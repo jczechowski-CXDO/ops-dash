@@ -397,6 +397,34 @@ why publishing it was the fix that mattered. The hoist is tidying, not a defect 
 reading "fourth instance of the duplication pattern" without this paragraph will reasonably go
 looking for something broken on screen and find nothing.
 
+## How to set the theme when measuring or screenshotting
+
+**Set it the way the app sets it — `localStorage['ops-dash.theme']` before any script runs.**
+Adding the `dark` class to `documentElement` externally does not work: `ThemeProvider` owns that
+class and syncs it back from its own state on the next render, so anything measured afterwards
+is **light mode wearing a dark label**.
+
+Playwright: `context.addInitScript(t => localStorage.setItem('ops-dash.theme', t), theme)`.
+Then **assert the class actually applied** before measuring anything — `expect(
+document.documentElement.classList.contains('dark')).toBe(true)` — and fail loudly if not.
+
+This cost real time and produced a wrong number. My first contrast sweep reported 68 failures,
+of which the dark half were artefacts: I had measured light twice. The **light** failures were
+genuine and are fixed; the BLOCKER was genuine and was confirmed independently by resolving the
+tokens rather than by measurement (`--grey-grey-100` on `--grey-grey-100`). But any figure I
+gave for dark before this note is void.
+
+**A scan reporting zero needs a positive control.** After the fixes the sweep reported 0
+failures, which is exactly what a broken scanner reports. Reverting `Button`'s `success` text
+rung to `-main` reproduced 5 failures at 3.40 — the same value originally measured — which is
+what makes the zero meaningful. Pick the control carefully: my first attempt reverted the
+*neutral* family, which produced 0, because `--neutral-main` is genuinely readable. A control
+that cannot fail proves nothing.
+
+**Current measured state: 0 AA failures**, 1,696 text nodes, 7 routes × 2 themes × 2 worlds,
+theme application asserted on all 28 loads, `document.fonts.ready` awaited, effective background
+resolved by walking from the element itself so a filled control's own background counts.
+
 ## Task 10A environment notes — read before starting it
 
 - **Await `document.fonts.ready` before every screenshot.** A screenshot was twice captured
