@@ -397,6 +397,32 @@ why publishing it was the fix that mattered. The hoist is tidying, not a defect 
 reading "fourth instance of the duplication pattern" without this paragraph will reasonably go
 looking for something broken on screen and find nothing.
 
+## A readability assertion is orthogonal to a semantic one
+
+**A contrast test will never fail for a wrong-but-legible colour.** Found by `ops-primitives`
+when three of its five mutations survived: `needs_auth` mapped to the info family, `polling` to
+success, `error` to warning. Every one of those is perfectly readable at `-darker`-on-`-lighter`,
+so the contrast suite could not see any of them — it was asking "can you read it", never "does
+it mean the right thing".
+
+`polling` → success is the one to remember: an integration that is merely **polling** would
+render green and read as **connected**. That is the same wrong-green as a service tile going
+green on an unknown vendor feed — readable, plausible and false.
+
+So **every contrast test needs a meaning test beside it**: an explicit mapping assertion, a
+"only this state may read as green" assertion, and a distinctness assertion across the set. Two
+of the five colour helpers had that from the start and the other three did not, until the
+mutants said so.
+
+## An unrendered state is an unmeasured state
+
+`Integration['state'].error` has no fixture row, so it could only be measured by resolving the
+token pair directly — it never reaches a screen. That is the colour-dimension twin of M-9.
+
+Mapping tests reach all four states regardless of what any fixture contains, which is the
+cheaper half of the fix and is now in place. A fixture row for `error` is still worth having in
+Wave 4, because it is the only way the **layout** of that badge ever gets looked at.
+
 ## How to set the theme when measuring or screenshotting
 
 **Set it the way the app sets it — `localStorage['ops-dash.theme']` before any script runs.**
@@ -413,6 +439,12 @@ of which the dark half were artefacts: I had measured light twice. The **light**
 genuine and are fixed; the BLOCKER was genuine and was confirmed independently by resolving the
 tokens rather than by measurement (`--grey-grey-100` on `--grey-grey-100`). But any figure I
 gave for dark before this note is void.
+
+**Restore a probe with `git checkout -- <path>`, and check the tree afterwards.** I twice left
+control mutations in the working tree because the restoring `cp` sat in an `&&` chain after a
+command that exited non-zero, so it never ran — the same failure `w3-overview` self-reported,
+repeated by me in the same session while writing up the rule about it. The agents' own tests
+caught it, which is the system working, but the tree should have been clean.
 
 **A scan reporting zero needs a positive control.** After the fixes the sweep reported 0
 failures, which is exactly what a broken scanner reports. Reverting `Button`'s `success` text
