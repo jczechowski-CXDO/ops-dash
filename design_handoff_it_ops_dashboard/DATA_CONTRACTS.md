@@ -50,7 +50,19 @@ completed fetch that returns "healthy" (**amendment 4**). Zendesk is the sharp c
 feed publishes no per-service status field, so an empty `incidents.json` is the only green
 signal available — and an absence is not an affirmation. An adapter that cannot distinguish
 "nothing is wrong" from "nothing came back" sets `empty` and maps the level to `unknown`.
-Consumers must never infer `operational` from `empty`.
+Consumers must never infer `operational` from `empty` — **and must not infer it from `empty`
+being absent either.** That second half is the one that bites. `empty` is a *transport floor*:
+it means the body carried nothing at all, which the helper can see. It cannot see that
+Zendesk's `{"data":[],"included":[]}` carried no records, because that is a non-empty object,
+so an adapter widens the flag when it knows which key holds the records. The widening is
+monotone — an adapter may set `empty`, never clear it — so a consumer's `empty` is always at
+least as pessimistic as the truth.
+
+But `!empty` still proves nothing about health. Zendesk's `incidents.json` returns seventeen
+*closed* incidents: not empty, and equally silent about whether anything is wrong. Zendesk's
+level is `unknown` on every path because the platform publishes no status field at all, not
+because a document happened to be empty. **The flag describes the body; only the adapter can
+describe the health.**
 
 ---
 
