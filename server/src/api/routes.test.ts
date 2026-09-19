@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { SourceResult } from '@ops-dash/shared';
 import { openStore, type Store } from '../store/db.js';
-import type { SourceStatus } from '../poller/schedule.js';
+import { createSchedule, type Source, type SourceStatus } from '../poller/schedule.js';
 import {
   buildApi,
   apiRoutes,
@@ -266,13 +266,18 @@ describe('GET /api/incidents', () => {
     store.putIncident(row({ id: 'INC-2', severity: 'catastrophic' }));
     const { body } = await get({ store }, '/api/incidents');
     const byId = Object.fromEntries(
-      (body as IncidentsResponse).result.data!.map((i) => [i.id, i.severity]),
+      (body as IncidentsResponse).result.data!.map((i) => [i.id, i]),
     );
 
-    expect(byId['INC-1']).toBe('info');
+    expect(byId['INC-1']!.severity).toBe('info');
     // A severity we cannot read is a thing we cannot see, and this codebase
     // never renders a thing it cannot see as benign.
-    expect(byId['INC-2']).toBe(1);
+    expect(byId['INC-2']!.severity).toBe(1);
+    // And the guess is VISIBLE. `severityRaw` is what makes "degrade on the
+    // read path" different from "guess quietly": present only on a fallback,
+    // carrying the value we could not read.
+    expect(byId['INC-2']!.severityRaw).toBe('catastrophic');
+    expect(byId['INC-1']!.severityRaw).toBeUndefined();
   });
 
   it('no open incidents is empty: true with an empty array, never an assertion of health', async () => {
@@ -311,17 +316,17 @@ describe('GET /api/health reports the store and the poller separately', () => {
     expect(health.store.ok).toBe(false);
     expect(health.store.error).toContain('database connection is not open');
     expect(health.poller.ok).toBe(true);
-    expect(health.poller.stalled).toEqual([]);
+    expect(health.poller.healthy).toEqual(['vendor:jira']);
   });
 
-  it('a healthy store with a stalled poller: store ok, poller not ok, and which source', async () => {
+  it('a healthy store with a broken poller: store ok, poller not ok, and which source', async () => {
     const store = memStore();
     const { body } = await get(
       {
         store,
         poller: pollerWith({
           'vendor:jira': statusOf(),
-          'probes': statusOf({ lastError: 'probeFn is not a function' }),
+          'probes': statusOf({ lastError: 'threw: probeFn is not a function' }),
         }),
       },
       '/api/health',
@@ -331,9 +336,11 @@ describe('GET /api/health reports the store and the poller separately', () => {
     expect(health.store.ok).toBe(true);
     expect(health.store.error).toBeUndefined();
     expect(health.poller.ok).toBe(false);
-    expect(health.poller.stalled).toEqual(['probes']);
+    expect(health.poller.broken).toEqual(['probes']);
+    expect(health.poller.failing).toEqual([]);
+    expect(health.poller.healthy).toEqual(['vendor:jira']);
     // The per-source detail is mirrored, not summarised away.
-    expect(health.poller.sources['probes']!.lastError).toBe('probeFn is not a function');
+    expect(health.poller.sources['probes']!.lastError).toBe('threw: probeFn is not a function');
     expect(health.poller.sources['vendor:jira']!.runs).toBe(3);
   });
 
@@ -390,5 +397,211 @@ describe('the API is read-only', () => {
 
   it('the plugin is the only thing that registers routes', () => {
     expect(typeof apiRoutes).toBe('function');
+  });
+});
+
+/* ------------------------------------------------ the derived current level */
+
+describe('a stale payload never reaches the client as a colour', () => {
+  /** G2 HIGH 4. `putSnapshot` branches on `error` alone, so an adapter that
+   *  returns BOTH an `unknown` payload and an error has the payload dropped;
+   *  `getSnapshot` then serves the last GOOD payload with the error attached.
+   *  Mirroring that outward is correct and this route still does it — but
+   *  `data.level` then says `operational` about a vendor we have not read for
+   *  three hours, and `statusColor()` takes exactly that field. */
+  const entryFor = async (id: string, prime: (s: Store) => void) => {
+    const store = memStore();
+    prime(store);
+    const { body } = await get({ store }, '/api/services');
+    return (body as ServicesResponse).services.find((s) => s.id === id)!;
+  };
+
+  it('a vendor erroring now reads unknown, while the envelope still carries the old payload', async () => {
+    const entry = await entryFor('claude', (store) => {
+      store.putSnapshot(vendorSource('claude'), good('operational', '2026-09-19T08:14:00.000Z'));
+      store.putSnapshot(vendorSource('claude'), {
+        fetchedAt: '2026-09-19T11:14:00.000Z',
+        degraded: true,
+        error: { code: 'http_503', message: '503 Service Unavailable' },
+      });
+    });
+
+    expect(entry.currentLevel).toBe('unknown');
+    // The mirror is intact: the old reading is still there to render as
+    // "operational at 08:14", it is simply not what the tile is coloured by.
+    expect((entry.result.data as { level: string }).level).toBe('operational');
+    expect(entry.result.error?.code).toBe('http_503');
+  });
+
+  it('an affirmative, error-free statement of health is the only thing that reads operational', async () => {
+    const entry = await entryFor('jira', (store) => {
+      store.putSnapshot(vendorSource('jira'), good('operational', '2026-09-19T12:00:00.000Z'));
+    });
+    expect(entry.currentLevel).toBe('operational');
+  });
+
+  it('a service never polled reads unknown, not absent and not green', async () => {
+    const entry = await entryFor('m365', () => {});
+    expect(entry.currentLevel).toBe('unknown');
+  });
+
+  it('a level the contract does not define reads unknown', async () => {
+    const entry = await entryFor('openai', (store) => {
+      // A feed shape we have not seen, or a future adapter getting it wrong.
+      store.putSnapshot(vendorSource('openai'), {
+        data: { level: 'green' },
+        fetchedAt: '2026-09-19T12:00:00.000Z',
+        degraded: false,
+      });
+    });
+    expect(entry.currentLevel).toBe('unknown');
+  });
+});
+
+/* --------------------------------------------- the poller half of /health */
+
+describe('the poller half of /api/health is computed from something that can speak', () => {
+  const envelope = (over: Partial<SourceResult<unknown>> = {}): SourceResult<unknown> => ({
+    data: { ok: true }, fetchedAt: '2026-09-19T12:00:00.000Z', degraded: false, ...over,
+  });
+
+  /**
+   * Driven by a REAL `createSchedule`, not a hand-written status map.
+   *
+   * This is the test the previous `stalled[]` could not have had. That field
+   * was computed from `lastError`, which at the time was set only when
+   * `run()` threw — and nothing in this repo throws, so it was empty by
+   * construction and every test of it passed. Running the real scheduler over
+   * a source that throws AND one that returns an errored result is the world
+   * where the two candidates differ; a hand-written map is a world where the
+   * author has already decided the answer.
+   *
+   * It also pins `THREW_PREFIX` against the scheduler that produces it, so the
+   * day that string changes this goes red rather than the constant going
+   * quietly stale.
+   */
+  it('a real schedule: a thrown error is broken, an errored result is failing, a success is healthy', async () => {
+    const sources: Source[] = [
+      { name: 'ourBug', intervalMs: 60_000, run: async () => { throw new Error('probeFn is not a function'); } },
+      { name: 'deadFeed', intervalMs: 60_000, run: async () =>
+        envelope({ data: undefined, degraded: true, error: { code: 'http_503', message: '503 Service Unavailable' } }) },
+      { name: 'goodFeed', intervalMs: 60_000, run: async () => envelope() },
+    ];
+    const schedule = createSchedule(sources);
+    schedule.start();
+    await vi.waitFor(() => {
+      expect(schedule.statusOf('ourBug')?.lastError).toBeDefined();
+      expect(schedule.statusOf('deadFeed')?.lastError).toBeDefined();
+      expect(schedule.statusOf('goodFeed')?.lastOkAt).toBeDefined();
+    });
+    schedule.stop();
+
+    const { body } = await get({ store: memStore(), poller: schedule }, '/api/health');
+    const poller = (body as HealthResponse).poller;
+
+    // Our bug and a vendor's outage are different facts with different
+    // remedies, and this is the field that keeps them apart.
+    expect(poller.broken).toEqual(['ourBug']);
+    expect(poller.failing).toEqual(['deadFeed']);
+    expect(poller.healthy).toEqual(['goodFeed']);
+    expect(poller.neverSucceeded.sort()).toEqual(['deadFeed', 'ourBug']);
+    expect(poller.neverRun).toEqual([]);
+    expect(poller.ok).toBe(false);
+  });
+
+  it('every source succeeding on a real schedule is the only thing that reads ok', async () => {
+    const schedule = createSchedule([
+      { name: 'a', intervalMs: 60_000, run: async () => envelope() },
+      { name: 'b', intervalMs: 60_000, run: async () => envelope({ empty: true }) },
+    ]);
+    schedule.start();
+    await vi.waitFor(() => {
+      expect(schedule.statusOf('a')?.lastOkAt).toBeDefined();
+      expect(schedule.statusOf('b')?.lastOkAt).toBeDefined();
+    });
+    schedule.stop();
+
+    const { body } = await get({ store: memStore(), poller: schedule }, '/api/health');
+    const poller = (body as HealthResponse).poller;
+
+    // `empty` is a completed read, not a failure to look — so `b` is healthy.
+    expect(poller.healthy.sort()).toEqual(['a', 'b']);
+    expect(poller.ok).toBe(true);
+  });
+
+  it('a source polled forty times that has never once succeeded is not healthy', async () => {
+    // The exact G2 shape: the feed 503s every minute, so `runs` climbs, and
+    // there is no last good payload behind it at all.
+    const { body } = await get(
+      {
+        store: memStore(),
+        poller: pollerWith({
+          // Written out rather than spread over `statusOf`, because the
+          // absence of `lastOkAt` IS the fact under test and a spread with
+          // `lastOkAt: undefined` does not typecheck under
+          // exactOptionalPropertyTypes.
+          'vendor:m365': {
+            baseline: false,
+            runs: 40,
+            skipped: 0,
+            lastRunAt: '2026-09-19T12:00:00.000Z',
+            lastError: 'http_503: 503 Service Unavailable',
+          },
+        }),
+      },
+      '/api/health',
+    );
+    const poller = (body as HealthResponse).poller;
+
+    expect(poller.ok).toBe(false);
+    expect(poller.failing).toEqual(['vendor:m365']);
+    expect(poller.neverSucceeded).toEqual(['vendor:m365']);
+    expect(poller.healthy).toEqual([]);
+  });
+
+  it('a poller that was built and never started reads not ok, and says which sources never ran', async () => {
+    // The hole in the first version of this route: no source had complained,
+    // because no source had run. `start()` is deliberately not called.
+    const schedule = createSchedule([{ name: 'vendor:jira', intervalMs: 60_000, run: async () => envelope() }]);
+    const { body } = await get({ store: memStore(), poller: schedule }, '/api/health');
+    const poller = (body as HealthResponse).poller;
+
+    expect(poller.configured).toBe(true);
+    expect(poller.neverRun).toEqual(['vendor:jira']);
+    expect(poller.healthy).toEqual([]);
+    expect(poller.ok).toBe(false);
+  });
+
+  it('a source that has run but recorded neither a success nor an error is not healthy', async () => {
+    // Found by mutation: dropping the `lastOkAt` check from `classify` killed
+    // nothing, because every other test reaches that branch with a `lastError`
+    // set. This is the world where the two candidates differ.
+    //
+    // Today's `createSchedule` cannot produce this state — it sets one of the
+    // two on every tick. The rule is still load-bearing: `ApiPoller` is a
+    // structural type that anything can implement, and the whole finding
+    // behind this rewrite was a health field that read calm because nothing
+    // had complained. Silence is not evidence of a successful poll.
+    const { body } = await get(
+      {
+        store: memStore(),
+        poller: pollerWith({
+          'vendor:jira': { baseline: false, runs: 7, skipped: 0, lastRunAt: '2026-09-19T12:00:00.000Z' },
+        }),
+      },
+      '/api/health',
+    );
+    const poller = (body as HealthResponse).poller;
+
+    expect(poller.healthy).toEqual([]);
+    expect(poller.neverSucceeded).toEqual(['vendor:jira']);
+    expect(poller.ok).toBe(false);
+  });
+
+  it('a poller with no sources at all is not ok', async () => {
+    // `healthy.length === entries.length` is true of two empty lists. An
+    // all-clear made of nothing is the emptiest kind of green there is.
+    const { body } = await get({ store: memStore(), poller: pollerWith({}) }, '/api/health');
+    expect((body as HealthResponse).poller.ok).toBe(false);
   });
 });

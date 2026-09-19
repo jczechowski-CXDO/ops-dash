@@ -1,6 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
-import type { ServiceId, Severity, SourceResult } from '@ops-dash/shared';
+import type { ServiceId, Severity, SourceResult, StatusLevel } from '@ops-dash/shared';
 import type { SourceStatus } from '../poller/schedule.js';
+// The ONE definition of "what is this service now", shared with `index.ts` and
+// the engine. Imported rather than reimplemented: a second copy of this rule
+// would be a second place for a stale `operational` to leak out, and the two
+// would agree right up until the day they did not.
+import { currentLevel } from '../store/currentLevel.js';
 
 /**
  * The read-only API.
@@ -20,10 +25,20 @@ import type { SourceStatus } from '../poller/schedule.js';
  *    six payloads and one error object. The transport succeeded; the source
  *    did not. Those are different facts and the status code describes the
  *    first one. A 5xx here would blank six healthy panels over one bad feed.
- *  - **Nothing is derived.** The store already returns the last good payload
- *    with the last failure attached; this file re-derives none of it. Branch
- *    on `error` for the stale badge and on `data` for whether there is
+ *  - **Almost nothing is derived.** The store already returns the last good
+ *    payload with the last failure attached; this file re-derives none of it.
+ *    Branch on `error` for the stale badge and on `data` for whether there is
  *    anything to draw — never infer one from the other (amendment 9).
+ *
+ *    The one exception is `ServiceEntry.currentLevel`, and it sits BESIDE the
+ *    envelope rather than inside it. A pure mirror hands the client
+ *    `data.level: 'operational'` for a vendor we have not read since
+ *    breakfast, and `statusColor()` takes exactly that field — so "every
+ *    consumer must remember to check `error` before reading `level`" becomes
+ *    the contract. That is the same shape as "everyone remembers not to use a
+ *    raw token", which cost this repo 42 contrast failures in one wave. The
+ *    mirror stays byte for byte; the safe reading is served next to it, so
+ *    getting it right is the easy path rather than the remembered one.
  *
  * ## The auth seam, deliberately visible
  *
@@ -97,7 +112,16 @@ export type ServiceEntry = {
   /** The store key this came from, so a reader can tell an unpolled service
    *  from a mis-keyed one without guessing. */
   source: string;
+  /** The stored envelope, byte for byte. See `store/currentLevel.ts` for why
+   *  `result.data.level` is NOT the field to colour a tile with. */
   result: SourceResult<unknown>;
+  /** What this service is **now**, as opposed to what the payload says it was
+   *  when we could last read it. Derived — the one derived field on this
+   *  route — and sitting BESIDE the mirror rather than inside it, by
+   *  `store/currentLevel.ts`, which is also what the engine reads. One rule,
+   *  one definition: the API and the correlator cannot disagree about whether
+   *  a vendor is green. */
+  currentLevel: StatusLevel;
 };
 
 export type ServicesResponse = {
@@ -112,6 +136,11 @@ export type ApiIncident = {
   ruleKey: string;
   serviceId: string;
   severity: Severity;
+  /** Present ONLY when the stored severity could not be decoded and
+   *  `severity` above is a fallback rather than a reading. The client renders
+   *  a badge; without it the fallback is invisible, and an invisible guess is
+   *  indistinguishable from a fact. */
+  severityRaw?: string;
   openedAt: string;
   resolvedAt?: string;
   summary: string;
@@ -128,16 +157,59 @@ export type HealthResponse = {
    *  single boolean would say the system is unwell without saying which half,
    *  and the two have entirely different remedies. */
   store: { ok: boolean; error?: string };
-  poller: {
-    ok: boolean;
-    configured: boolean;
-    /** Sources whose last run threw. That is OUR code failing to run a source,
-     *  which is a different fact from a feed being down — a down feed is a
-     *  successful run carrying an `error`, and shows up on `/api/services`. */
-    stalled: string[];
-    sources: Record<string, SourceStatus>;
-  };
+  poller: PollerHealth;
   auth: { mode: 'none'; note: string };
+};
+
+/**
+ * The poller's health, as four named populations and one positive list.
+ *
+ * The first version of this field was a single `stalled: string[]` computed
+ * from `SourceStatus.lastError`, which at the time was set only when
+ * `source.run()` THREW — and nothing in this repo throws, because every layer
+ * reports failure in the envelope. So `stalled` was empty by construction: a
+ * health field that reported calm because nothing could make it speak, which
+ * is the exact failure this product exists to prevent. Found at G2, together
+ * with the poller defect underneath it.
+ *
+ * It is replaced rather than redefined. A field whose meaning silently changed
+ * is worse than one that was renamed, because every reader who learned the old
+ * meaning keeps it.
+ *
+ * `broken` and `failing` are separate because an operator does different
+ * things with each: `broken` is a stack trace to read, `failing` is a vendor
+ * to wait for. Collapsing them into one list is the same flattening this whole
+ * route exists to refuse, applied to our own failures instead of a feed's.
+ *
+ * `neverSucceeded` deliberately OVERLAPS the two above: they answer "what is
+ * wrong right now", it answers "have we ever had data at all". A source that
+ * has 503'd since boot is in both, and the second fact is the one that decides
+ * whether a panel has anything to draw.
+ */
+export type PollerHealth = {
+  /** True only if every configured source can show a recorded success on its
+   *  most recent run. Positive by construction: there is no default-true path
+   *  through this, and an unstarted poller is not a healthy poller. */
+  ok: boolean;
+  configured: boolean;
+  /** Succeeded on its latest run — the positive list. `ok` is this list being
+   *  everything. Stated outward as well as `ok` so a reader can see WHICH
+   *  sources the all-clear is made of. */
+  healthy: string[];
+  /** Our code broke: `run()` threw and the scheduler caught it. */
+  broken: string[];
+  /** The source ran fine and came back with an errored `SourceResult` — a feed
+   *  that 503s, a 2xx carrying HTML, a platform with no adapter yet. */
+  failing: string[];
+  /** Has run at least once and has NEVER recorded a success. There is no last
+   *  good payload behind this source at all. */
+  neverSucceeded: string[];
+  /** Configured and has not run once. Almost always `start()` was never
+   *  called — which the old `poller.ok` reported as healthy. */
+  neverRun: string[];
+  /** Every source's full status, mirrored and not summarised. The lists above
+   *  are a reading of this; this is the evidence. */
+  sources: Record<string, SourceStatus>;
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -163,26 +235,75 @@ const storeUnavailable = (at: string, cause: unknown): SourceResult<never> => ({
 });
 
 /**
+ * The prefix `poller/schedule.ts` puts on a `lastError` it produced by
+ * CATCHING a throw, as opposed to one it read out of an errored
+ * `SourceResult`. Our bug must not read like a vendor outage, and this string
+ * is the only thing that tells them apart.
+ *
+ * It is a duplicated literal, on purpose: the alternative is importing the
+ * scheduler's own template and asserting a value against the path that
+ * produced it, which proves nothing. `routes.test.ts` runs a REAL schedule
+ * over a source that throws and one that returns an errored result, and pins
+ * that this classification puts them in different lists — so the day the
+ * prefix changes, that test goes red rather than this constant going quietly
+ * stale.
+ */
+export const THREW_PREFIX = 'threw: ';
+
+/** One source's population. Order matters: a source that has never run cannot
+ *  also be failing, and a `lastError` outranks a stale `lastOkAt` because it
+ *  describes the most recent attempt. */
+function classify(status: SourceStatus): keyof Omit<PollerHealth, 'ok' | 'configured' | 'sources'> {
+  if (status.runs === 0) return 'neverRun';
+  if (status.lastError !== undefined) {
+    return status.lastError.startsWith(THREW_PREFIX) ? 'broken' : 'failing';
+  }
+  // Healthy requires positive evidence of a success, not merely the absence of
+  // a complaint. Without the `lastOkAt` check, a status object that has run and
+  // recorded nothing at all would read healthy — which is how the field this
+  // replaces came to be empty by construction.
+  return status.lastOkAt === undefined ? 'neverSucceeded' : 'healthy';
+}
+
+/**
  * The stored severity, decoded to the frozen `Severity` union.
  *
  * SQLite holds it as TEXT, so '1' comes back where the contract says 1. A
  * value we cannot read decodes to **1**, the most severe, and not to 'info':
  * an unreadable severity is a thing we cannot see, and this codebase never
  * renders a thing it cannot see as benign.
+ *
+ * ## The layer rule: throw on the write path, degrade loudly on the read path
+ *
+ * `engine/correlate.ts`'s `parseSeverity` answers this same question by
+ * THROWING, and that is right where it sits: a guess made on the write path
+ * gets persisted and outlives the bug that made it. Here it would be wrong —
+ * a throw inside a route turns one unreadable row into a 500 that blanks nine
+ * good incidents, which is the flattening this file exists to refuse arriving
+ * through a different door.
+ *
+ * What makes the pair safe rather than merely inconsistent is that the
+ * fallback is **visible**: this returns `fellBack`, the route puts the
+ * undecodable value in `severityRaw`, and the client can badge it. A fallback
+ * nobody can see is just a guess with better manners.
  */
-export function decodeSeverity(raw: unknown): Severity {
-  if (raw === 'info') return 'info';
+export function decodeSeverity(raw: unknown): { severity: Severity; fellBack: boolean } {
+  if (raw === 'info') return { severity: 'info', fellBack: false };
   const n = typeof raw === 'number' ? raw : Number(raw);
-  return n === 1 || n === 2 || n === 3 ? (n as Severity) : 1;
+  return n === 1 || n === 2 || n === 3
+    ? { severity: n as Severity, fellBack: false }
+    : { severity: 1, fellBack: true };
 }
 
 function toIncident(row: Record<string, unknown>): ApiIncident {
   const resolvedAt = row['resolved_at'];
+  const { severity, fellBack } = decodeSeverity(row['severity']);
   return {
     id: String(row['id']),
     ruleKey: String(row['rule_key']),
     serviceId: String(row['service_id']),
-    severity: decodeSeverity(row['severity']),
+    severity,
+    ...(fellBack ? { severityRaw: String(row['severity']) } : {}),
     openedAt: String(row['opened_at']),
     ...(typeof resolvedAt === 'string' ? { resolvedAt } : {}),
     summary: String(row['summary']),
@@ -210,7 +331,9 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
           // One service's read failing must not blank the other six.
           result = storeUnavailable(servedAt, cause);
         }
-        return { id, source, result };
+        // Derived BESIDE the mirror, never instead of it: `result` is
+        // untouched and `currentLevel` is the safe reading of it.
+        return { id, source, result, currentLevel: currentLevel(result) };
       }),
     };
   });
@@ -252,14 +375,27 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
     }
 
     const sources = poller ? poller.allStatus() : {};
-    const stalled = Object.entries(sources)
-      .filter(([, s]) => s.lastError !== undefined)
-      .map(([name]) => name);
+    const entries = Object.entries(sources);
+    const bucket = (want: string) => entries.filter(([, st]) => classify(st) === want).map(([name]) => name);
+    const healthy = bucket('healthy');
+    // Overlaps `broken`/`failing` on purpose — a different question.
+    const neverSucceeded = entries.filter(([, st]) => st.runs > 0 && st.lastOkAt === undefined).map(([n]) => n);
 
     return {
       servedAt,
       store: storeHealth,
-      poller: { ok: poller !== undefined && stalled.length === 0, configured: poller !== undefined, stalled, sources },
+      poller: {
+        // Every configured source must SHOW a success. No poller, no sources,
+        // or one source short and this is false.
+        ok: poller !== undefined && entries.length > 0 && healthy.length === entries.length,
+        configured: poller !== undefined,
+        healthy,
+        broken: bucket('broken'),
+        failing: bucket('failing'),
+        neverSucceeded,
+        neverRun: bucket('neverRun'),
+        sources,
+      },
       auth: {
         mode: 'none',
         note: 'No authentication. Milestone 4 fills this seam, with the mutating routes that need it.',
