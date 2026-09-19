@@ -41,6 +41,9 @@ const good = (level: string, fetchedAt: string): SourceResult<unknown> => ({
 
 const statusOf = (over: Partial<SourceStatus> = {}): SourceStatus => ({
   baseline: false,
+  // The scheduler now echoes each source's cadence, so a consumer can judge
+  // freshness without keeping a second interval table of its own.
+  intervalMs: 60_000,
   runs: 3,
   skipped: 0,
   lastRunAt: '2026-09-19T12:00:00.000Z',
@@ -542,6 +545,7 @@ describe('the poller half of /api/health is computed from something that can spe
           // exactOptionalPropertyTypes.
           'vendor:m365': {
             baseline: false,
+            intervalMs: 60_000,
             runs: 40,
             skipped: 0,
             lastRunAt: '2026-09-19T12:00:00.000Z',
@@ -586,7 +590,7 @@ describe('the poller half of /api/health is computed from something that can spe
       {
         store: memStore(),
         poller: pollerWith({
-          'vendor:jira': { baseline: false, runs: 7, skipped: 0, lastRunAt: '2026-09-19T12:00:00.000Z' },
+          'vendor:jira': { baseline: false, intervalMs: 60_000, runs: 7, skipped: 0, lastRunAt: '2026-09-19T12:00:00.000Z' },
         }),
       },
       '/api/health',

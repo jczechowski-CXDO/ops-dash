@@ -330,7 +330,7 @@ describe('a thrown value that resists being stringified', () => {
     for (const value of hostile) {
       const bad = src({ name: 'hostile', run: vi.fn(async () => { throw value; }) });
       const alive = src({ name: 'alive', intervalMs: 60_000 });
-      const s = createSchedule([bad, alive]);
+      const s = createSchedule([bad, alive], () => {});
       s.start();
       await vi.advanceTimersByTimeAsync(120_000);
 
@@ -443,6 +443,80 @@ describe('a source that hangs forever', () => {
     s.start();
     await vi.advanceTimersByTimeAsync(180_000);
     expect(alive.run).toHaveBeenCalledTimes(4);
+    s.stop();
+  });
+});
+
+describe('the findings G2 left accepted at the gate', () => {
+  it('start() twice does not double the poll rate', async () => {
+    // G2 MEDIUM 5. The one failure in this file with a victim outside this
+    // machine: five `start()`s meant five times the traffic to other people's
+    // status pages, silently.
+    const s1 = src();
+    const s = createSchedule([s1], () => {});
+    s.start();
+    s.start();
+    s.start();
+    await vi.advanceTimersByTimeAsync(180_000);
+    // t=0, 60, 120, 180 — four polls, not twelve.
+    expect(s1.run).toHaveBeenCalledTimes(4);
+    s.stop();
+  });
+
+  it('stop() then start() polls again, so idempotence is not paralysis', async () => {
+    // The obvious wrong fix for the above is a latch that never reopens.
+    const s1 = src();
+    const s = createSchedule([s1], () => {});
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    s.stop();
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s1.run).toHaveBeenCalledTimes(2);
+    s.stop();
+  });
+
+  it('reports each source its own interval, so a consumer can judge freshness', async () => {
+    // Without this, `lastOkAt` twenty minutes ago is indistinguishable from
+    // twenty seconds ago, and a source whose timer silently stopped reads
+    // healthy forever. Distinct values per source, so a single shared constant
+    // would not satisfy it.
+    const s = createSchedule(
+      [src({ name: 'fast', intervalMs: 30_000 }), src({ name: 'slow', intervalMs: 900_000 })],
+      () => {},
+    );
+    expect(s.statusOf('fast')!.intervalMs).toBe(30_000);
+    expect(s.statusOf('slow')!.intervalMs).toBe(900_000);
+    s.stop();
+  });
+
+  it('allStatus survives being destructured off the schedule', async () => {
+    // G2 LOW 10. `const { allStatus } = schedule` is exactly how a Fastify route
+    // takes it, and a `this.statusOf` inside made that throw.
+    const s = createSchedule([src()], () => {});
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const { allStatus, statusOf } = s;
+    expect(() => allStatus()).not.toThrow();
+    expect(Object.keys(allStatus())).toEqual(['vendor:jira']);
+    expect(statusOf('vendor:jira')!.runs).toBe(1);
+    s.stop();
+  });
+
+  it('records lastOkAt at the finish of a run, not its start', async () => {
+    // G2 LOW 11. For a source taking nine seconds, recording the start
+    // overstates the freshness of what we hold by nine seconds — and freshness
+    // is the number this whole dashboard is about.
+    const slow = src({
+      run: vi.fn(async () => new Promise<SourceResult<unknown>>((r) => setTimeout(() => r(ok()), 9_000))),
+    });
+    const s = createSchedule([slow], () => {});
+    s.start();
+    await vi.advanceTimersByTimeAsync(9_000);
+
+    const st = s.statusOf('vendor:jira')!;
+    expect(Date.parse(st.lastOkAt!) - Date.parse(st.lastRunAt!)).toBeGreaterThanOrEqual(9_000);
     s.stop();
   });
 });

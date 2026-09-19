@@ -333,3 +333,27 @@ describe('a hostile body cannot exhaust memory', () => {
     expect(result.data).toEqual(value);
   });
 });
+
+describe('a thrown value that resists being stringified', () => {
+  it('becomes a network error rather than escaping the helper', async () => {
+    // `CLAUDE.md` states "it never throws" as an unconditional invariant of this
+    // helper. It was conditional: `String(cause?.message ?? cause)` throws on a
+    // null-prototype object or a throwing getter, and it throws INSIDE the catch
+    // — so the new exception escapes the handler meant to contain it. Found in
+    // the poller first; the identical line survived here, in the more exposed of
+    // the two. An invariant with an exception nobody has found is worse than one
+    // with an exception everybody knows about.
+    const hostile: unknown[] = [
+      Object.create(null),
+      Object.assign(Object.create(null), { message: Object.create(null) }),
+      { get message() { throw new Error('nope'); }, toString() { throw new Error('nope'); } },
+    ];
+    for (const value of hostile) {
+      const impl: FetchLike = async () => { throw value; };
+      const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: impl });
+      expect(result.error?.code).toBe('network');
+      expect(typeof result.error?.message).toBe('string');
+      expect(result.fetchedAt).toBeTruthy();
+    }
+  });
+});

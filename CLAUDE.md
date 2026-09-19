@@ -12,7 +12,7 @@ self-hosted. Read-only upstream; the only writes are to our own store.
 | `npm run dev` | Vite dev server on :5173 |
 | `npm run build` | production build to `web/dist` |
 | `npm test` | Vitest, all workspaces. **Runs `typecheck` first** via a `pretest` hook |
-| `npm run typecheck` | `tsc -b shared web` |
+| `npm run typecheck` | `tsc -b shared web server` |
 | `npm run test:e2e` | Playwright — 152 visual baselines, interaction, the offline proof |
 | `npm run test:e2e:update` | regenerate baselines. **Look at them before committing** |
 | `npm run icons` | regenerate `web/src/components/aurora/icons.generated.ts` from the Aurora bundle |
@@ -62,10 +62,15 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   seven services are permanently `unknown`, so **"ALL SYSTEMS OPERATIONAL" is unreachable
   in production** — that is correct, not a bug to fix.
 - **Everything upstream is read-only.** No mutating third-party call belongs in this repo.
-- **Every network call goes through `server/src/http/fetchJson.ts`.** It owns all four
-  failure rules — non-2xx, a 2xx carrying non-JSON, an empty body, and a throw — and it
-  never throws, because a transport failure is a fact to report and not an exception to
-  handle. `web/src/guards.test.ts` enforces this by grepping for bare `fetch`. There is
+- **Every network call goes through `server/src/http/fetchJson.ts`.** It owns the failure
+  rules — non-2xx, a 2xx carrying non-JSON, an empty body, a throw, a body over the 5 MB
+  cap, and an unsafe target or redirect — and it never throws, because a transport failure
+  is a fact to report and not an exception to handle. That invariant is unconditional and
+  tested against values that resist being stringified, which is the way it was once false.
+- **Every URL this process opens is checked by `http/safeTarget.ts`, including the ones a
+  redirect chose.** Parsed, never pattern-matched: `startsWith('https://')` is satisfied by
+  `https://attacker@127.0.0.1/`. Redirects are followed manually so the `Location` header
+  cannot pick the address for us. `web/src/guards.test.ts` enforces this by grepping for bare `fetch`. There is
   exactly one exemption, `adapters/synthetic/probe.ts`, and it is argued in a block
   comment there: a reachability probe asks a different question and must not read a body.
 - **Nothing in `server/` throws to signal failure**, so nothing may treat a resolved

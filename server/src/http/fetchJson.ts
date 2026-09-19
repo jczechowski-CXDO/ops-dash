@@ -1,5 +1,6 @@
 import type { SourceResult } from '@ops-dash/shared';
 import { refuseTarget } from './safeTarget.js';
+import { describeThrown } from './describeThrown.js';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -138,7 +139,7 @@ export async function fetchJson<T>(
     return err(
       fetchedAt,
       aborted ? 'timeout' : 'network',
-      aborted ? `no response within ${timeoutMs}ms` : String((cause as Error)?.message ?? cause),
+      aborted ? `no response within ${timeoutMs}ms` : describeThrown(cause),
     );
   } finally {
     clearTimeout(timer);

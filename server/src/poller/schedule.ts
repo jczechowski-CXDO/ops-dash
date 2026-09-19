@@ -1,4 +1,5 @@
 import type { SourceResult } from '@ops-dash/shared';
+import { describeThrown } from '../http/describeThrown.js';
 
 /**
  * One interval per source, isolated failures.
@@ -54,6 +55,15 @@ export type SourceStatus = {
    *  than hidden: a source skipping steadily is one whose interval is too short
    *  for its upstream, and nobody would otherwise find out. */
   skipped: number;
+  /** The interval this source is polled at, echoed so a consumer can judge
+   *  freshness without a second table of its own.
+   *
+   *  G2 and the API's owner arrived here from opposite ends: `lastOkAt` twenty
+   *  minutes ago is indistinguishable from twenty seconds ago unless you know
+   *  the cadence, so a source whose timer has silently stopped reads healthy
+   *  forever. `Source` already knows the number; anything else keeping its own
+   *  copy would be a second source of truth for it. */
+  intervalMs: number;
   /** When the most recent tick was dropped.
    *
    *  G2 MEDIUM 8. `lastRunAt` freezes at the START of a run that never settles,
@@ -73,26 +83,6 @@ function fail(st: { baseline: boolean; lastError?: string }, why: string): void 
   st.lastError = why;
 }
 
-/** Stringify a thrown value that may be actively hostile to being stringified.
- *
- *  G2 HIGH 3. `String((cause as Error)?.message ?? cause)` throws on a
- *  null-prototype object and on anything with a throwing `toString` — and it
- *  throws INSIDE the catch, so it escapes `tick`, which is called as
- *  `void tick(source)` from a timer. That is an unhandled rejection: the exact
- *  process death the catch exists to prevent, reachable through the catch
- *  itself. */
-function describe(cause: unknown): string {
-  try {
-    if (cause instanceof Error && typeof cause.message === 'string') return cause.message;
-    const message = (cause as { message?: unknown } | null | undefined)?.message;
-    if (typeof message === 'string') return message;
-    return String(cause);
-  } catch {
-    // Nothing about the value can be trusted, including its type tag.
-    return 'unstringifiable thrown value';
-  }
-}
-
 /** Where the poller talks.
  *
  *  A parameter with a default rather than a bare `console.log`, because a test
@@ -107,7 +97,10 @@ export function createSchedule(sources: Source[], log: Logger = defaultLog) {
   const status = new Map<string, SourceStatus & { inFlight: boolean; hasSucceeded: boolean }>();
   const timers: NodeJS.Timeout[] = [];
   for (const s of sources) {
-    status.set(s.name, { baseline: false, runs: 0, skipped: 0, inFlight: false, hasSucceeded: false });
+    status.set(s.name, {
+      baseline: false, runs: 0, skipped: 0, intervalMs: s.intervalMs,
+      inFlight: false, hasSucceeded: false,
+    });
   }
 
   async function tick(source: Source) {
@@ -140,7 +133,11 @@ export function createSchedule(sources: Source[], log: Logger = defaultLog) {
       }
       st.baseline = !st.hasSucceeded;   // true on the first SUCCESS only
       st.hasSucceeded = true;
-      st.lastOkAt = st.lastRunAt;
+      // The FINISH, not `lastRunAt` which is the start. G2 LOW 11. For a source
+      // that takes nine seconds, recording the start overstates the freshness of
+      // what we hold by nine seconds — and freshness is the number the whole
+      // dashboard is about.
+      st.lastOkAt = new Date().toISOString();
       delete st.lastError;
       // Global Constraints: a baseline "must say so explicitly in its return
       // value AND its log line". The return value half was done; this is the
@@ -152,15 +149,27 @@ export function createSchedule(sources: Source[], log: Logger = defaultLog) {
       // take the process down and with it every other source. Reaching this
       // means an adapter broke its own contract, which is OUR bug, so the
       // message says so rather than reading like a vendor outage.
-      fail(st, `threw: ${describe(cause)}`);
+      fail(st, `threw: ${describeThrown(cause)}`);
       log(`ERROR ${source.name} threw — this is our bug, not the vendor's: ${st.lastError}`);
     } finally {
       st.inFlight = false;
     }
   }
 
+  function statusOf(name: string): SourceStatus | undefined {
+    const st = status.get(name);
+    if (!st) return undefined;
+    const { inFlight: _i, hasSucceeded: _h, ...rest } = st;
+    return rest;
+  }
+
   return {
     start() {
+      // Idempotent. G2 MEDIUM 5: a second `start()` used to add a second timer
+      // per source, doubling every poll rate silently — five calls gave five
+      // times the traffic to other people's systems, which is the one failure
+      // here with a victim outside this machine.
+      if (timers.length > 0) return;
       for (const source of sources) {
         // Immediately, then on the interval. Waiting a full interval would mean
         // fifteen empty minutes after every restart for a 15-minute source.
@@ -173,7 +182,7 @@ export function createSchedule(sources: Source[], log: Logger = defaultLog) {
         // insurance against a future edit to the catch block.
         const guarded = () => {
           tick(source).catch((cause: unknown) => {
-            log(`ERROR ${source.name} escaped its own error boundary: ${describe(cause)}`);
+            log(`ERROR ${source.name} escaped its own error boundary: ${describeThrown(cause)}`);
           });
         };
         guarded();
@@ -196,14 +205,13 @@ export function createSchedule(sources: Source[], log: Logger = defaultLog) {
       // start() is ever made re-entrant.
       for (const t of timers.splice(0)) clearInterval(t);
     },
-    statusOf(name: string): SourceStatus | undefined {
-      const st = status.get(name);
-      if (!st) return undefined;
-      const { inFlight: _i, hasSucceeded: _h, ...rest } = st;
-      return rest;
-    },
+    statusOf,
     allStatus(): Record<string, SourceStatus> {
-      return Object.fromEntries([...status.keys()].map((k) => [k, this.statusOf(k)!]));
+      // `statusOf` by closure, not `this.statusOf`. G2 LOW 10: the object's
+      // methods are routinely destructured — `const { allStatus } = schedule` is
+      // exactly how a Fastify route would take it — and a `this` reference makes
+      // that throw. Nothing here needs an identity.
+      return Object.fromEntries([...status.keys()].map((k) => [k, statusOf(k)!]));
     },
   };
 }
