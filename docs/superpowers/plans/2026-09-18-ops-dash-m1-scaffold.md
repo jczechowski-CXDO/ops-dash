@@ -68,6 +68,13 @@ The dependency chain is real, not ceremonial:
 | 3 | `view-settings` | `web/src/views/Settings.tsx` + `Settings.test.tsx` | same |
 | 4 | `lead` | everything | everything |
 
+**`web/index.html` is owned by `lead` in every wave** — added at G2, because the original table
+never assigned it and Task 6 Step 5 instructs a Wave 2 agent to edit it while Task 11A also
+modifies it. It is also the one place in the tree that can hold `@keyframes`: there is no
+stylesheet under `web/src` and there must not be one, and `web/public/aurora/*` is copied
+verbatim. A wave agent that needs a keyframe **stops and asks the lead** rather than editing
+it, until Task 11A creates `web/public/app.css` and moves the block there.
+
 Two notes on that table. **Nobody owns `shared/src/contracts.ts` after Task 2** — it is frozen. And ownership of each `views/*.tsx` **transfers** from `lead` to its Wave 3 agent: Task 6 creates them as one-line stubs so the router compiles, and the Wave 3 agent replaces its own stub wholesale.
 
 One reconciliation to note: `AGENTS.md` puts the contract at `src/types/contracts.ts`. The approved design spec puts it at `shared/contracts.ts` so the future `server/` workspace imports the same file. **The spec wins.** Path in this plan: `shared/src/contracts.ts`, imported as `@ops-dash/shared`.
@@ -2439,7 +2446,7 @@ describe('demo state toggle', () => {
   it('switches the fixture bundle between quiet and sev1', () => {
     at('/');
     fireEvent.click(screen.getByRole('button', { name: 'Quiet' }));
-    expect(screen.getByText(/All 7 monitored services healthy/)).toBeInTheDocument();
+    expect(screen.getByText(/5 of 7 monitored services affirmed healthy · 2 unknown  /* amended at G2: the original 'All 7 monitored services healthy' is the G1 wrong-green one string further along — it renders over two services we cannot affirm *//)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Sev1' }));
     expect(screen.getByText(/open incidents across 7 monitored services/)).toBeInTheDocument();
   });
@@ -2464,9 +2471,20 @@ const KEY = 'ops-dash.theme';
 const Ctx = createContext<{ theme: Theme; toggle: () => void } | null>(null);
 
 function initial(): Theme {
-  const stored = localStorage.getItem(KEY);
+  // amended at G2 — G-14. The original line here read the OS colour preference
+  // via a media query, which FAILS Task 3A's "no second dark palette" guard and
+  // gives a red build the moment you regenerate this task from the plan. The
+  // guard greps prose as well as code, so a comment naming that query — or
+  // quoting Aurora's own attribute selector — fails it identically. Default to
+  // light; the stored value is the only input.
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(KEY);   // can throw: private mode, blocked storage
+  } catch {
+    stored = null;
+  }
   if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'light';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -2575,7 +2593,7 @@ export function pageMeta(
         title: 'Overview',
         subtitle: open
           ? `${open} open incidents across 7 monitored services`
-          : 'All 7 monitored services healthy · 512 users, 612 endpoints',
+          : '5 of 7 monitored services affirmed healthy · 2 unknown  /* amended at G2: the original 'All 7 monitored services healthy' is the G1 wrong-green one string further along — it renders over two services we cannot affirm */ · 512 users, 612 endpoints',
       };
   }
 }
@@ -2588,6 +2606,12 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { fixtures, type DemoMode, type FixtureBundle } from '../fixtures/index.js';
 
 const Ctx = createContext<{ mode: DemoMode; setMode: (m: DemoMode) => void; bundle: FixtureBundle } | null>(null);
+
+/// <reference types="vite/client" />
+// amended at G2 — G-15. Without that reference this file does not typecheck —
+// `import.meta.env` is a Vite ambient type — while Vitest still reports
+// "Type Errors  no errors", because Vitest typechecks only the `shared`
+// project. Fourth occurrence of that trap; see docs/RESUME.md.
 
 /** Dev-only. Milestone 4 deletes this provider along with the sidebar footer. */
 export const DEMO_TOGGLE_VISIBLE = import.meta.env.DEV;

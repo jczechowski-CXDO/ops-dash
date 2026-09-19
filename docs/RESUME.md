@@ -203,6 +203,42 @@ real corporate hostname in a committed fixture.
 `checkRunsFor(mode, id)` — `FixtureBundle.checkRuns` is now `Record<ServiceId, CheckRun[]>`, and
 `useParams` hands `ServiceDetail` a `string | undefined` the record's key type rejects.
 
+## Gate G2 — Wave 2 in review (2026-09-19)
+
+Task 6 committed at `d52f888`. 228 tests, typecheck exit 0, `npm run build` exit 0.
+
+**Two more plan defects, both of which give a red build on regeneration:**
+
+- **G-14** — Task 6 Step 3's `ThemeProvider` reads the OS colour preference via a media query,
+  which fails Task 3A's own `no second dark palette` guard. The guard greps prose too, so a
+  comment naming the query, or quoting Aurora's `[data-theme=` selector, fails identically.
+  Amended at source: default to `light`, stored value is the only input.
+- **G-15** — Task 6 Step 4's `DemoModeProvider` does not typecheck, because `import.meta.env`
+  is a Vite ambient type — while Vitest reports `Type Errors  no errors`. **Fourth occurrence
+  of the typecheck trap, this time originating in the plan's own source.** Amended at source
+  with a `/// <reference types="vite/client" />`.
+
+**A third wrong-green, one string further along.** Task 6 Step 4's quiet subtitle read
+`All 7 monitored services healthy`, over two services we cannot affirm. Now
+`5 of 7 monitored services affirmed healthy · 2 unknown`, all counts derived. The
+`All N healthy` branch is kept and still uses `allOperational`, with a test proving it
+reachable only in a constructed all-affirmed world — which is the right way to retain a branch
+that today's data cannot reach.
+
+**Ownership gap closed:** `web/index.html` was assigned to no wave, while Task 6 Step 5 tells a
+Wave 2 agent to edit it and Task 11A modifies it too. It is now **lead-owned in every wave**,
+and is the only place in the tree that can hold `@keyframes` until Task 11A creates
+`web/public/app.css`.
+
+**One mutation survived out of ten** — deleting `end` from the `NavLink`s, because react-router
+special-cases `/`. The agent's comment had claimed the assertion covered it; it corrected the
+comment rather than the claim. That is the right response and worth the precedent.
+
+**Not yet verified by a human eye.** There is no GUI in this environment. The agent confirmed
+the dev server serves the page with local-only asset references and audited `dist` (the only
+`https://` strings are React error-message URLs in vendor code), but nobody has *seen* the
+shell. Worth a look before G2 closes.
+
 ## The one practice this project has earned the hard way
 
 **A passing test is not evidence until someone has watched it fail.**
