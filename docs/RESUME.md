@@ -939,10 +939,17 @@ is a 401 — `help.netsapiens.com`'s help centre is sign-in restricted, so
 `{"error":"Couldn't authenticate you"}` in 150ms is Zendesk's application tier working
 perfectly. `response.ok` is the wrong predicate for a real estate.
 
-**NEEDS JOHN: the real Jira Cloud hostname.** Jira has no probe until then — it keeps its
-vendor half, which is live and correct, and renders no check for ours, which is true.
-`runner.test.ts` has a test asserting its absence; delete that test when the hostname
-arrives.
+~~**NEEDS JOHN: the real Jira Cloud hostname.**~~ **Answered 2026-09-19: the tenant is
+`netsapiens`, not `crexendo`.** The guess came from the Zendesk pods' pattern, and the
+pattern was the wrong one to generalise from — Crexendo and NetSapiens are both in play
+and they do not use the same name everywhere. Probing `netsapiens.atlassian.net/status`:
+200 `{"state":"RUNNING"}` in ~110ms, stable over four rounds, no redirect.
+
+`/status` rather than the tenant root, and the distinction is the same one the Zendesk
+pods taught: the root answers **202** with an async loading shell, which is a 2xx and
+would pass, but it only proves Atlassian's edge is serving HTML. `/status` is Jira's own
+liveness endpoint, answered by the instance. Probe the application tier, not what stands
+in front of it.
 
 ## A comment nobody had measured was load-bearing
 
@@ -1059,7 +1066,7 @@ shrinks every tick).
   "everything the feed publishes".
 - `evaluate`'s `enabled` map is supplied by the caller and nothing reads the `rule_state`
   table into it, so both rules are effectively always on. A wiring gap, not an engine one.
-- **NEEDS JOHN — a contract question, not a code one.** `DATA_CONTRACTS.md` §7's prose
+- **NEEDS JOHN — the last open question, and it is a contract question, not a code one.** `DATA_CONTRACTS.md` §7's prose
   promises a **Sev2 for a single vendor `unknown` + our check failing**, and no M2 rule
   emits one; the engine's tests assert zero incidents for that state. This is either an M3
   rule or a prose correction. Deliberately not decided at the close of a milestone —
@@ -1165,7 +1172,8 @@ usually right. That is a cheaper signal than a third review and it costs nothing
 
 ## Still open after M2, for whoever picks up M3
 
-- **NEEDS JOHN: the Jira Cloud hostname**, and the §7 Sev2 prose question. Both above.
+- ~~NEEDS JOHN: the Jira Cloud hostname~~ — answered, `netsapiens.atlassian.net/status`.
+  **NEEDS JOHN: the §7 Sev2 prose question** is the only one left. See above.
 - **A source whose timer silently stops still classifies as `healthy`.** `SourceStatus` now
   carries `intervalMs`, so the API *can* classify staleness at >3x interval — it is not yet
   wired. This is the last place in the chain where something broken reads calm.

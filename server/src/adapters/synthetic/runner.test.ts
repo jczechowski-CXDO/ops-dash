@@ -111,18 +111,19 @@ describe('the probe list', () => {
     // passes is worse than no probe, because the correlation rule would read
     // it as an affirmative "our side is fine".
     expect(DEFAULT_PROBES.map((p) => p.serviceId)).toEqual([
-      'zendesk', 'zendesk', 'helpjuice',
+      'zendesk', 'zendesk', 'helpjuice', 'jira',
     ]);
   });
 
-  it('carries no Jira probe either — the tenant hostname is not known', () => {
-    // `crexendo.atlassian.net` was derived from the tenant pattern and the
-    // hand-run found it answers 404 on every path. Same reasoning as M365, from
-    // the other direction: a probe pointed at a host that does not exist
-    // reports `fail` forever, and a permanently-failing our-side check turns
-    // the first flicker on Atlassian's status page into a Sev1. Jira keeps its
-    // vendor half, which is live and correct, and renders "no check" for ours —
-    // which is true. Delete this test when John supplies the real hostname.
-    expect(DEFAULT_PROBES.filter((p) => p.serviceId === 'jira')).toEqual([]);
+  it('probes the Jira tenant at its own liveness endpoint, not at the tenant root', () => {
+    // The root answers 202 with an async loading shell — a 2xx, so it would
+    // pass, but it proves only that Atlassian's edge is serving HTML. `/status`
+    // is answered by the instance itself. Same reasoning as the Zendesk pods:
+    // probe the application tier, not what stands in front of it.
+    const jira = DEFAULT_PROBES.filter((p) => p.serviceId === 'jira');
+    expect(jira).toHaveLength(1);
+    expect(jira[0]!.url).toBe('https://netsapiens.atlassian.net/status');
+    // No expectStatus: this one is an honest 200.
+    expect(jira[0]!.expectStatus).toBeUndefined();
   });
 });

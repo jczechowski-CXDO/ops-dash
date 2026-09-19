@@ -27,7 +27,8 @@ import { runProbe, type ProbeSpec } from './probe.js';
  *     centre API underneath the challenge answers honestly and fast, so that is
  *     what we probe.
  *   - `crexendo.atlassian.net` answered 404 on every path tried. The hostname
- *     was a guess derived from the tenant pattern and the guess was wrong.
+ *     was a guess derived from the tenant pattern and the guess was wrong; the
+ *     tenant is `netsapiens`, confirmed by John 2026-09-19.
  *
  * The lesson is the one this product is about: a probe that cannot pass is
  * worse than no probe, because it teaches the operator that red means nothing.
@@ -59,13 +60,22 @@ export const DEFAULT_PROBES: ProbeSpec[] = [
     url: 'https://crexendo.helpjuice.com',
     region: 'us-east',
   },
-  // NO JIRA PROBE. `crexendo.atlassian.net` was a guess and it answers 404 on
-  // every path, so Jira's tile carries the vendor half only until John gives us
-  // the real tenant hostname. That is deliberate and it is the honest option:
-  // a probe pointed at a host that does not exist would report `fail` forever,
-  // and under the `vendor` rule a permanently-failing our-side check means the
-  // first flicker on Atlassian's status page opens a Sev1. An absent probe
-  // renders as "no check", which is true. A wrong probe renders as a lie.
+  // Measured 2026-09-19: 200 `{"state":"RUNNING"}` in ~110ms, four rounds, no
+  // redirect. The tenant is `netsapiens`, not `crexendo` — the guessed hostname
+  // 404'd on every path and was removed rather than left to fail forever.
+  //
+  // `/status` rather than the tenant root, and the difference matters. The root
+  // answers 202 with an async loading shell, which is a 2xx and would pass, but
+  // it proves only that Atlassian's edge is serving HTML. `/status` is Jira's
+  // own liveness endpoint: credential-free, JSON, and answered by the instance
+  // rather than by the CDN in front of it. Same reasoning as the Zendesk pods —
+  // probe the application tier, not the thing standing in front of it.
+  {
+    serviceId: 'jira',
+    check: 'Jira Cloud tenant',
+    url: 'https://netsapiens.atlassian.net/status',
+    region: 'us-east',
+  },
 ];
 
 /** Injected only by the isolation test. A probe that rejects cannot be
