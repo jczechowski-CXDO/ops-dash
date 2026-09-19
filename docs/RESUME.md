@@ -1,8 +1,11 @@
 # Resume here — ops-dash
 
-Last updated 2026-09-19. **Milestone 1 is under construction. Wave 0 (Tasks 1, 2, 3, 3A) is
-done, committed and reviewed; gate G0 is closed with accepted findings. Wave 1 is next.**
-Read this file, then the plan, then start at "Pick up here".
+Last updated 2026-09-19. **Milestone 1 is COMPLETE.** All five waves built, all six gates
+closed, `CLAUDE.md` written. Read this file, then `CLAUDE.md`, then start at "Pick up here" —
+which is now the Milestone 2 plan, not this one.
+
+**State: 539 unit tests, 153 e2e tests, 152 visual baselines, thirteen repository guards,
+zero AA contrast failures in either theme, typecheck 0, build 0.**
 
 This file is the single entry point. Everything needed to continue lives in git — there is no
 state on the machine this was started on that you need.
@@ -59,11 +62,24 @@ Linux notes:
 
 ## Pick up here
 
-**Wave 4 — Tasks 11, 11A and 12, lead solo.** Wiring and the fidelity pass, the security review,
-and `CLAUDE.md`. Read "What Task 11's fidelity pass should and should not redo" first — 152
-baselines already discharge most of it, and the remainder is listed in priority order.
+**Milestone 2.** `vendorstatus` (Statuspage first — four vendors, one adapter) + `synthetic`,
+the poller, SQLite, correlation. At that point it detects a real outage. It gets its own plan
+under `docs/superpowers/plans/`.
 
-Superseded, for the record: Waves 0-3½. `ops-primitives` builds the eight
+**Before you start it, three things:**
+
+1. **Install Node 24.** The store is `node:sqlite`, a built-in. This is the hard stop the
+   `engines` floor has been warning about since Task 1.
+2. **Read the appendix at the end of the Milestone 1 plan** — the four Python clients' auth
+   mechanics, rate limits and proven traps, before writing any adapter.
+3. **Two amendments are queued for the frozen contract**, and the file should be opened once
+   for all of them rather than three times: an explicit "all sources of one platform failed"
+   correlation signal; the rule that a 2xx carrying non-JSON is an error, not data (proven
+   necessary by `epc.py`'s `groups` endpoint returning an HTML login page under HTTP 200); and
+   `CheckRun` having no `serviceId`, which the fixtures solved with a `Record` but an adapter
+   cannot.
+
+Superseded, for the record: Waves 0-4 of Milestone 1. `ops-primitives` builds the eight
 primitives, the five shared dashboard components and `theme/statusColor.ts`; `ops-fixtures`
 builds the prototype-derived fixture modules. Disjoint ownership; dispatch both together, then
 run gate G1.

@@ -84,7 +84,13 @@ describe('nothing reaches off-box', () => {
     // Also catches protocol-relative //host/path, which inherits the page scheme
     // and is just as outbound as an explicit https://.
     const outbound = /https?:\/\/|(^|[^:])\/\/[a-z0-9.-]+\.[a-z]{2,}/i;
-    const offenders = assets.filter((f) => outbound.test(read(f)));
+    // XML namespace identifiers are not references: no browser ever fetches
+    // http://www.w3.org/2000/svg, it is a name that happens to be spelled as a
+    // URL, and a standalone .svg file is invalid without it. Stripped by exact
+    // match rather than by exempting .svg files, so a real https:// inside an
+    // SVG — an <image href>, a webfont — still fails.
+    const NAMESPACES = /https?:\/\/www\.w3\.org\/(2000\/svg|1999\/xlink|1999\/xhtml)/g;
+    const offenders = assets.filter((f) => outbound.test(read(f).replace(NAMESPACES, '')));
     expect(offenders.map(rel)).toEqual([]);
   });
 

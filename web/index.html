@@ -4,44 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Crexendo IT · Service operations</title>
+    <!-- default-src 'self' makes the zero-external-dependency rule enforceable by
+         the BROWSER rather than by a grep and good intentions. The day someone
+         re-adds a Google Fonts @import or a CDN script, the browser refuses it.
+         That value is the same whether the app is local-only or deployed.
+         Note frame-ancestors is ignored in a meta CSP — it needs an HTTP header,
+         and is on the Reopens-at-release list rather than here. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/aurora/styles.css" />
-    <style>
-      /* The one animation the shell needs, defined where the prototype defines
-         it. Nothing under web/src may hold a stylesheet (G0 accepted finding 3),
-         and an inline style attribute cannot declare keyframes. */
-      @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-
-      /* Skeleton's pulse, verbatim from the bundle. Skeleton.tsx sets
-         `animation: aur-skel-pulse ...` but the keyframes had no home, so every
-         placeholder rendered as a static grey block — correct in the DOM, wrong
-         on screen, and invisible to every test we have. G1 accepted finding M-8. */
-      @keyframes aur-skel-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
-
-      /* The focus ring. No :focus-visible is expressible from web/src — there is
-         no stylesheet there and there must not be one — which is why the
-         primitives carry aur-* classes. G1 accepted finding M-6 residual.
-         Tokens only; this file is served, so no literal colour belongs here. */
-      .aur-button:focus-visible,
-      .aur-icon-button:focus-visible,
-      .aur-switch:focus-visible,
-      a:focus-visible,
-      button:focus-visible,
-      [role="button"]:focus-visible,
-      [tabindex]:focus-visible {
-        outline: 2px solid var(--primary-main);
-        outline-offset: 2px;
-      }
-
-      /* Respect a reduced-motion preference. This is a motion query, not a
-         colour-scheme one, so it does not trip the no-second-dark-palette guard. */
-      @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-          animation-duration: .01ms !important;
-          animation-iteration-count: 1 !important;
-          transition-duration: .01ms !important;
-        }
-      }
-    </style>
+    <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <div id="root"></div>

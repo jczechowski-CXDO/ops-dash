@@ -74,8 +74,16 @@ test('no request leaves this machine, on any route in either world', async ({ pa
 });
 
 test('the offline proof can see a foreign request (positive control)', async ({ page, context }) => {
-  // The deliberate defect the test above needs to be worth anything. If this
-  // ever goes green-by-silence, the assertion above is measuring nothing.
+  // The deliberate defect the test above needs to be worth anything. If this ever
+  // goes green-by-silence, that assertion is measuring nothing.
+  //
+  // It fires from about:blank rather than from our own page, and that is the
+  // point rather than a workaround. Task 11A's CSP carries `connect-src 'self'`,
+  // so a foreign fetch issued FROM our page is refused by the browser before it
+  // becomes a request at all — the interceptor never sees it, and a control
+  // pointed there would pass for the wrong reason forever. about:blank has no
+  // policy, so the request reaches the wire and the interceptor is the only
+  // thing that can stop it. That is what this proves.
   const foreign: string[] = [];
   await context.route('**/*', async (route) => {
     const url = route.request().url();
@@ -86,7 +94,8 @@ test('the offline proof can see a foreign request (positive control)', async ({ 
     }
     await route.continue();
   });
-  await page.goto(urlFor('/', 'sev1'));
+
+  await page.goto('about:blank');
   await page.evaluate(async () => {
     try {
       await fetch('https://fonts.googleapis.com/css2?family=Probe');
@@ -97,6 +106,33 @@ test('the offline proof can see a foreign request (positive control)', async ({ 
   await expect.poll(() => foreign.length).toBeGreaterThan(0);
   expect(foreign.some((u) => u.includes('fonts.googleapis.com'))).toBe(true);
 });
+
+test('the CSP refuses a foreign fetch before it reaches the wire', async ({ page, context }) => {
+  // The other half of the same claim, and the reason the control above had to
+  // move. Two independent layers now stop an off-box request: the browser's own
+  // policy, and — if the policy were ever removed — the interceptor. This test
+  // asserts the FIRST one by showing the request never becomes a request.
+  const reachedTheWire: string[] = [];
+  await context.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (!isLocal(url)) reachedTheWire.push(url);
+    await route.continue();
+  });
+
+  await page.goto(urlFor('/', 'sev1'));
+  const blocked = await page.evaluate(async () => {
+    try {
+      await fetch('https://fonts.googleapis.com/css2?family=Probe');
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  expect(blocked, 'the fetch should be refused by the policy').toBe(true);
+  expect(reachedTheWire, 'and refused before becoming a request').toEqual([]);
+});
+
 
 test('nothing 404s and nothing fails — no asset is silently missing', async ({ page }) => {
   const failed: string[] = [];
@@ -183,7 +219,7 @@ test('every link is same-origin, or an https vendor link with rel protection', a
   expect(checked).toBeGreaterThan(50);
 });
 
-test('the content security policy is present and blocks an off-box fetch [RED until Task 11A]', async ({ page }) => {
+test('the content security policy is present and blocks an off-box fetch', async ({ page }) => {
   // Task 10A Step 4 says to write this now and let it fail. It is the handoff
   // signal into Task 11A, which adds the meta tag to web/index.html — a file
   // this task does not own — and whose Step expects this test green.

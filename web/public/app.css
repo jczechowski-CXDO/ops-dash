@@ -1,0 +1,42 @@
+/* ops-dash's own styles. Everything else is Aurora tokens.
+ *
+ * This file exists because of the Content Security Policy in index.html.
+ * `style-src 'self'` with no 'unsafe-inline' permits React's style={{…}} —
+ * CSSOM is not governed by CSP — but a literal <style> block in the HTML IS
+ * governed, so these rules had to leave the document to survive the policy.
+ *
+ * Two of the three were accepted findings from gate G1. `web/src` has no
+ * stylesheet and must not grow one, so keyframes and :focus-visible had nowhere
+ * to live: every Skeleton rendered a static grey block, and no focus ring was
+ * expressible anywhere. Both were invisible to the whole test suite and only
+ * ever showed up in a screenshot. */
+
+/* The refresh pill's dot, and the only motion on the page besides Aurora's transitions. */
+@keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Skeleton's pulse, verbatim from the bundle. Skeleton.tsx sets
+   `animation: aur-skel-pulse …`; without these keyframes the property is inert. */
+@keyframes aur-skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+
+/* The focus ring. The primitives carry aur-* classes for exactly this.
+   Tokens only — this file is served, so no literal colour belongs in it. */
+.aur-button:focus-visible,
+.aur-icon-button:focus-visible,
+.aur-switch:focus-visible,
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--primary-main);
+  outline-offset: 2px;
+}
+
+/* A motion query, not a colour-scheme one, so it does not trip the
+   no-second-dark-palette guard. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

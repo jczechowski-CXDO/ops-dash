@@ -2,6 +2,7 @@
 // Aurora bundle's extracted path data, so no icon webfont and no icon package is
 // needed at runtime. Regenerate with: npm run icons --workspace @ops-dash/web
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const BUNDLE = '../design_handoff_it_ops_dashboard/aurora/_ds_bundle.js';
 const OUT = 'src/components/aurora/icons.generated.ts';
@@ -21,7 +22,23 @@ const NAMES = {
   light_mode: 'LightMode',
 };
 
-const line = readFileSync(BUNDLE, 'utf8')
+// Pinned 2026-09-19. This script evals the bundle and its output is rendered
+// through dangerouslySetInnerHTML on every page, so a silent swap is a
+// code-execution path — at build time on this machine, and as arbitrary markup
+// in the browser. The file is vendored, committed and diffable, which is most
+// of the defence; the pin is the part that fails loudly rather than shipping.
+// If this throws: the bundle changed. Diff it, understand why, then update.
+const BUNDLE_SHA256 = '24ca75952a96991537b4361e8292092da9138ac729eb74b00ade05dc317f83b5';
+
+const bundleSource = readFileSync(BUNDLE, 'utf8');
+const actual = createHash('sha256').update(bundleSource).digest('hex');
+if (actual !== BUNDLE_SHA256) {
+  throw new Error(
+    `Aurora bundle hash mismatch — refusing to eval it.\n  expected ${BUNDLE_SHA256}\n  actual   ${actual}`,
+  );
+}
+
+const line = bundleSource
   .split('\n')
   .find((l) => l.startsWith('let __ds_default_components_foundation_icon_data_hdnrqo;'));
 if (!line) throw new Error('icon-data line not found in the Aurora bundle');
