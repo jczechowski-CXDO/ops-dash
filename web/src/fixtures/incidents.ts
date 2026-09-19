@@ -1,5 +1,5 @@
 import type { Incident } from '@ops-dash/shared';
-import { clock, clockOf, dayAgoAt, minutesAgo, span } from './time.js';
+import { afterBy, clock, clockOf, dayAgoAt, minutesAgo, span } from './time.js';
 import {
   MAILFLOW_LAST_SUCCESS_MINUTES_AGO as LAST_SUCCESS,
   PROOFPOINT_OPENED_MINUTES_AGO as PP0,
@@ -165,6 +165,12 @@ export const sev1Incidents: Incident[] = [
       'Fourteen managed endpoints have not checked in for 21 days or more. Their patch and encryption state is unknown rather than compliant, so they are excluded from the compliance figures until they report.',
     metaParts: ['Endpoint Central', `opened yesterday ${clockOf(EPC_OPENED)}`, '9 laptops, 5 desktops'],
     ruleKey: 'stale',
+    /** Muted indefinitely (`until: null`), which is the distinction the
+     *  contract's `string | null` exists to express: this is not snoozed until
+     *  Tuesday, it is silenced until someone unmutes it. Coherent with the
+     *  `stale` rule being disabled — the fleet is being worked through by hand
+     *  and nobody wants a daily reminder of a number they already know. */
+    muted: { by: 'j.hart@example.com', until: null },
     blastRadius: [
       { label: 'Agents stale', value: '14', note: 'of 612 managed endpoints', level: 'warning' },
       { label: 'Longest silence', value: '34 days', note: 'DEMO-LT-0412', level: 'error' },
@@ -198,6 +204,17 @@ export const sev1Incidents: Incident[] = [
       'Two app registration credentials expire in nine days. Graph collection and the Stellar connector both stop silently when a secret lapses, so this is renewed ahead of the date rather than on it.',
     metaParts: ['Entra ID', 'opened 2 days ago', 'CXDO-GraphExport, Stellar-Connector'],
     ruleKey: 'secrets',
+    /** Acknowledged, so the Overview dims this row and credits the actor —
+     *  README:81's branch, which until now rendered in no world and would have
+     *  been photographed by the Playwright baselines in a state the product can
+     *  produce but the demo never showed (accepted finding M-9).
+     *
+     *  The lowest-severity incident, deliberately: dimming it does not weaken
+     *  the Sev1 story the Overview and the baselines are built around. The
+     *  actor is m.reyes, who the Entra audit already shows updating app
+     *  credentials — the same person, doing the same job, on the same two
+     *  registrations this incident is about. */
+    ack: { by: 'm.reyes@example.com', at: afterBy(minutesAgo(2 * 24 * 60), 90) },
     blastRadius: [
       { label: 'Credentials expiring', value: '2', note: 'within 9 days', level: 'warning' },
       { label: 'Integrations affected', value: '2', note: 'Graph export and Stellar', level: 'normal' },

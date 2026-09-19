@@ -44,6 +44,12 @@ export function span(minutes: number): string {
  *  allowed to postdate now. */
 export const hoursAhead = (n: number): string => iso(NOW + n * 60 * 60_000);
 
+/** `minutes` after an existing instant. Used where one event must provably
+ *  follow another — an acknowledgement cannot predate the incident it
+ *  acknowledges, which is the `clock(72)` defect in a different costume. */
+export const afterBy = (at: string, minutes: number): string =>
+  iso(Date.parse(at) + minutes * 60_000);
+
 /** Local HH:MM on the calendar day `days` before today — 'yesterday 17:20'. */
 export function dayAgoAt(days: number, hour: number, minute: number): string {
   const d = new Date(NOW);

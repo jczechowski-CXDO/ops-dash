@@ -494,6 +494,55 @@ describe('the product is shown detecting something by itself', () => {
   });
 });
 
+describe('the acknowledged and muted branches are reachable from a fixture', () => {
+  // M-9. Both branches are implemented in Overview.tsx and were reachable only
+  // by clicking, so the rendered-from-data path shipped unrendered — and a
+  // baseline suite freezes whatever is on screen and makes it the acceptance
+  // criterion. Two findings this build would have been certified correct by a
+  // screenshot; an unrendered branch is the version of that we can still catch.
+  it('acknowledges exactly one incident, the lowest-severity one', () => {
+    const acked = fixtures.sev1.incidents.filter((i) => i.ack !== undefined);
+    expect(acked.map((i) => i.id)).toEqual(['INC-2286']);
+    expect(acked[0]?.severity).toBe(3);
+  });
+
+  it('mutes exactly one, and indefinitely, which is what `until: null` means', () => {
+    const muted = fixtures.sev1.incidents.filter((i) => i.muted !== undefined);
+    expect(muted.map((i) => i.id)).toEqual(['INC-2288']);
+    expect(muted[0]?.muted?.until).toBeNull();
+    // Not the same row as the acknowledged one: one row carrying both states
+    // tests neither cleanly.
+    expect(muted[0]?.id).not.toBe('INC-2286');
+  });
+
+  it('never acknowledges or mutes an incident before it existed', () => {
+    for (const i of fixtures.sev1.incidents) {
+      const opened = Date.parse(i.openedAt);
+      if (i.ack) expect(Date.parse(i.ack.at)).toBeGreaterThan(opened);
+      if (i.muted?.until) expect(Date.parse(i.muted.until)).toBeGreaterThan(opened);
+    }
+  });
+
+  it('credits a redacted person, never a real one', () => {
+    for (const i of fixtures.sev1.incidents) {
+      for (const who of [i.ack?.by, i.muted?.by]) {
+        if (who === undefined) continue;
+        expect(who).toMatch(/^[a-z]\.[a-z]+@example\.com$/);
+      }
+    }
+  });
+
+  it('leaves an acknowledged incident open and still counted', () => {
+    // The product decision the Overview already encodes: acknowledging must not
+    // hide work. The nav badge, the alert summary and the affirmed/unknown
+    // split are all unchanged by it.
+    const acked = incidentById('sev1', 'INC-2286');
+    expect(acked?.resolvedAt).toBeUndefined();
+    expect(fixtures.sev1.incidents.filter((i) => !i.resolvedAt)).toHaveLength(5);
+    expect(fixtures.sev1.services.filter((s) => s.vendor.level === 'unknown')).toHaveLength(2);
+  });
+});
+
 describe('a disabled rule cannot have produced an incident', () => {
   it('reconciles INC-2288 with the Agent stale rule being off', () => {
     const stale = fixtures.sev1.rules.find((r) => r.key === 'stale');
