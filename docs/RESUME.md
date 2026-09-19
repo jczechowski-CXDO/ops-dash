@@ -399,6 +399,19 @@ looking for something broken on screen and find nothing.
 
 ## Task 10A environment notes — read before starting it
 
+- **Await `document.fonts.ready` before every screenshot.** A screenshot was twice captured
+  rendered in a **fallback face rather than Plus Jakarta Sans** — sidebar, header, everything.
+  Not reproducible on demand afterwards (five consecutive clean captures), so: **observed,
+  mitigation known, mechanism not pinned down.** Act on it anyway. A baseline that silently
+  bakes fallback-font metrics passes for whoever generated it and fails for everyone else, and
+  it is very hard to diagnose after the fact. `--virtual-time-budget=8000` suppressed it in
+  every observed case; Playwright's equivalent is awaiting `document.fonts.ready`.
+- **Rebuild before you preview, and use a positive control.** `vite preview` serves whatever is
+  in `dist`. A comparison run without rebuilding compares a build against itself and produces a
+  confident "pixel-identical, no layout shift" that means nothing. Every visual comparison needs
+  a band you *expect* to differ; if that band matches too, you are comparing one build with
+  itself.
+
 - **G-16: `vite preview` binds `localhost`, not `127.0.0.1`.** Verified on this box:
   `localhost:4173` → 200, `127.0.0.1:4173` → connection refused (localhost resolves to `::1`).
   The plan's Playwright config used `127.0.0.1` for both `baseURL` and the `webServer` health
@@ -526,6 +539,13 @@ Consequences, all load-bearing:
   the hook.
 - **Never read `$?` after a pipe.** It reports the last command in the pipeline. Run the command
   bare, or use `${PIPESTATUS[0]}`.
+- **A success message that prints only on success is not evidence**, when you cannot distinguish
+  "did not print" from "did not run". `cmd && echo RESTORED` prints nothing both when the
+  restore failed and when the whole chain never reached it — and a missing failure message reads
+  as success. This cost ~15 minutes of screenshots taken against a reverted working tree, and
+  the conclusion drawn from them had to be withdrawn. **Echo the exit code positively**:
+  `echo "exit=$?"`. Same family as the `$?`-after-a-pipe error that hid BLOCKER B-1 for two
+  commits: in both cases the check reported on something other than what was being checked.
 - **`tsc -b` is incremental.** It writes `*.tsbuildinfo` (gitignored) and can skip work; delete
   those if a result looks impossible.
 
