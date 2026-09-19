@@ -79,7 +79,13 @@ export type ServiceStatus = {
   name: string;                // page title,  e.g. 'Microsoft 365 / Entra ID'
   vendor: {
     level: StatusLevel;
-    label: string;             // 'Operational' | 'Degraded' | 'Advisory' | 'Maintenance' | 'Unknown'
+    label: string;             // the display form of `level`, one per StatusLevel member:
+                               // 'Operational' | 'Degraded' | 'Outage' | 'Maintenance' | 'Unknown'.
+                               // Corrected 2026-09-19: this listed 'Advisory' and omitted
+                               // 'Outage'. 'Advisory' was the prototype's word for a degraded
+                               // vendor with a published advisory; nothing emits it, and a
+                               // comment naming a label no code produces while omitting one it
+                               // does is worse than no comment.
     note: string;              // advisory text + last vendor update, or why the level is unknown
     advisoryId?: string;       // e.g. 'EX1084221'
     url?: string;
