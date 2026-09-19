@@ -13,8 +13,8 @@ Common envelope, returned by every adapter:
 
 ```ts
 type SourceResult<T> = {
-  data?: T;                 // amendment 9 — ABSENT when `error` is set. A failed fetch has no
-                            // payload, and the M1 shape made every adapter's error path a cast.
+  data?: T;                 // amendment 9 — optional, because a failed TRANSPORT has no payload.
+                            // See the note below: an adapter may still supply a derived value.
   fetchedAt: string;      // ISO 8601
   degraded: boolean;      // partial result (some pages/regions failed)
   empty?: boolean;        // fetch completed, returned no records — NOT an assertion of health
@@ -24,6 +24,17 @@ type SourceResult<T> = {
 
 When `error` is set the UI renders the panel's last good data with a stale badge, or an
 error state if there is none. It never renders zeros as if they were real.
+
+**`data` and `error` are not mutually exclusive, and the difference is the layer (amendment 9).**
+At the transport layer a failure has no payload: `fetchJson` sets `error` and omits `data`,
+because there is nothing to report. At the **adapter** layer the opposite is right — an adapter
+turns a transport failure into a *renderable* state and returns **both**: `data` holding a
+vendor at `unknown` whose note says we could not read the feed, and `error` saying why. That is
+the product's whole thesis in one shape. A panel that renders nothing because a poll failed has
+told the operator less than one that renders "unknown, and here is the reason".
+
+So a consumer must branch on `error` to decide whether to show a stale badge, and on `data`
+to decide whether it has anything to draw — never on one to infer the other.
 
 **A 2xx carrying non-JSON is an error, not data (amendment 7).** A JSON-decode failure on a
 successful status code sets `error` with `code: 'non_json_2xx'` and maps the level to

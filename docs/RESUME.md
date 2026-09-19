@@ -721,6 +721,22 @@ fail before you commit. When you review one, do the same rather than reading it.
 mandatory at G3, where four agents land view tests in parallel and nobody can see anyone
 else's work.
 
+## tsc and vitest read the shared contract from two different places
+
+`shared/package.json` points `main`/`types`/`exports` at `./src/index.ts`, so **vitest**
+resolves the contract from source. But `web` and `server` declare
+`references: [{ path: "../shared" }]`, and **TypeScript project references resolve to the
+declaration output** — `shared/dist/*.d.ts`, which is gitignored and rebuilt by `tsc -b`.
+
+Two resolvers, two answers. An agent amending the contract mid-task saw exactly this: `npm run
+typecheck` reporting 62 errors against a `data?: T` it had just written, while vitest's
+typecheck said clean, because `dist` had not been rebuilt yet.
+
+In practice the `pretest` hook saves us — it runs `tsc -b` before the suite, which rebuilds
+`dist` first. The hazard is running vitest directly after a contract change and trusting the
+result. **After amending `shared/src/contracts.ts`, run `npm run typecheck` before anything
+else**, or `rm -rf shared/dist` if a type error looks impossible.
+
 ## The trap that has now caught us three times
 
 **`Type Errors  no errors` in a Vitest run is a claim about `shared` only.** Typecheck mode is

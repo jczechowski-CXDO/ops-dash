@@ -5,7 +5,17 @@
 
 /** Common envelope, returned by every adapter. */
 export type SourceResult<T> = {
-  /** amendment 9 — ABSENT when `error` is set. A failed fetch has no payload.
+  /** amendment 9 — optional, because a failed TRANSPORT has no payload.
+   *
+   *  `data` and `error` are NOT mutually exclusive, and which you get depends on
+   *  the layer. `fetchJson` omits `data` on failure: there is nothing to report.
+   *  An adapter returns BOTH — `data` holding a vendor at `unknown` whose note
+   *  explains that we could not read the feed, and `error` saying why — because
+   *  a panel that renders nothing has told the operator less than one that says
+   *  "unknown, and here is the reason". Branch on `error` for the stale badge
+   *  and on `data` for whether there is anything to draw; never infer one from
+   *  the other.
+   *
    *  Required until Milestone 2's first real adapter, which made every error
    *  path a cast past the contract — and let code typed on SourceResult write
    *  `result.data.components` on an errored result with no type error. M1 never
