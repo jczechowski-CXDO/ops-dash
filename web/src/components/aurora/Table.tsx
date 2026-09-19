@@ -109,8 +109,13 @@ function Row<R extends Record<string, unknown>>({
             color: 'var(--text-primary)',
             borderBottom: '1px solid var(--divider)',
             whiteSpace: 'nowrap',
+            // `maxWidth: 0` alone does NOT mean "yield when there is no room" —
+            // under table-layout:auto it means "be the narrowest column, always",
+            // and the Email subjects truncated at 1440 with ~180px of empty table
+            // beside them. Paired with `width: '100%'` the cell absorbs the slack
+            // and truncates only when there is none.
             ...(c.truncate
-              ? { overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 }
+              ? { overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0, width: '100%' }
               : {}),
           }}
         >

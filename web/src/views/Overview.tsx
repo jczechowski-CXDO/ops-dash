@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Incident, ServiceStatus, StatusLevel } from '@ops-dash/shared';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { Card } from '../components/Card.js';
@@ -322,6 +322,8 @@ export function StatusStrip({ services }: { services: ServiceStatus[] }) {
  *  two half-labels at 10.5px --text-secondary. */
 function ServiceTile({ service }: { service: ServiceStatus }) {
   const color = statusColor(tileLevel(service));
+  const navigate = useNavigate();
+  const href = `/services/${service.id}`;
   return (
     // The hook is on the Card itself (ops-primitives added `data-testid` at
     // 37cea35). It used to be on a wrapper <div>, which made the WRAPPER the grid
@@ -336,7 +338,14 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
       // prototype carries exactly two `border-radius:10px` rules — these two
       // elements. README:60's "card recipe used everywhere" is the generic
       // recipe; this is its one documented override.
-      style={{ display: 'flex', flexDirection: 'column', gap: 6, borderRadius: 10 }}
+      // The WHOLE tile is the click target, as the prototype has it. L-12 kept
+      // the alert row non-interactive because its three buttons would then be
+      // interactive children inside a role="button", which is invalid for
+      // assistive tech — a tile has no interactive children, so that objection
+      // does not apply here. The name stays a real <Link> for middle-click and
+      // "open in new tab"; the Card's handler only adds the rest of the surface.
+      onClick={() => navigate(href)}
+      style={{ display: 'flex', flexDirection: 'column', gap: 6, borderRadius: 10, cursor: 'pointer' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span data-testid="tile-dot" style={DOT(7, color)} />
@@ -357,7 +366,9 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
           {service.latencyMs} ms
         </span>
       </div>
-      <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
+      <div data-testid="tile-spark">
+        <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
         <span>Vendor: {service.vendor.label}</span>
         <span>Ours: {service.ours.label}</span>

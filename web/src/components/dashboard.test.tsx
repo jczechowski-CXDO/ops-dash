@@ -198,6 +198,10 @@ describe('Column.truncate (G3½ HIGH — the Email table was clipped at 1000px)'
     );
     const [truncating, holding] = [...container.querySelectorAll('tbody td')];
     expect(truncating).toHaveStyle({ textOverflow: 'ellipsis', overflow: 'hidden' });
+    // Paired with width:100% on purpose. maxWidth:0 alone makes the column the
+    // narrowest ALWAYS rather than only when crowded — it truncated at 1440 with
+    // ~180px of empty table beside it. The pair is the fix; either half is not.
+    expect(truncating).toHaveStyle({ maxWidth: '0', width: '100%' });
     expect(holding).not.toHaveStyle({ textOverflow: 'ellipsis' });
   });
 

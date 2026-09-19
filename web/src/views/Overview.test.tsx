@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { render, screen, within, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import type { ServiceStatus } from '@ops-dash/shared';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
@@ -42,7 +42,12 @@ const at = (mode: DemoMode = 'sev1') =>
     <MemoryRouter initialEntries={[`/?demo=${mode}`]}>
       <ThemeProvider>
         <DemoModeProvider>
-          <Overview />
+          {/* A landing route, so a navigation can be observed rather than
+              inferred from a handler having been called. */}
+          <Routes>
+            <Route path="/" element={<Overview />} />
+            <Route path="/services/:id" element={<div data-testid="landed-on-service" />} />
+          </Routes>
         </DemoModeProvider>
       </ThemeProvider>
     </MemoryRouter>,
@@ -913,5 +918,32 @@ describe('tiles and alert rows take the radius-10 override (G3½ MEDIUM)', () =>
     // restyle the whole app.
     at('quiet');
     expect(screen.getByTestId('status-strip')).not.toHaveStyle({ borderRadius: '10px' });
+  });
+});
+
+describe('the whole tile is the click target (G3½ LOW-4)', () => {
+  // The prototype makes the tile clickable; ours linked only the name, so most
+  // of a 190x90 card was dead — state-tile-hover was byte-identical to
+  // state-tile-rest, which is the affordance gap visible in a baseline. L-12
+  // kept the ALERT ROW non-interactive because its three buttons would be
+  // interactive children inside a role="button"; a tile has no interactive
+  // children, so that objection does not carry over.
+  it('navigates from a click anywhere on the tile, not only on the name', () => {
+    at();
+    const tile = screen.getAllByTestId('service-tile')[0]!;
+    // The sparkline: about as far from the name link as a tile gets.
+    fireEvent.click(within(tile).getByTestId('tile-spark'));
+    expect(screen.getByTestId('landed-on-service')).toBeInTheDocument();
+  });
+
+  it('keeps the name a real link, so middle-click and open-in-new-tab survive', () => {
+    // A bare div with an onClick would satisfy the test above and silently
+    // remove that, which is why the Link stays rather than being absorbed.
+    at();
+    const tile = screen.getAllByTestId('service-tile')[0]!;
+    expect(within(tile).getByRole('link')).toHaveAttribute(
+      'href',
+      `/services/${sev1.services[0]!.id}`,
+    );
   });
 });
