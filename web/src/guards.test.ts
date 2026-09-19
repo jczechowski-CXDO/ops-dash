@@ -30,8 +30,12 @@ function walk(dir: string, exts: string[], acc: string[] = []): string[] {
 // literal patterns it searches for ('dangerouslySetInnerHTML', the credential
 // shapes, '[data-theme='), so without this exclusion each guard fails on its
 // own source. It ships in no bundle and renders nothing.
+const SELF = join(WEB, 'src', 'guards.test.ts');
 const src = () =>
-  walk(join(WEB, 'src'), ['.ts', '.tsx']).filter((f) => !f.endsWith('guards.test.ts'));
+  // Anchored to this exact path, not endsWith: the old form exempted ANY
+  // web/src/**/guards.test.ts from every guard, so a new file with that name
+  // in any subdirectory would have been silently unguarded.
+  walk(join(WEB, 'src'), ['.ts', '.tsx']).filter((f) => f !== SELF);
 const read = (p: string) => readFileSync(p, 'utf8');
 const rel = (p: string) => p.slice(REPO.length + 1).replace(/\\/g, '/');
 
@@ -41,7 +45,16 @@ describe('every colour is a token', () => {
     for (const file of src()) {
       if (file.endsWith('icons.generated.ts')) continue;
       read(file).split('\n').forEach((line, i) => {
-        if (/#[0-9a-fA-F]{3,8}\b/.test(line) && !line.includes('prototype literal')) {
+        // Only CSS hex lengths: 3, 4, 6 or 8 digits. The old {3,8} range matched
+        // any run, so the prototype's subject line "Outstanding invoice #88214"
+        // — five digits, plainly not a colour — failed the guard and forced a
+        // fixture to claim an exemption it should never have needed.
+        // The marker is scoped to #fff, which is the only literal the constraint
+        // actually allows (solid severity chips, the brand square, nav badges).
+        // Previously it whitelisted ANY hex on any line that mentioned it.
+        const hex = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/.exec(line);
+        const exempt = /#fff\b[^\n]*prototype literal/.test(line);
+        if (hex && !exempt) {
           offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
         }
       });
