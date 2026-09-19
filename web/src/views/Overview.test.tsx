@@ -10,6 +10,7 @@ import {
   severityFillColor,
   severityLabel,
   severityOnFillColor,
+  statusColor,
 } from '../theme/statusColor.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
 import Overview, {
@@ -471,7 +472,95 @@ describe('the severity chip is painted from the published fill-grade rungs', () 
 
   it('leaves the row accent on --main, which is the rung that grade is for', () => {
     at();
+    // The row IS the Card now (the testid moved onto it at 37cea35), so the
+    // accent is on the row element itself rather than on its first child.
     const row = screen.getAllByTestId('alert-row')[0]!;
-    expect(row.firstElementChild).toHaveStyle({ borderLeft: '3px solid var(--error-main)' });
+    expect(row).toHaveStyle({ borderLeft: '3px solid var(--error-main)' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The acknowledged/muted branch, reached from the DATA and not from a click
+// ---------------------------------------------------------------------------
+
+describe('a row acknowledged in the fixture renders acknowledged, with no interaction', () => {
+  /** INC-2286 (sev3) carries `ack`, INC-2288 carries `muted` — landed by
+   *  ops-fixtures at f1feaab for M-9. Both are read from the bundle rather than
+   *  named here, so this fails if the fixture drops them rather than passing
+   *  over a state nothing produces. */
+  const acked = sev1.incidents.find((i) => i.ack)!;
+  const mutedIncident = sev1.incidents.find((i) => i.muted)!;
+  const rowOf = (id: string) =>
+    screen.getAllByTestId('alert-row')[sev1.incidents.findIndex((i) => i.id === id)]!;
+
+  it('the fixture actually carries an acknowledged and a muted incident', () => {
+    // If M-9 is ever reverted, this says so in one line instead of leaving the
+    // assertions below vacuously true over an empty find().
+    expect(acked?.ack?.by).toBeTruthy();
+    expect(mutedIncident?.muted).toBeTruthy();
+    expect(acked.id).not.toBe(mutedIncident.id);
+  });
+
+  it('dims it and credits the actor the DATA names, not the one at the keyboard', () => {
+    at();
+    const row = rowOf(acked.id);
+    expect(row).toHaveStyle({ opacity: '0.45' });
+    expect(row).toHaveTextContent(`Acknowledged by ${acked.ack!.by}`);
+    // The whole point of the ruling: this row was acknowledged by someone else.
+    expect(row).not.toHaveTextContent('Acknowledged by John H.');
+    expect(within(row).getByRole('button', { name: 'Acknowledged' })).toBeInTheDocument();
+  });
+
+  it('shows a muted row as muted, offering Unmute, from the data alone', () => {
+    at();
+    const row = rowOf(mutedIncident.id);
+    expect(row).toHaveStyle({ opacity: '0.45' });
+    expect(within(row).getByRole('button', { name: 'Unmute' })).toBeInTheDocument();
+  });
+
+  it('keeps an acknowledged incident open, counted and in place', () => {
+    at();
+    // README's product decision, now reachable without clicking: acknowledging
+    // must not hide work. The summary, the row count and the order are unmoved.
+    expect(screen.getAllByTestId('alert-row')).toHaveLength(sev1.incidents.length);
+    expect(screen.getByTestId('alert-summary')).toHaveTextContent(alertSummary(sev1.incidents));
+  });
+
+  it('dims exactly the rows the data marks, and no others', () => {
+    at();
+    const dimmed = screen
+      .getAllByTestId('alert-row')
+      .map((r) => r.style.opacity === '0.45');
+    // The relationship, over all five rows rather than the two interesting ones.
+    expect(dimmed).toEqual(sev1.incidents.map((i) => Boolean(i.ack || i.muted || i.resolvedAt)));
+  });
+
+  it('still credits the local actor when the acknowledgement happens here', () => {
+    at();
+    // The other direction of `incident.ack?.by ?? ACTOR`: INC-2292 carries no
+    // ack, so clicking it must credit the person at the keyboard.
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    expect(sev1.incidents[0]!.ack).toBeUndefined();
+    fireEvent.click(within(row).getByRole('button', { name: 'Acknowledge' }));
+    expect(screen.getAllByTestId('alert-row')[0]!).toHaveTextContent('Acknowledged by John H.');
+  });
+});
+
+describe('the testid hangs on the Card itself, not on a wrapper', () => {
+  it('makes each tile the grid item, carrying the card recipe directly', () => {
+    at();
+    // Task 10A photographs structure: with a wrapper, minmax()/gap applied to a
+    // box the Card did not control. The element the test selects must be the
+    // element that carries the border and the radius.
+    // Not the `border` shorthand: every tile also carries the 3px status accent
+    // on borderLeft, so the shorthand is deliberately not uniform.
+    screen.getAllByTestId('service-tile').forEach((tile, i) => {
+      expect(tile).toHaveStyle({
+        borderRadius: '12px',
+        background: 'var(--background-paper)',
+        borderLeft: `3px solid ${statusColor(tileLevel(sev1.services[i]!))}`,
+      });
+    });
+    expect(screen.getAllByTestId('alert-row')[0]).toHaveStyle({ borderRadius: '12px' });
   });
 });

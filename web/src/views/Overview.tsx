@@ -21,8 +21,17 @@ import {
 import { srOnly } from '../theme/srOnly.js';
 import type { HistoryRow } from '../fixtures/index.js';
 
-/** The actor credited by ack/mute/resolve in this milestone, as in the
- *  prototype. Milestone 4 replaces it with the signed-in user. */
+/**
+ * The actor credited for an action taken HERE, by clicking, as in the prototype.
+ * Milestone 4 replaces it with the signed-in user.
+ *
+ * It covers the local-click case ONLY. A row acknowledged in the DATA was
+ * acknowledged by somebody else, possibly days ago and possibly in another
+ * tool, and must credit `incident.ack.by` — see AlertRow. `?? ACTOR` there is
+ * not a fallback for a missing field, it is the distinction between the two
+ * paths, and it is what keeps the contract's `ack.by` load-bearing rather than
+ * carried and discarded at render.
+ */
 const ACTOR = 'John H.';
 
 /**
@@ -232,41 +241,41 @@ export function StatusStrip({ services }: { services: ServiceStatus[] }) {
 function ServiceTile({ service }: { service: ServiceStatus }) {
   const color = statusColor(tileLevel(service));
   return (
-    // The testid lives on a wrapper because `Card` takes no arbitrary props and
-    // it is not my file to widen. Reported rather than worked around by writing
-    // a local card.
-    <div data-testid="service-tile">
-      <Card
-        padding="10px 12px"
-        borderLeft={color}
-        style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span data-testid="tile-dot" style={DOT(7, color)} />
-          <Link
-            to={`/services/${service.id}`}
-            style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
-          >
-            {service.short}
-          </Link>
-          <span
-            style={{
-              marginLeft: 'auto',
-              fontSize: 11,
-              fontVariantNumeric: 'tabular-nums',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            {service.latencyMs} ms
-          </span>
-        </div>
-        <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
-          <span>Vendor: {service.vendor.label}</span>
-          <span>Ours: {service.ours.label}</span>
-        </div>
-      </Card>
-    </div>
+    // The hook is on the Card itself (ops-primitives added `data-testid` at
+    // 37cea35). It used to be on a wrapper <div>, which made the WRAPPER the grid
+    // item under repeat(auto-fill, minmax(190px,1fr)) and the Card its child — so
+    // the track sizing applied to a box the Card did not control.
+    <Card
+      data-testid="service-tile"
+      padding="10px 12px"
+      borderLeft={color}
+      style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span data-testid="tile-dot" style={DOT(7, color)} />
+        <Link
+          to={`/services/${service.id}`}
+          style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
+        >
+          {service.short}
+        </Link>
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 11,
+            fontVariantNumeric: 'tabular-nums',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          {service.latencyMs} ms
+        </span>
+      </div>
+      <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
+        <span>Vendor: {service.vendor.label}</span>
+        <span>Ours: {service.ours.label}</span>
+      </div>
+    </Card>
   );
 }
 
@@ -294,72 +303,81 @@ function AlertRow({
 }) {
   const color = severityColor(incident.severity);
   const dimmed = state.ack || state.muted || state.resolved;
+  // Resolving is click-only in this milestone — the contract carries no
+  // `resolvedBy` — so it credits the person at the keyboard. Acknowledgement can
+  // arrive either way, so it credits whoever the data names and falls back to
+  // the local actor only when the acknowledgement happened here.
   const credit = state.resolved
     ? `Resolved by ${ACTOR}`
     : state.ack
-      ? `Acknowledged by ${ACTOR}`
+      ? `Acknowledged by ${incident.ack?.by ?? ACTOR}`
       : null;
   const meta = credit ? [credit, ...incident.metaParts] : incident.metaParts;
 
   return (
-    <div data-testid="alert-row" style={dimmed ? { opacity: 0.45 } : {}}>
-      <Card
-        padding="11px 14px"
-        borderLeft={color}
-        style={{ display: 'grid', gridTemplateColumns: '52px 1fr auto', gap: 14, alignItems: 'center' }}
+    <Card
+      data-testid="alert-row"
+      padding="11px 14px"
+      borderLeft={color}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '52px 1fr auto',
+        gap: 14,
+        alignItems: 'center',
+        ...(dimmed ? { opacity: 0.45 } : {}),
+      }}
+    >
+      {/* G3 HIGH-1. The chip is filled with the `-dark` rung, not README:77's
+          `-main`, and its word takes the theme-aware `-contrast` token rather
+          than a literal white. Both are the lead's ruling, recorded here so
+          Task 11's fidelity pass reads the chip as a decision rather than as
+          drift from the prototype: white on `--warning-main` is 2.40:1, and a
+          literal white collapses further in the dark palette, where `-dark`
+          lightens. The 3px row accent beside it stays `-main` (severityColor),
+          which is the rung that grade is for. */}
+      <span
+        style={{
+          width: 52,
+          height: 22,
+          borderRadius: 6,
+          background: severityFillColor(incident.severity),
+          color: severityOnFillColor(incident.severity),
+          fontSize: 11,
+          fontWeight: 700,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
       >
-        {/* G3 HIGH-1. The chip is filled with the `-dark` rung, not README:77's
-            `-main`, and its word takes the theme-aware `-contrast` token rather
-            than a literal white. Both are the lead's ruling, recorded here so
-            Task 11's fidelity pass reads the chip as a decision rather than as
-            drift from the prototype: white on `--warning-main` is 2.40:1, and a
-            literal white collapses further in the dark palette, where `-dark`
-            lightens. The 3px row accent beside it stays `-main` (severityColor),
-            which is the rung that grade is for. */}
-        <span
-          style={{
-            width: 52,
-            height: 22,
-            borderRadius: 6,
-            background: severityFillColor(incident.severity),
-            color: severityOnFillColor(incident.severity),
-            fontSize: 11,
-            fontWeight: 700,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+        {severityLabel(incident.severity)}
+      </span>
+
+      <div style={{ minWidth: 0 }}>
+        {/* L-12: the TITLE is the click target, not the card. A `Card` with
+            onClick takes role="button", and nesting the three action buttons
+            inside a role="button" is as invalid for assistive technology as a
+            nested <button>. */}
+        <Link
+          to={`/incidents/${incident.id}`}
+          style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
         >
-          {severityLabel(incident.severity)}
-        </span>
+          {incident.title}
+        </Link>
+        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{meta.join(' · ')}</div>
+      </div>
 
-        <div style={{ minWidth: 0 }}>
-          {/* L-12: the TITLE is the click target, not the card. A `Card` with
-              onClick takes role="button", and nesting the three action buttons
-              inside a role="button" is as invalid for assistive technology as a
-              nested <button>. */}
-          <Link
-            to={`/incidents/${incident.id}`}
-            style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
-          >
-            {incident.title}
-          </Link>
-          <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{meta.join(' · ')}</div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <Button size="small" variant="outlined" color="neutral" onClick={onAck} disabled={state.ack}>
-            {state.ack ? 'Acknowledged' : 'Acknowledge'}
-          </Button>
-          <Button size="small" variant="text" color="neutral" onClick={onMute}>
-            {state.muted ? 'Unmute' : 'Mute'}
-          </Button>
-          <Button size="small" variant="text" color="success" onClick={onResolve} disabled={state.resolved}>
-            {state.resolved ? 'Resolved' : 'Resolve'}
-          </Button>
-        </div>
-      </Card>
-    </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Button size="small" variant="outlined" color="neutral" onClick={onAck} disabled={state.ack}>
+          {state.ack ? 'Acknowledged' : 'Acknowledge'}
+        </Button>
+        <Button size="small" variant="text" color="neutral" onClick={onMute}>
+          {state.muted ? 'Unmute' : 'Mute'}
+        </Button>
+        <Button size="small" variant="text" color="success" onClick={onResolve} disabled={state.resolved}>
+          {state.resolved ? 'Resolved' : 'Resolve'}
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -424,25 +442,24 @@ export default function Overview() {
       </Panel>
 
       {quiet ? (
-        <div data-testid="no-incidents">
-          <Card
-            padding="28px 24px"
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}
+        <Card
+          data-testid="no-incidents"
+          padding="28px 24px"
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}
+        >
+          <Icon name="task_alt" size={34} color="var(--success-main)" />
+          <div style={{ fontSize: 16, fontWeight: 700 }}>No active incidents</div>
+          <div
+            style={{
+              fontSize: 13,
+              color: 'var(--text-secondary)',
+              maxWidth: 460,
+              textWrap: 'pretty',
+            }}
           >
-            <Icon name="task_alt" size={34} color="var(--success-main)" />
-            <div style={{ fontSize: 16, fontWeight: 700 }}>No active incidents</div>
-            <div
-              style={{
-                fontSize: 13,
-                color: 'var(--text-secondary)',
-                maxWidth: 460,
-                textWrap: 'pretty',
-              }}
-            >
-              {emptyStateLine(services, bundle.recentHistory[0]?.closed)}
-            </div>
-          </Card>
-        </div>
+            {emptyStateLine(services, bundle.recentHistory[0]?.closed)}
+          </div>
+        </Card>
       ) : (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionHeading
