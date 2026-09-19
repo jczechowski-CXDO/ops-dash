@@ -1027,9 +1027,15 @@ shrinks every tick).
 ## Open at the end of M2
 
 - **NEEDS JOHN: the Jira Cloud hostname.** See above.
-- The `fetchJson` exemption is still **file-scoped** — one marker comment licenses a whole
-  file. `probe.ts` is the only user and its need is real, but the exemption is wider than
-  the need.
+- ~~The `fetchJson` exemption is file-scoped.~~ **Closed.** Line-scoped now: the marker must
+  sit on the offending line or the two above. Across the whole server that leaves exactly
+  one site needing a licence — `probe.ts`'s `fetchImpl: FetchLike = fetch` default
+  parameter — and the block comment above it stays as the argument rather than the licence.
+
+  It needed a prerequisite nobody had noticed: `stripComments` replaced a block comment
+  with a single space, collapsing forty lines into one, so **every offender line number a
+  guard reported after a doc comment was already wrong**. It now blanks characters and
+  keeps newlines.
 - `ack` and `muted` have no columns in `incidents`. They are M4. Incident ids are a hash
   of the condition precisely so an ack has a stable row to land on when the column exists.
 - `check_runs` has no retention policy and grows at one row per probe per minute forever.
@@ -1113,3 +1119,63 @@ derived ids proves the ingredients matched, and nothing else — not that the ri
 not that the identity was carried rather than coincidentally re-derived. Verify a derived id
 against a literal or an independent re-derivation, and verify the *behaviour* against a fact
 the id does not encode.
+
+
+## Gate G2 — closed with accepted findings, then all of them fixed anyway (2026-09-19)
+
+The reviewer's eight findings were all real and all reproduced before being written down.
+Six were fixed the same session; the two it marked "accepted" turned out to be cheap once
+the poller could tell a failed read from a successful one, so they were fixed too.
+
+Worth separating what the gate was *for* from what it found. It was asked three questions
+about the poller. It answered all three, and then found something none of them named:
+**the poller's definition of success was wrong**, because it had been written against a
+convention — throw on failure — that this codebase had deliberately abandoned two waves
+earlier. Nothing in the poller's own tests could see it. The tested path was the one
+production never takes.
+
+## The security review changed the standard of evidence
+
+M1's review was a reasoned threat model. M2's reproduced things:
+
+- a 300 MB response measured at **1.29 GB of RSS in 1.0 second** on loopback, which is
+  what made a body cap non-negotiable rather than a nice-to-have
+- a working redirect from a status feed into `http://127.0.0.1/latest/meta-data/`, whose
+  body came back as **a clean un-degraded `SourceResult`**, indistinguishable from a good
+  vendor read
+- the file-scoped guard exemption demonstrated in both directions with a probe file
+
+None of those were arguable afterwards. A finding with a number attached gets fixed in the
+session it was found; a finding with a category name gets a ticket. Both reviews were
+competent — the difference was the evidence, and it is worth asking any future reviewer
+for the reproduction rather than the reasoning.
+
+## Convergence as a signal
+
+Twice in this milestone two agents reached the same answer independently, from opposite
+sides, each knowing only that the other had answered differently:
+
+- **the severity codec** — throw on the write path, degrade loudly on the read path
+- **correlate on the newest attempt, never on the stale payload** — the engine recommended
+  it; the lead had already built it; G2 found the same thing from the store's end as HIGH 4
+
+Neither was in any plan. Both are now rules. When parallel agents disagree, the plan is
+usually ambiguous; when they converge after disagreeing about mechanism, the rule is
+usually right. That is a cheaper signal than a third review and it costs nothing to notice.
+
+## Still open after M2, for whoever picks up M3
+
+- **NEEDS JOHN: the Jira Cloud hostname**, and the §7 Sev2 prose question. Both above.
+- **A source whose timer silently stops still classifies as `healthy`.** `SourceStatus` now
+  carries `intervalMs`, so the API *can* classify staleness at >3x interval — it is not yet
+  wired. This is the last place in the chain where something broken reads calm.
+- **Security MEDIUM-3**: adapters ship vendor-authored `url` strings that nothing parses,
+  and `web/src/lib/safeUrl.ts` is still called by nothing. Goes live at M4 wiring, but the
+  cheap fix belongs in the adapters, before the store.
+- **Deep-nesting is inert only by accident**: every adapter replaces `data` with a flat
+  `Vendor` before `db.ts` stringifies it. An M3 adapter that stores a raw vendor body
+  re-arms it.
+- **`check_runs` has no retention** — 263 MB/year measured at M2 cadence, unbounded.
+- **Nothing has ever run unattended.** Every claim about the long-lived process is reasoned
+  from the code, not observed. The first M3 task should be to leave it running for a day
+  and look at what it did.
