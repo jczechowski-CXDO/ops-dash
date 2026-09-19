@@ -277,9 +277,21 @@ computed `tileLevel` on *both* sides, making them tautological about the very th
 The cure is to **read the expected values off the fixtures by hand**. A test that derives its
 expectation using the code under test can only ever confirm the code agrees with itself.
 
-Corollary, from the same finding: "assert it over both worlds" sometimes has no page-level
-route. The strip does not render in sev1 at all — README § 1 gives sev1 the tile grid — so the
-component had to be exported and rendered directly to reach the second world.
+Stated in the strong form: **an assertion may not call the thing it is asserting about, even
+transitively.** That is the rule the `isAffirmed`/`allOperational` drift guard already obeys —
+it compares two independently-reachable definitions against each other rather than one
+definition against itself.
+
+**And run the battery against the world where the two candidates differ.** This is the other
+half and it is equally load-bearing: the quiet fixtures could not have distinguished
+`vendor.level` from `tileLevel` no matter how good the assertions were, because in quiet every
+`ours` half is operational so the two agree for all seven services. Two independent conditions
+had to coincide for that bug to hide — a fixture world where the candidates agree, *and*
+assertions computed with the function under test — and removing either one would have caught it.
+
+Corollary: "assert it over both worlds" sometimes has no page-level route. The strip does not
+render in sev1 at all — README § 1 gives sev1 the tile grid — so the component had to be
+exported and rendered directly to reach the second world.
 
 ## The no-second-dark-palette guard catches prose, not just code
 
@@ -380,6 +392,23 @@ looking for something broken on screen and find nothing.
 - **Both demo worlds must be photographed.** `?demo=quiet` / `?demo=sev1` works in a production
   build; the footer control does not, because it is `import.meta.env.DEV`-gated and stripped.
   Without the query parameter all 28 baselines would be sev1-only (G2 HIGH-2).
+
+## Why publishing beat deduplicating
+
+Four cross-agent seams went through one arbitration point and came back as one published
+definition each: `statusColor` (and the three rung-pickers that grew out of it), `ageLabel`,
+`srOnly`, `isAffirmed`. The pattern is worth naming precisely, because the obvious reading of it
+is wrong.
+
+**In every case the duplicate copy was correct when it was written.** Nobody made a mistake.
+The copies failed because **two correct copies diverge the moment either premise moves** — and
+on this project the premises moved constantly: `unknown` stopped being an edge case, `-main`
+stopped being good enough for text, an optional field stopped being absent. Each shift
+invalidated one copy and not the other, silently, because both had been right.
+
+That is why the fix was always to publish one definition rather than to correct a copy, and why
+the drift guard — asserting that a derived function equals its definition across several
+shapes — matters more than any individual correction.
 
 ## The published API Wave 3 builds on
 
