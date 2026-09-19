@@ -35,3 +35,6 @@ Thumbs.db
 # Superseded design bundle. The extracted design_handoff_it_ops_dashboard/ is the
 # committed source of record; the archives are not tracked.
 *.zip
+
+# SDD workspace (scratch, per-plan)
+.superpowers/
