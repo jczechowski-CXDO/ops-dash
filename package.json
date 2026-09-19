@@ -1,0 +1,29 @@
+{
+  "name": "ops-dash",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.14.1" },
+  "workspaces": ["shared", "web"],
+  "scripts": {
+    "dev": "npm run dev --workspace @ops-dash/web",
+    "build": "npm run build --workspace @ops-dash/web",
+    "preview": "npm run preview --workspace @ops-dash/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b shared web",
+    "icons": "npm run icons --workspace @ops-dash/web",
+    "fonts": "npm run fonts --workspace @ops-dash/web"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0",
+    "@playwright/test": "^1.49.0"
+  }
+}

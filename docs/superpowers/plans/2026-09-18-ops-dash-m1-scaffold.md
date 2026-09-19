@@ -334,11 +334,19 @@ coverage/
 ```json
 {
   "extends": "../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "noEmit": true, "types": ["vitest/globals"] },
-  "include": ["src", "vitest.setup.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["vitest/globals"]
+  },
+  "include": ["src", "vitest.setup.ts", "e2e", "playwright.config.ts", "vite.config.ts"],
   "references": [{ "path": "../shared" }]
 }
 ```
+
+`web` deliberately drops `rootDir`, `outDir` and `composite` from the base config. With `rootDir: "src"` set, `tsc -b` fails `TS6059` the moment `vitest.setup.ts` — which lives beside `src`, not inside it — is included, and the same would happen later for `e2e/` and `playwright.config.ts`. `web` emits nothing (Vite builds it) and nothing references it, so none of those three options buys anything. `shared` keeps them, because `web` references `shared` and a referenced project must be composite.
 
 - [ ] **Step 3: Configure Vite and Vitest**
 

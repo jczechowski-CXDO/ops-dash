@@ -1,0 +1,21 @@
+# This repo is authored on Windows and built on Linux. Normalise line endings in
+# the repository so a checkout on either platform produces the same bytes, and so
+# a cross-platform diff is about code rather than about CRLF.
+* text=auto eol=lf
+
+# Binary — never touched, never normalised.
+*.woff2   binary
+*.woff    binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.zip     binary
+*.pdf     binary
+*.pfx     binary
+
+# Playwright baselines are binary and are compared byte-wise. Keep git out of them.
+web/e2e/**/*.png binary
+
+# Generated. Collapsed in diffs and never merged by hand.
+web/src/components/aurora/icons.generated.ts linguist-generated=true
+package-lock.json                            linguist-generated=true merge=binary

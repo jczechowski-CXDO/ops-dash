@@ -1,0 +1,19 @@
+{
+  "name": "@ops-dash/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/extract-icons.mjs",
+    "fonts": "node scripts/vendor-fonts.mjs"
+  },
+  "dependencies": {
+    "@ops-dash/shared": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^7.1.0"
+  }
+}

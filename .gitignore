@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+coverage/
 
 # Local data store — SQLite file and its WAL companions
 *.sqlite
