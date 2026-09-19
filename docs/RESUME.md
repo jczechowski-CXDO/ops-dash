@@ -1,7 +1,8 @@
 # Resume here — ops-dash
 
-Last updated 2026-09-19. **Milestone 1 is under construction. Task 1 of 15 is done and
-committed; Task 2 is next.** Read this file, then the plan, then start at "Pick up here".
+Last updated 2026-09-19. **Milestone 1 is under construction. Wave 0 (Tasks 1, 2, 3, 3A) is
+done, committed and reviewed; gate G0 is closed with accepted findings. Wave 1 is next.**
+Read this file, then the plan, then start at "Pick up here".
 
 This file is the single entry point. Everything needed to continue lives in git — there is no
 state on the machine this was started on that you need.
@@ -58,11 +59,17 @@ Linux notes:
 
 ## Pick up here
 
-**Task 2 — the frozen contract.** Plan section `### Task 2: The frozen contract`. It writes
-`shared/src/contracts.ts` from the amended `DATA_CONTRACTS.md`, verbatim, then freezes it.
+**Wave 1 — Tasks 4 and 5, two agents in parallel.** `ops-primitives` builds the eight
+primitives, the five shared dashboard components and `theme/statusColor.ts`; `ops-fixtures`
+builds the prototype-derived fixture modules. Disjoint ownership; dispatch both together, then
+run gate G1.
 
-Then Task 3 (self-hosted tokens/fonts/icons), then Task 3A (the nine repository guards), which
-closes Wave 0. Tag `wave-0` and run review gate G0 before Wave 1.
+Two things to carry into that brief that are not in the plan. `tsconfig.base.json` sets
+**`exactOptionalPropertyTypes: true`**, so `{ empty: undefined }` is a type *error* — an
+optional field must be absent, not explicitly undefined; this will hit `ops-fixtures` first.
+And **`Table`'s `Column<R>` must keep `key: keyof R & string`** — relaxing it to `string` for
+convenience silently re-opens defect G-4, where a column keyed `dur` against a field named
+`duration` renders empty cells with no error.
 
 The plan's "Teams and file ownership" section defines five waves, the agent per task, and the
 review gate that closes each wave. Waves 1 and 3 are parallel — two agents and four agents
@@ -86,6 +93,72 @@ web/src/main.tsx        one-line boot — Task 6 replaces it
 
 Nothing else exists. No contract, no assets, no fonts, no icons, no primitives, no fixtures,
 no shell, no views, no tests, no guards.
+
+## Gate G0 — closed with accepted findings (2026-09-19)
+
+Wave 0 is complete and reviewed. **Fixed and verified** at this gate: BLOCKER B-1
+(`npm run typecheck` had been exiting 2 since Task 3A — `@types/node` was installed
+nowhere and nothing caught it, because Vitest transpiles `web` without typechecking
+and `vite build` does not typecheck either, so `npm test` and `npm run build` both
+stayed green over a workspace that did not compile); H-1 (the milestone's only HTML
+sink was caller-controllable — `Icon.tsx` spread `{...rest}` *after*
+`dangerouslySetInnerHTML`, so `<Icon {...props} />` could inject arbitrary markup and
+the guard could not see it, since it greps for a literal string a spread does not
+contain); HIGH-3 (`web/index.html` — the file that ships, and the file Task 11A edits
+— sat outside the outbound guard's scope); H-2 (redaction guards read `src/fixtures`
+only, so `web/src/fixtures.ts` with a real UPN passed all nine); the tautology hazard;
+the multiset hole; the conditional sink exemption; and both survivors of a ten-mutation
+battery against `contracts.test.ts`.
+
+The contract itself was audited twice, independently: 126 field lines on each side of
+`DATA_CONTRACTS.md` ↔ `contracts.ts`, zero asymmetric difference, all four amendment
+comments intact. Re-running `extract-icons.mjs` reproduces `icons.generated.ts`
+byte-identically, so the committed artefact is genuinely generated.
+
+**Accepted rather than fixed.** These are the written acceptance the plan's review-gate
+rule requires. A gate is not closed because findings were recorded — only because they
+were fixed or explicitly accepted, and these are the accepted ones.
+
+| # | Finding | Owner | Deadline |
+|---|---|---|---|
+| 1 | `guards.test.ts:44` — the `prototype literal` marker is unscoped: it whitelists any hex on any line, not just `#fff` on chips/brand/badges | lead | before Wave 3 |
+| 2 | `guards.test.ts:34` — self-exclusion by `endsWith`, so any `web/src/**/guards.test.ts` is exempt from every guard; anchor to the exact path | lead | before Wave 3 |
+| 3 | Colour/palette guard scope — blind to `.css` under `web/src`, and **no colour or dark-palette guard covers `public/` at all**. Not a live risk for Waves 1-3 (nothing under `web/src` writes a stylesheet; everything is inline style + `var(--*)`), but Task 11A creates `web/public/app.css` | lead | `web/src` half → G1 brief; `public/` half → **before Task 11A** |
+| 4 | `guards.test.ts` — nothing asserts the ten guards are still collected; rename or relocate the file and they vanish silently | lead | none |
+| 5 | `ops-security.md` tools vs Task 11A's Files list | lead | **fixed at G0 close** |
+| 6 | `ops-e2e.md` ownership claim vs the plan's table | lead | **fixed at G0 close** |
+| 7 | Nine LOW items (see below) | as cited | — |
+
+LOW, carried: credential guard skips `web/scripts/*.mjs`, `.json` and `e2e/`; network
+guard misses `import('node:https')`, `new Image().src` and `<link>`/`@import` in JSX;
+**nothing links `Incident.serviceId` to a `ServiceStatus.id`, so `/services/:id` can
+render blank → G1 fixture test**; `BlockedMessage.reason` collapses to `string` in the
+type system, so the Email view needs a default branch → G3; `Icon.tsx` throws and
+unmounts the subtree on an unknown `name`, with no fallback glyph; pin the Aurora
+bundle by SHA-256 at Task 11A; `export type *` exports no runtime values, which matters
+at M2.
+
+Items 5 and 6 were fixed at the gate rather than carried, along with two LOW agent-
+definition defects: `ops-primitives` did not claim `web/src/theme/statusColor.ts`,
+which the ownership table grants it, and `ops-contract` described an amendment
+procedure its read-only tools cannot perform — it now states that it verifies and
+reports while the lead performs the edit, so a change to a frozen file always passes
+through a second pair of hands.
+
+## Three further plan defects, found by running it
+
+Beyond the six the plan already records:
+
+| # | Defect | Ruling |
+|---|---|---|
+| G-7 | Task 3A's guards cannot run under jsdom at all. The G-1 fix (`fileURLToPath`) throws `The URL must be of scheme file`, because Vite hands jsdom an `http://` `import.meta.url`. | Pin the file to the node environment with a `@vitest-environment node` docblock. These guards read the filesystem and never touch the DOM. |
+| G-8 | `walk()` on `src/fixtures` throws ENOENT in Wave 0; the plan predicted a vacuous pass. | `walk()` tolerates a missing directory. Superseded in part: the redaction guards now scan all of `web/src`, which dissolves the ambiguity. |
+| G-9 | Three guards fail on their own source, since the file necessarily contains the patterns it greps for. The plan exempts `guards.test.ts` from one of the nine, not the other three. | Exempt the guard file once, centrally, and document why. |
+
+Also wrong in the plan, and load-bearing: **Task 3 Step 8's `Icon.tsx` has the unsafe
+prop-spread ordering of H-1.** Regenerating from the plan reintroduces the injection
+point. Task 3A's expected output for `grep -c viewBox` is 11; the true value is 12,
+because the `Record<IconName, …>` type line also contains the word.
 
 ## Six plan defects found and fixed before/while building
 

@@ -8,7 +8,7 @@ description: >
   SectionHeading), plus theme/statusColor.ts. Use for Task 4, for any later 
   change to web/src/components/**, and for G1 findings against the 
   primitives. Owns web/src/components/** EXCEPT aurora/Icon.tsx and 
-  aurora/icons.generated.ts.
+  aurora/icons.generated.ts, PLUS web/src/theme/statusColor.ts.
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 # Aurora primitives specialist

@@ -6,7 +6,7 @@ description: >
   tests, and the real offline proof (app rendering with the network 
   disabled). Use for Task 10A, for re-baselining after an intentional visual 
   change, and for diagnosing a flaky or failing baseline. Owns web/e2e/** and 
-  playwright.config.ts.
+  web/playwright.config.ts, and the Playwright scripts in the root package.json.
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 # Playwright and visual-fidelity specialist

@@ -21,6 +21,11 @@ to run the amendment procedure.
 its amendment log — with John's approval; then `contracts.ts`; then the consumers.
 Never the other way round, and never just the code.
 
+You hold read-only tools, deliberately. You do not execute that procedure — you
+verify it was followed, and you report precisely what an amendment would have to
+change. The lead performs the edits, so that a change to a frozen file always
+passes through a second pair of hands.
+
 ## What you verify
 
 - **Field-for-field conformance** between `contracts.ts` and `DATA_CONTRACTS.md`:
