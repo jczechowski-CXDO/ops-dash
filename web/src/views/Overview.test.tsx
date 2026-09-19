@@ -4,9 +4,22 @@ import { MemoryRouter } from 'react-router';
 import type { ServiceStatus } from '@ops-dash/shared';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
-import { allOperational, isAffirmed } from '../theme/statusColor.js';
+import {
+  allOperational,
+  isAffirmed,
+  severityFillColor,
+  severityOnFillColor,
+} from '../theme/statusColor.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
-import Overview, { alertSummary, listState, statusTally, stripOverline, tileLevel } from './Overview.js';
+import Overview, {
+  StatusStrip,
+  alertSummary,
+  listState,
+  statusPhrase,
+  statusTally,
+  stripOverline,
+  tileLevel,
+} from './Overview.js';
 
 /**
  * PLAN DEFECT (Task 7 Step 1). The plan's helper renders `<Overview />` alone and
@@ -304,5 +317,147 @@ describe('an empty list is a designed state, not a blank area', () => {
 
   it('asks Panel for the ready state when there is', () => {
     expect(listState(3, 'nothing here')).toEqual({ kind: 'ready' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G3: colour is never the sole carrier of meaning
+// ---------------------------------------------------------------------------
+
+describe('a strip pill announces its status, not just its name', () => {
+  it('reads the service and its state as one phrase, for every pill', () => {
+    at('quiet');
+    const pills = screen.getAllByTestId('service-pill');
+    expect(pills).toHaveLength(quiet.services.length);
+    // Every pill, derived — not the two interesting ones. A pill whose dot said
+    // one thing and whose text said another would fail here.
+    pills.forEach((pill, i) => {
+      const s = quiet.services[i]!;
+      expect(pill).toHaveTextContent(`${s.short}, ${statusPhrase(tileLevel(s))}`);
+    });
+  });
+
+  it('names WHICH services are the unknown ones the overline only counts', () => {
+    at('quiet');
+    // The group overline says "2 UNKNOWN". Without this, that is all a
+    // screen-reader user ever learns: two of seven, and no way to find out which.
+    const unknown = screen
+      .getAllByTestId('service-pill')
+      .filter((p) => p.textContent?.includes('status unknown'));
+    expect(unknown.map((p) => p.getAttribute('href'))).toEqual(['/services/m365', '/services/zendesk']);
+    expect(unknown).toHaveLength(statusTally(quiet.services).unknown);
+  });
+
+  it('puts the status in text, not in the dot, and leaves the dot --main', () => {
+    at('quiet');
+    const pill = screen.getAllByTestId('service-pill')[0]!;
+    // The ruling was explicitly NOT to darken the dot.
+    expect(within(pill).getByTestId('pill-dot')).toHaveStyle({ background: 'var(--text-disabled)' });
+    // Visually hidden, still announced: clip-path, never display:none, which
+    // would take it back out of the accessibility tree.
+    const hidden = pill.querySelector('span[style*="clip-path"]');
+    expect(hidden).toHaveTextContent('status unknown');
+    expect(pill.querySelector('span[style*="display: none"]')).toBeNull();
+  });
+});
+
+describe('the announced phrase cannot drift from the colour beside it', () => {
+  // Both worlds, as asked: quiet and sev1 put different levels on the pills, and
+  // sev1 reaches degraded, outage and maintenance, which quiet never does.
+  it.each(shapes)('$name: a phrase reading "operational" means exactly isAffirmed', ({ services }) => {
+    for (const s of services) {
+      expect(statusPhrase(tileLevel(s)) === 'operational').toBe(isAffirmed(s));
+    }
+  });
+
+  it.each(shapes)('$name: every service gets a non-empty phrase', ({ services }) => {
+    for (const s of services) {
+      expect(statusPhrase(tileLevel(s)).trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Read off the fixtures by hand, NOT computed with `tileLevel` — an expectation
+   * derived by calling the function under test agrees with any level that
+   * function picks, which is how "announce the vendor half only" passed the first
+   * version of this suite. Each line below is a claim about both halves:
+   * m365 is vendor-`unknown` with our probes failing and must announce OUR
+   * failure, not the vendor's silence; zendesk is vendor-`unknown` with our
+   * probes passing and must announce the silence; helpjuice is announced
+   * maintenance with everything green; proofpoint is vendor-degraded with our
+   * probes failing.
+   */
+  const SEV1_ANNOUNCED: [string, string][] = [
+    ['Microsoft 365', 'not responding'],
+    ['Proofpoint', 'not responding'],
+    ['Jira', 'operational'],
+    ['Zendesk', 'status unknown'],
+    ['Helpjuice', 'in scheduled maintenance'],
+    ['Claude', 'operational'],
+    ['OpenAI', 'operational'],
+  ];
+
+  it('announces the worse of the two halves, rendered over the sev1 list', () => {
+    render(
+      <MemoryRouter>
+        <StatusStrip services={sev1.services} />
+      </MemoryRouter>,
+    );
+    const pills = screen.getAllByTestId('service-pill');
+    expect(pills).toHaveLength(SEV1_ANNOUNCED.length);
+    pills.forEach((pill, i) => {
+      const [name, phrase] = SEV1_ANNOUNCED[i]!;
+      expect(pill).toHaveTextContent(`${name}, ${phrase}`);
+    });
+  });
+
+  it('announces the same phrases the quiet page renders, over the quiet list', () => {
+    render(
+      <MemoryRouter>
+        <StatusStrip services={quiet.services} />
+      </MemoryRouter>,
+    );
+    // Quiet differs from sev1 on exactly the four services whose halves differ.
+    expect(screen.getAllByTestId('service-pill').map((p) => p.textContent)).toEqual([
+      'Microsoft 365, status unknown',
+      'Proofpoint, operational',
+      'Jira, operational',
+      'Zendesk, status unknown',
+      'Helpjuice, operational',
+      'Claude, operational',
+      'OpenAI, operational',
+    ]);
+  });
+});
+
+describe('the severity chip uses the fill-grade rungs, not --main and not white', () => {
+  it('fills with severityFillColor and writes with severityOnFillColor', () => {
+    at();
+    const chip = screen.getAllByText('SEV 1')[0]!;
+    expect(chip).toHaveStyle({
+      background: severityFillColor(1),
+      color: severityOnFillColor(1),
+    });
+    expect(chip).toHaveStyle({ background: 'var(--error-dark)' });
+  });
+
+  it('carries no literal white, which collapses in the dark palette', () => {
+    at();
+    for (const chip of [...screen.getAllByText('SEV 1'), ...screen.getAllByText('SEV 2'), screen.getByText('SEV 3')]) {
+      // No literal colour of ANY kind — asserted as "contains no #", which is
+      // both stronger than naming the white hex and the only form that does not
+      // itself trip the repository's no-literal-hex guard. Writing the forbidden
+      // value in order to forbid it is the same self-reference that makes a
+      // redaction test fail on its own source.
+      expect(chip.getAttribute('style')).not.toMatch(/#/);
+      expect(chip.getAttribute('style')).not.toMatch(/\bwhite\b/i);
+      expect(chip.getAttribute('style')).toMatch(/-contrast\)/);
+    }
+  });
+
+  it('leaves the row accent on --main, which is the rung that grade is for', () => {
+    at();
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    expect(row.firstElementChild).toHaveStyle({ borderLeft: '3px solid var(--error-main)' });
   });
 });

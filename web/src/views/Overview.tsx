@@ -9,7 +9,16 @@ import { Sparkline } from '../components/Sparkline.js';
 import { Button } from '../components/aurora/Button.js';
 import { Icon } from '../components/aurora/Icon.js';
 import { Table, type Column } from '../components/aurora/Table.js';
-import { allOperational, isAffirmed, severityColor, severityLabel, statusColor } from '../theme/statusColor.js';
+import {
+  allOperational,
+  isAffirmed,
+  severityColor,
+  severityFillColor,
+  severityLabel,
+  severityOnFillColor,
+  statusColor,
+} from '../theme/statusColor.js';
+import { srOnly } from '../theme/srOnly.js';
 import type { HistoryRow } from '../fixtures/index.js';
 
 /** The actor credited by ack/mute/resolve in this milestone, as in the
@@ -41,6 +50,30 @@ export function tileLevel(service: ServiceStatus): StatusLevel {
   return RANK[service.vendor.level] >= RANK[service.ours.level]
     ? service.vendor.level
     : service.ours.level;
+}
+
+/**
+ * A service's state as a phrase, for the strip pill's text equivalent.
+ *
+ * Written to be read immediately after the service name — "Microsoft 365,
+ * status unknown" — rather than as a standalone fragment, because that is how a
+ * screen reader runs the pill together.
+ *
+ * A Record, not a switch with a fallback: an eighth `StatusLevel` stops this
+ * compiling instead of announcing nothing. `unknown` says so in words for the
+ * same reason `statusColor` gives it the disabled grey — the absence of
+ * information is a state, and must be stated rather than omitted.
+ */
+const STATUS_PHRASE: Record<StatusLevel, string> = {
+  operational: 'operational',
+  maintenance: 'in scheduled maintenance',
+  unknown: 'status unknown',
+  degraded: 'degraded',
+  outage: 'not responding',
+};
+
+export function statusPhrase(level: StatusLevel): string {
+  return STATUS_PHRASE[level];
 }
 
 /**
@@ -133,8 +166,16 @@ const DOT = (size: number, color: string) => ({
 
 /** README § 1 quiet 1: one bordered radius-12 row, padding 10px 14px, wrapping
  *  flex, gap 8px; one pill per service at radius 999, padding 4px 9px, with a
- *  6px dot and an 11.5px/600 name. */
-function StatusStrip({ services }: { services: ServiceStatus[] }) {
+ *  6px dot and an 11.5px/600 name.
+ *
+ *  Exported only so the test can render it over the SEV1 service list as well.
+ *  The strip itself is quiet-only, and in the quiet world every service's `ours`
+ *  half is operational — so vendor-level and rolled-up-level agree for all seven
+ *  and no assertion made through the page can tell them apart. Rendered over the
+ *  sev1 list, m365 is vendor-`unknown` with our probes failing, which is exactly
+ *  the pair that separates them. A mutation announcing only `s.vendor.level`
+ *  survived the whole suite until this existed. */
+export function StatusStrip({ services }: { services: ServiceStatus[] }) {
   return (
     <Card padding="10px 14px" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
       <div
@@ -164,8 +205,18 @@ function StatusStrip({ services }: { services: ServiceStatus[] }) {
             color: 'var(--text-primary)',
           }}
         >
+          {/* G3: the dot stays --main and stays 6px. It was not the colour that
+              was wrong, it was being the ONLY thing that said anything: a pill
+              was [dot][name], so a screen-reader user heard "Zendesk" and learned
+              nothing, while the group overline told them two of seven were
+              unknown without saying which two. Darkening the dot would have
+              satisfied a contrast checker and left them exactly as blind. The
+              status is now text, so the dot is redundant decoration; it is an
+              empty span, which carries no accessible name, so it needs no
+              aria-hidden to stay out of the accessibility tree. */}
           <span data-testid="pill-dot" style={DOT(6, statusColor(tileLevel(s)))} />
           <span style={{ fontSize: 11.5, fontWeight: 600 }}>{s.short}</span>
+          <span style={srOnly}>{`, ${statusPhrase(tileLevel(s))}`}</span>
         </Link>
       ))}
     </Card>
@@ -257,13 +308,21 @@ function AlertRow({
         borderLeft={color}
         style={{ display: 'grid', gridTemplateColumns: '52px 1fr auto', gap: 14, alignItems: 'center' }}
       >
+        {/* G3 HIGH-1. The chip is filled with the `-dark` rung, not README:77's
+            `-main`, and its word takes the theme-aware `-contrast` token rather
+            than a literal white. Both are the lead's ruling, recorded here so
+            Task 11's fidelity pass reads the chip as a decision rather than as
+            drift from the prototype: white on `--warning-main` is 2.40:1, and a
+            literal white collapses further in the dark palette, where `-dark`
+            lightens. The 3px row accent beside it stays `-main` (severityColor),
+            which is the rung that grade is for. */}
         <span
           style={{
             width: 52,
             height: 22,
             borderRadius: 6,
-            background: color,
-            color: '#fff' /* prototype literal */,
+            background: severityFillColor(incident.severity),
+            color: severityOnFillColor(incident.severity),
             fontSize: 11,
             fontWeight: 700,
             display: 'inline-flex',
