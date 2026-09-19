@@ -88,6 +88,20 @@ test.describe('interactive states', () => {
       await shotAround(page, sw, `state-switch-off-${theme}.png`);
     });
 
+    test(`dimmed alert rows · ${theme}`, async ({ page }) => {
+      // README:81: "Acknowledged / muted / resolved rows drop to opacity: 0.45
+      // and the meta line is prefixed ... The row stays in place." G1 accepted
+      // finding M-9: this treatment had no data to render from until the
+      // fixtures gave INC-2286 an ack and INC-2288 a mute. A tight clip of each
+      // one, so the state has a baseline of its own and not only a few hundred
+      // pixels inside a full-page capture of the Overview.
+      await visit(page, '/', 'sev1', theme);
+      const dimmed = page.getByTestId('alert-row').filter({ hasText: 'Acknowledged by' });
+      await shotAround(page, dimmed.first(), `state-alertrow-acked-${theme}.png`);
+      const muted = page.getByTestId('alert-row').filter({ hasText: 'Muted by' });
+      await shotAround(page, muted.first(), `state-alertrow-muted-${theme}.png`);
+    });
+
     test(`service tile · ${theme}`, async ({ page }) => {
       await visit(page, '/', 'sev1', theme);
       const tile = page.getByTestId('service-tile').first();
@@ -159,6 +173,45 @@ test.describe('measurements from README § "Screens / views"', () => {
     await expect(chip).toHaveCSS('font-size', '11px');
     await expect(chip).toHaveCSS('font-weight', '700');
   });
+});
+
+// ---------------------------------------------------------------------------
+// M-9 coverage, asserted rather than assumed.
+//
+// "The state is on the page" and "a capture contains the state" are different
+// claims, and this project has been bitten by the gap between them repeatedly.
+// This test names the captures that carry README:81's acknowledged/muted
+// treatment and fails if any of them stops carrying it — which is what would
+// happen if a fixture lost its `ack`, if the opacity changed, or if someone
+// pointed the incident route at an id with neither field.
+// ---------------------------------------------------------------------------
+test('the acknowledged and muted treatment is inside a capture, not merely on a page', async ({
+  page,
+}) => {
+  // Capture 1: overview-sev1-{light,dark}-{project}. Full-page, so "below the
+  // fold" cannot hide a row — asserted below against the document height
+  // rather than against the viewport.
+  await visit(page, '/', 'sev1', 'light');
+  const acked = page.getByTestId('alert-row').filter({ hasText: 'Acknowledged by m.reyes@example.com' });
+  const muted = page.getByTestId('alert-row').filter({ hasText: 'Muted by j.hart@example.com' });
+  await expect(acked).toHaveCount(1);
+  await expect(muted).toHaveCount(1);
+  await expect(acked.first()).toHaveCSS('opacity', '0.45');
+  await expect(muted.first()).toHaveCSS('opacity', '0.45');
+  for (const row of [acked.first(), muted.first()]) {
+    const within = await row.evaluate(
+      (el) => el.getBoundingClientRect().bottom + window.scrollY <= document.documentElement.scrollHeight,
+    );
+    expect(within, 'row falls outside the full-page capture').toBe(true);
+  }
+
+  // Capture 2 and 3: incident-acked-sev1-* and incident-muted-sev1-*. These are
+  // the two routes whose hero changed at 76a72f4, when IncidentDetail stopped
+  // seeding its buttons from false and started reading the record.
+  await visit(page, '/incidents/INC-2286', 'sev1', 'light');
+  await expect(page.getByRole('button', { name: /Acknowledged/ })).toBeDisabled();
+  await visit(page, '/incidents/INC-2288', 'sev1', 'light');
+  await expect(page.getByRole('button', { name: 'Unmute service' })).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

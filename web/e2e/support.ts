@@ -17,13 +17,27 @@ export const THEMES: readonly Theme[] = ['light', 'dark'];
  *  one and half the application is unbaselined. */
 export const WORLDS: readonly World[] = ['quiet', 'sev1'];
 
-/** The seven routes, in nav order. `/incidents/INC-2291` exists only in sev1;
- *  in quiet the same URL is the "nothing is open" empty state, which is the
- *  correct quiet-world rendering of that route and is baselined as such. */
+/** The seven routes, in nav order, plus two more incidents.
+ *
+ * `/incidents/INC-2291` exists only in sev1; in quiet the same URL is the
+ * "nothing is open" empty state, which is the correct quiet-world rendering of
+ * that route and is baselined as such.
+ *
+ * INC-2286 and INC-2288 are here for a specific reason. INC-2291 carries
+ * neither `ack` nor `muted`, so a route list containing only it photographs
+ * none of README:81's acknowledged/muted treatment — the branch G1 accepted
+ * finding **M-9** was about, which shipped unrendered until the fixtures gave
+ * INC-2286 an ack and INC-2288 a mute so that it would appear on screen.
+ * Closing M-9 in the fixtures and leaving it unbaselined would reopen it one
+ * layer up. These two are also the only routes whose hero moved at 76a72f4,
+ * when IncidentDetail stopped seeding its buttons from `false` and started
+ * reading ack/muted from the record. */
 export const ROUTES = [
   ['overview', '/'],
   ['service', '/services/m365'],
   ['incident', '/incidents/INC-2291'],
+  ['incident-acked', '/incidents/INC-2286'],
+  ['incident-muted', '/incidents/INC-2288'],
   ['entra', '/entra'],
   ['endpoints', '/endpoints'],
   ['email', '/email'],
