@@ -488,10 +488,14 @@ function AlertRow({
       </div>
 
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <Button size="small" variant="outlined" color="neutral" onClick={onAck} disabled={state.ack}>
+        {/* primary, not neutral: the prototype renders Acknowledge and Mute in
+            rgb(0,128,190) — measured from its own DOM, not read off the image.
+            The plan's Task 7 text names the variants and not the colours, so
+            neutral was a reasonable default and the prototype overrules it. */}
+        <Button size="small" variant="outlined" color="primary" onClick={onAck} disabled={state.ack}>
           {state.ack ? 'Acknowledged' : 'Acknowledge'}
         </Button>
-        <Button size="small" variant="text" color="neutral" onClick={onMute}>
+        <Button size="small" variant="text" color="primary" onClick={onMute}>
           {state.muted ? 'Unmute' : 'Mute'}
         </Button>
         <Button size="small" variant="text" color="success" onClick={onResolve} disabled={state.resolved}>
