@@ -239,6 +239,48 @@ the dev server serves the page with local-only asset references and audited `dis
 `https://` strings are React error-message URLs in vendor code), but nobody has *seen* the
 shell. Worth a look before G2 closes.
 
+## A test cannot forbid a literal by containing it
+
+**Four occurrences, three agents, three different guards.** `Endpoints.test.tsx`'s
+`/CXDO-LT-/` against the redaction guard; `w1-primitives`' `[data-theme="dark"]` regex against
+the no-second-dark-palette guard; and the same `not.toMatch(/#fff|white/)` chip assertion
+written **independently by two agents** against the no-literal-hex guard.
+
+The instinct to prove an absence by naming the thing is strong, and it is wrong for three
+separate reasons:
+
+1. **It trips the guard**, because naming the forbidden value puts it in the tree.
+2. **It is the weaker claim.** "Not `#fff`" permits `rgb(255,255,255)`, `hsl(0 0% 100%)` and
+   every other wrong colour. "Not `CXDO-LT-`" permits every un-redacted hostname nobody thought
+   to enumerate — which is exactly how G-12 got through.
+3. **It survives the remedy changing.** Swap the token later and the negative assertion still
+   passes over a broken screen.
+
+**Assert what the value must be, not what it must not be.** And note the trap one level on,
+which `w3-service` and `w3-overview` both found independently: **equality against the published
+helper is not sufficient either**, because both sides then call the same function and the test
+passes if the view and the test are wrong together. Pin it with one concrete expected value
+beside the equality, or with an inequality against the rung it must *not* be. The pair is the
+guard; either alone is not.
+
+The general form, and the reason every one of these was the code being the wrong shape rather
+than the guard having a blind spot: **when a guard fires on a test file, the test is usually
+asserting the wrong thing.**
+
+## Never compute an expectation with the function under test
+
+`w3-overview`'s strip test announced `vendor.level` instead of the rolled-up `tileLevel` and
+**passed all 61 tests**. Two reasons compounded: the strip renders only in quiet, where every
+`ours` half is operational so the two levels agree for all seven services — and the assertions
+computed `tileLevel` on *both* sides, making them tautological about the very thing they named.
+
+The cure is to **read the expected values off the fixtures by hand**. A test that derives its
+expectation using the code under test can only ever confirm the code agrees with itself.
+
+Corollary, from the same finding: "assert it over both worlds" sometimes has no page-level
+route. The strip does not render in sev1 at all — README § 1 gives sev1 the tile grid — so the
+component had to be exported and rendered directly to reach the second world.
+
 ## The no-second-dark-palette guard catches prose, not just code
 
 Third time this has bitten, so it is written down. The contrast test needed to locate the dark
