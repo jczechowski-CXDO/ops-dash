@@ -123,8 +123,9 @@ describe('HTML sinks', () => {
         read(f).includes('dangerouslySetInnerHTML') &&
         !f.endsWith('aurora/Icon.tsx') &&
         // Icon.test.tsx proves the sink cannot be hijacked via prop spread, so it
-        // must name it. That test is the reason this exclusion is safe to make.
-        !f.endsWith('aurora/Icon.test.tsx'),
+        // must name it. The exemption is conditional on that proof still being
+        // present: strip the assertion and the file stops being exempt.
+        !(f.endsWith('aurora/Icon.test.tsx') && read(f).includes("not.toContain('<image')")),
     );
     expect(offenders.map(rel)).toEqual([]);
   });
@@ -190,7 +191,20 @@ describe('the contract test cannot become a tautology', () => {
     const testSource = read(CONTRACT_TEST).split('@contract-shapes-end')[0]!;
     const spec = fields(testSource).map((f) => f.replace(/^data: number$/, 'data: T'));
 
-    const missing = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
+    // Counted multiset, not set membership. `label: string` appears under both
+    // vendor and ours, so an includes() check leaves the survivor matching and a
+    // deletion passes. Compare occurrence counts so duplicates are load-bearing.
+    const missing = (a: string[], b: string[]) => {
+      const left = new Map<string, number>();
+      for (const x of b) left.set(x, (left.get(x) ?? 0) + 1);
+      const out: string[] = [];
+      for (const x of a) {
+        const n = left.get(x) ?? 0;
+        if (n === 0) out.push(x);
+        else left.set(x, n - 1);
+      }
+      return out;
+    };
 
     expect({
       inDocNotInImpl: missing(doc, impl),

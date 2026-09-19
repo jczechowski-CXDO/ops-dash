@@ -299,6 +299,11 @@ describe('contracts — log sources, rules and integrations', () => {
 // Everything BELOW this marker uses deliberately malformed object literals as
 // hostile probes — they are not contract shapes and must not be read as such.
 // The three-way field-set guard in web/src/guards.test.ts stops extracting here.
+//
+// Moving a contract shape below this line does NOT silence the guard — it removes
+// that shape from the comparison, and the document side immediately reports every
+// one of its fields as missing. The sentinel can only ever hide an ADDITION below
+// it, which is not a weakening. Hoisting the sentinel itself fails loudest of all.
 // ---------------------------------------------------------------------------
 
 describe('contracts — optional fields reject an explicit undefined', () => {
