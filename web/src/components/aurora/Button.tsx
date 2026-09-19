@@ -39,11 +39,18 @@ const COLORS: Record<Color, { main: string; dark: string; contrast: string; bord
     contrast: 'var(--warning-contrast)',
     border: 'var(--warning-states-outlinedborder)',
   },
+  // HIGH-1. The bundle maps neutral to text-primary / grey-900 / common-white,
+  // mixing three unrelated families. In the dark palette that puts
+  // rgb(235,242,245) behind rgb(255,255,255) — 1.13:1, an invisible label that
+  // reappears only on hover, because grey-900 happens to be dark in both themes.
+  // Aurora already ships a theme-aware neutral family and the bundle simply does
+  // not use it. Using it resolves to 16.28:1 / 18.48:1 in light and
+  // 13.05:1 / 15.79:1 in dark, at rest and on hover.
   neutral: {
-    main: 'var(--text-primary)',
-    dark: 'var(--grey-grey-900)',
-    contrast: 'var(--common-white)',
-    border: 'var(--divider)',
+    main: 'var(--neutral-main)',
+    dark: 'var(--neutral-dark)',
+    contrast: 'var(--neutral-contrast)',
+    border: 'var(--neutral-states-outlinedborder)',
   },
 };
 

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Card } from './Card.js';
 import { StatCard } from './StatCard.js';
 import { Sparkline } from './Sparkline.js';
@@ -19,6 +19,24 @@ describe('Card', () => {
   it('takes an accent border on the left when asked', () => {
     const { container } = render(<Card borderLeft="var(--error-main)">body</Card>);
     expect(container.firstElementChild).toHaveStyle({ borderLeft: '3px solid var(--error-main)' });
+  });
+});
+
+describe('Card', () => {
+  it('a clickable card is operable by keyboard, not mouse only', () => {
+    const onClick = vi.fn();
+    render(<Card onClick={onClick}>tile</Card>);
+    const card = screen.getByRole('button', { name: 'tile' });
+    expect(card).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(card, { key: 'Enter' });
+    fireEvent.keyDown(card, { key: ' ' });
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('a non-clickable card is not announced as a control and is not focusable', () => {
+    render(<Card>plain</Card>);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText('plain')).not.toHaveAttribute('tabindex');
   });
 });
 
@@ -97,6 +115,19 @@ describe('Panel', () => {
     render(<Panel state={{ kind: 'empty', message: 'No incidents published' }}><p>rows</p></Panel>);
     expect(screen.getByText('No incidents published')).toBeInTheDocument();
     expect(screen.queryByText('rows')).not.toBeInTheDocument();
+  });
+
+  it('announces that it is loading rather than going silent', () => {
+    render(<Panel state={{ kind: 'loading' }}><p>real data</p></Panel>);
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('aria-busy', 'true');
+    expect(status).toHaveTextContent('Loading');
+  });
+
+  it('never phrases an unparseable timestamp as an age', () => {
+    render(<Panel state={{ kind: 'stale', source: 'Endpoint Central', fetchedAt: 'garbage' }}><p>x</p></Panel>);
+    expect(screen.getByRole('alert')).toHaveTextContent('Endpoint Central data is of unknown age');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('an unknown age old');
   });
 
   it('reports the age of the last good data on an error that has some', () => {

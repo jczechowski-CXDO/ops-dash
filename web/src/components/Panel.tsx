@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Alert } from './aurora/Alert.js';
 import { Skeleton } from './aurora/Skeleton.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 
 /**
  * The per-source states the prototype does not cover and README "What the
@@ -14,21 +15,42 @@ export type PanelState =
   | { kind: 'stale'; source: string; fetchedAt: string }
   | { kind: 'error'; source: string; message: string; fetchedAt?: string };
 
-// Intl.RelativeTimeFormat is a built-in. No date library is in the budget.
-const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
-
-export function ageLabel(iso: string, now: number = Date.now()): string {
-  const minutes = Math.round((now - new Date(iso).getTime()) / 60_000);
-  if (minutes < 60) return rtf.format(-minutes, 'minute').replace(' ago', '');
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return rtf.format(-hours, 'hour').replace(' ago', '');
-  return rtf.format(-Math.round(hours / 24), 'day').replace(' ago', '');
+function unreachable(state: never): never {
+  throw new Error(`Panel: unhandled state ${JSON.stringify(state)}`);
 }
+
+/** '14 minutes old' / 'of unknown age' — never 'an unknown age old'. */
+function agePhrase(iso: string): string {
+  const age = ageLabel(iso);
+  return age === UNKNOWN_AGE ? 'of unknown age' : `${age} old`;
+}
+
+/** Off-screen but announced. No stylesheet exists under web/src to hold a class. */
+const SR_ONLY = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
 
 export function Panel({ state, children }: { state: PanelState; children: ReactNode }) {
   switch (state.kind) {
+    // The Skeleton itself stays decorative (aria-hidden). The fact that a panel
+    // is loading is a property of the panel, not of the grey boxes, so the live
+    // region lives here: without it a screen reader hears silence and then, some
+    // seconds later, content appearing with no explanation.
     case 'loading':
-      return <Skeleton variant="text" lines={state.rows ?? 4} />;
+      return (
+        <div role="status" aria-busy="true" aria-live="polite">
+          <span style={SR_ONLY}>Loading</span>
+          <Skeleton variant="text" lines={state.rows ?? 4} />
+        </div>
+      );
 
     // No children. An error with nothing cached must not render a zero that
     // reads as a measurement.
@@ -36,7 +58,7 @@ export function Panel({ state, children }: { state: PanelState; children: ReactN
       return (
         <Alert severity="error" title={`${state.source} is unavailable`}>
           {state.message}
-          {state.fetchedAt ? ` · last good data ${ageLabel(state.fetchedAt)} old` : ''}
+          {state.fetchedAt ? ` · last good data ${agePhrase(state.fetchedAt)}` : ''}
         </Alert>
       );
 
@@ -59,12 +81,16 @@ export function Panel({ state, children }: { state: PanelState; children: ReactN
     case 'stale':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <Alert severity="warning">{`${state.source} data is ${ageLabel(state.fetchedAt)} old`}</Alert>
+          <Alert severity="warning">{`${state.source} data is ${agePhrase(state.fetchedAt)}`}</Alert>
           {children}
         </div>
       );
 
     case 'ready':
       return <>{children}</>;
+
+    // M-1: without this a new PanelState member compiles clean and renders blank.
+    default:
+      return unreachable(state);
   }
 }

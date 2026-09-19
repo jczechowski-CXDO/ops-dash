@@ -3,6 +3,12 @@
 // className/style/rest passthrough. Variant names follow the published
 // signature: 'rect'/'circle' rather than the bundle's 'rectangular'/'circular'.
 //
+// M-8: the Skeleton stays aria-hidden. It is decorative — the grey boxes carry
+// no information — and "this panel is loading" is a property of the panel, not
+// of its placeholder, so the live region belongs in Panel.tsx, which owns the
+// loading state and announces it there. Marking the boxes themselves as a status
+// region would make every skeleton in a panel announce independently.
+//
 // The bundle ships its @keyframes in an inline <style> child. That element's
 // text is part of the subtree's textContent, and a loading placeholder must
 // render no text at all, so the <style> is dropped. The animation property is

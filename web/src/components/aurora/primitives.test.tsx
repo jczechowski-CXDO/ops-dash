@@ -24,6 +24,19 @@ describe('Button', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it('pairs each contained variant with the contrast token of the SAME family', () => {
+    // HIGH-1 was a neutral button whose background came from --text-primary and
+    // whose label came from --common-white: 1.13:1 in the dark palette, an
+    // invisible label that reappeared only on hover. Mixing families is the bug
+    // class, so assert the pairing rather than a ratio that a unit test in jsdom
+    // cannot resolve (jsdom does not compute var() against the token sheet).
+    for (const color of ['primary', 'success', 'error', 'warning', 'neutral'] as const) {
+      const { container } = render(<Button variant="contained" color={color}>Go</Button>);
+      expect(container.innerHTML).toContain(`var(--${color}-main)`);
+      expect(container.innerHTML).toContain(`var(--${color}-contrast)`);
+    }
+  });
+
   it('uses only token colours', () => {
     const { container } = render(<Button color="success" variant="text">Resolve</Button>);
     expect(container.innerHTML).toContain('var(--success');
@@ -157,6 +170,12 @@ describe('Skeleton', () => {
 });
 
 describe('Alert', () => {
+  it('conveys severity to assistive tech, not by hue alone', () => {
+    render(<Alert severity="warning">disk filling</Alert>);
+    // role="alert" alone announces urgency but not which kind.
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Warning:/);
+  });
+
   it('renders as a live region with its title and body', () => {
     render(<Alert severity="warning" title="Stale data">Endpoint Central data is 14 minutes stale</Alert>);
     const alert = screen.getByRole('alert');
