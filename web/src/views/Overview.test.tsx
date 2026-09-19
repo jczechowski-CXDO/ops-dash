@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { render, screen, within, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import type { ServiceStatus } from '@ops-dash/shared';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
@@ -931,8 +931,11 @@ describe('the whole tile is the click target (G3½ LOW-4)', () => {
   it('navigates from a click anywhere on the tile, not only on the name', () => {
     at();
     const tile = screen.getAllByTestId('service-tile')[0]!;
-    // The sparkline: about as far from the name link as a tile gets.
-    fireEvent.click(within(tile).getByTestId('tile-spark'));
+    // The status dot: a child that is not the link, so this exercises the
+    // bubble rather than a direct hit on the Card. Deliberately NOT a testid
+    // added for the purpose — a wrapper introduced for a test hook is what made
+    // every tile 6px taller than README § 1 specifies.
+    fireEvent.click(within(tile).getByTestId('tile-dot'));
     expect(screen.getByTestId('landed-on-service')).toBeInTheDocument();
   });
 
@@ -945,5 +948,57 @@ describe('the whole tile is the click target (G3½ LOW-4)', () => {
       'href',
       `/services/${sev1.services[0]!.id}`,
     );
+  });
+});
+
+describe('one click is one history entry (G3½)', () => {
+  // Making the whole tile clickable while the name stayed an anchor meant one
+  // click ran BOTH: the Link navigated and the bubble reached the Card handler,
+  // which navigated again. Two entries went onto the stack, so one Back press
+  // left you where you were — the Back button appearing broken, on the
+  // commonest path into a service.
+  //
+  // Asserted as the user-visible claim rather than by counting: MemoryRouter
+  // keeps its own stack and never touches window.history, so a count would be
+  // measuring the wrong thing. "Back returns to the Overview" cannot be
+  // satisfied by a double push.
+  function BackButton() {
+    const navigate = useNavigate();
+    return <button data-testid="go-back" onClick={() => navigate(-1)} />;
+  }
+
+  const render1 = (mode: DemoMode = 'sev1') =>
+    render(
+      <MemoryRouter initialEntries={[`/?demo=${mode}`]}>
+        <ThemeProvider>
+          <DemoModeProvider>
+            <BackButton />
+            <Routes>
+              <Route path="/" element={<Overview />} />
+              <Route path="/services/:id" element={<div data-testid="landed-on-service" />} />
+            </Routes>
+          </DemoModeProvider>
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+  const oneBackReturnsHome = (get: (tile: HTMLElement) => HTMLElement) => {
+    render1();
+    fireEvent.click(get(screen.getAllByTestId('service-tile')[0]!));
+    expect(screen.getByTestId('landed-on-service')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('go-back'));
+    return screen.queryByTestId('view-overview') !== null;
+  };
+
+  // Two tests rather than two calls in one: Testing Library cleans up between
+  // tests, not between renders, and the second render would leave two of
+  // everything in the document. Both paths are asserted because the bug was the
+  // two firing TOGETHER — either one alone looks correct.
+  it('one Back returns to the Overview after clicking the name', () => {
+    expect(oneBackReturnsHome((t) => within(t).getByRole('link'))).toBe(true);
+  });
+
+  it('one Back returns to the Overview after clicking the card', () => {
+    expect(oneBackReturnsHome((t) => within(t).getByTestId('tile-dot'))).toBe(true);
   });
 });

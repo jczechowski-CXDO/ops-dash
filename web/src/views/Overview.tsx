@@ -350,7 +350,13 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span data-testid="tile-dot" style={DOT(7, color)} />
         <Link
-          to={`/services/${service.id}`}
+          to={href}
+          // The card navigates too, so without this one click ran both: the
+          // anchor AND the Card handler, pushing two history entries and making
+          // Back look broken on the commonest path into a service. Stopping the
+          // bubble is the fix; removing the anchor would cost middle-click and
+          // open-in-new-tab, which is why the anchor stays.
+          onClick={(e) => e.stopPropagation()}
           style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
         >
           {service.short}
@@ -366,9 +372,7 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
           {service.latencyMs} ms
         </span>
       </div>
-      <div data-testid="tile-spark">
-        <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
-      </div>
+      <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
         <span>Vendor: {service.vendor.label}</span>
         <span>Ours: {service.ours.label}</span>
