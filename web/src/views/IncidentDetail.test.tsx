@@ -4,6 +4,12 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { Incident } from '@ops-dash/shared';
+import {
+  severityColor,
+  severityFillColor,
+  severityLabel,
+  severityOnFillColor,
+} from '../theme/statusColor.js';
 import { fixtures, serviceById, type DemoMode } from '../fixtures/index.js';
 import IncidentDetail from './IncidentDetail.js';
 
@@ -74,25 +80,32 @@ describe('IncidentDetail', () => {
     }
   });
 
-  // G3 HIGH-1. The chip is the one place in these two views that paints a word
-  // ON a colour, and it is the place the prototype's literal white came from.
-  // Both halves are asserted, in both directions: theme-aware tokens, and no
-  // hard-coded white, which is what collapses to 1.75:1 in the dark palette.
-  it('fills the severity chip and writes on it with theme-aware tokens', () => {
-    at('INC-2291');
-    const chip = screen.getByText('SEV 1');
-    expect(chip).toHaveStyle({ background: 'var(--error-dark)' });
-    expect(chip).toHaveStyle({ color: 'var(--error-contrast)' });
-    // Asserted POSITIVELY: every colour declaration on the chip resolves
-    // through a token. Naming the forbidden literal here would trip the repo's
-    // own no-literal-hex guard — the same trap the redaction guard sprang two
-    // commits ago — and this form is the stronger claim anyway, since it also
-    // rejects `white`, `rgb()` and any other hard-coded colour.
-    const decls = (chip.getAttribute('style') ?? '')
-      .split(';')
-      .filter((d) => /(^|\s)(color|background)\s*:/.test(d));
-    expect(decls, 'the chip declares exactly a fill and an on-fill colour').toHaveLength(2);
-    for (const d of decls) expect(d.trim()).toMatch(/:\s*var\(--/);
+  // G3 HIGH-1, asserted positively per the lead's ruling. The earlier form
+  // ("no literal white") named the forbidden literal and tripped the repo's own
+  // no-literal-hex guard — and it was the weaker claim anyway: "not white"
+  // permits every other wrong colour, and it would still pass if we swapped the
+  // contrast token and the chip went wrong. This asserts the chip IS the two
+  // published rungs, over every severity the fixtures carry, not just SEV 1.
+  //
+  // Both sides call the same helpers, so equality alone could not tell the fill
+  // rung from the decoration rung. The second assertion is what does that: the
+  // fill must NOT be severityColor, which is where the prototype's unreadable
+  // white-on---warning-main came from.
+  it('fills the severity chip and writes on it with the published rungs', () => {
+    for (const inc of fixtures.sev1.incidents) {
+      const { unmount } = at(inc.id);
+      const chip = screen.getByText(severityLabel(inc.severity));
+      const where = `${inc.id} (${severityLabel(inc.severity)})`;
+
+      expect(chip, where).toHaveStyle({
+        background: severityFillColor(inc.severity),
+        color: severityOnFillColor(inc.severity),
+      });
+      expect(chip, `${where}: the fill rung is not the decoration rung`)
+        .not.toHaveStyle({ background: severityColor(inc.severity) });
+
+      unmount();
+    }
   });
 
   it('renders the timeline newest first with kind-coloured dots', () => {
