@@ -1,5 +1,5 @@
 import type { Incident } from '@ops-dash/shared';
-import { afterBy, clock, clockOf, dayAgoAt, minutesAgo, span } from './time.js';
+import { afterBy, clock, clockOf, dayAgoAt, hoursAhead, minutesAgo, span } from './time.js';
 import {
   MAILFLOW_LAST_SUCCESS_MINUTES_AGO as LAST_SUCCESS,
   PROOFPOINT_OPENED_MINUTES_AGO as PP0,
@@ -165,12 +165,26 @@ export const sev1Incidents: Incident[] = [
       'Fourteen managed endpoints have not checked in for 21 days or more. Their patch and encryption state is unknown rather than compliant, so they are excluded from the compliance figures until they report.',
     metaParts: ['Endpoint Central', `opened yesterday ${clockOf(EPC_OPENED)}`, '9 laptops, 5 desktops'],
     ruleKey: 'stale',
-    /** Muted indefinitely (`until: null`), which is the distinction the
-     *  contract's `string | null` exists to express: this is not snoozed until
-     *  Tuesday, it is silenced until someone unmutes it. Coherent with the
-     *  `stale` rule being disabled — the fleet is being worked through by hand
-     *  and nobody wants a daily reminder of a number they already know. */
-    muted: { by: 'j.hart@example.com', until: null },
+    /** Muted until this afternoon, not indefinitely.
+     *
+     *  This reverses an earlier choice, deliberately. `until: null` is the more
+     *  interesting half of the contract's `string | null` in the abstract, but
+     *  only one form can be carried by a fixture and therefore baselined, and
+     *  the timed one is strictly more informative: "muted by … until 14:30"
+     *  renders everything the indefinite form does plus the expiry, so it
+     *  exercises more of the view. It is also the case Milestone 2 will hit
+     *  constantly — real mutes are "silence this for four hours" — and shipping
+     *  only the indefinite form would leave the timed branch first rendering in
+     *  M2 untested and unbaselined, which is the defect this whole exercise has
+     *  been about. The `null` case keeps its type-level coverage here and its
+     *  rendering coverage through constructed props, which is the weaker
+     *  position, correctly given to the less informative rendering.
+     *
+     *  `until` is an expiry, so it is the one incident timestamp that points
+     *  forward. The contract carries no `muted.at`, so "after the mute began"
+     *  is not expressible; the checkable constraints are that it is in the
+     *  future and later than the incident it silences, and both are asserted. */
+    muted: { by: 'j.hart@example.com', until: hoursAhead(4) },
     blastRadius: [
       { label: 'Agents stale', value: '14', note: 'of 612 managed endpoints', level: 'warning' },
       { label: 'Longest silence', value: '34 days', note: 'DEMO-LT-0412', level: 'error' },

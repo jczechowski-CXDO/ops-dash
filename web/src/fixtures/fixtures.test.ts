@@ -506,20 +506,38 @@ describe('the acknowledged and muted branches are reachable from a fixture', () 
     expect(acked[0]?.severity).toBe(3);
   });
 
-  it('mutes exactly one, and indefinitely, which is what `until: null` means', () => {
+  it('mutes exactly one, on a timer, so the view can say when it comes back', () => {
     const muted = fixtures.sev1.incidents.filter((i) => i.muted !== undefined);
     expect(muted.map((i) => i.id)).toEqual(['INC-2288']);
-    expect(muted[0]?.muted?.until).toBeNull();
+    // Timed, not indefinite: only one of the two forms can be carried by a
+    // fixture and baselined, and this is the one that renders more — the
+    // expiry as well as the actor. It is also the form M2 will meet constantly.
+    const until = muted[0]?.muted?.until;
+    expect(until).not.toBeNull();
+    expect(Number.isNaN(Date.parse(until ?? ''))).toBe(false);
     // Not the same row as the acknowledged one: one row carrying both states
     // tests neither cleanly.
     expect(muted[0]?.id).not.toBe('INC-2286');
+  });
+
+  it('expires the mute in the future, within a working day', () => {
+    // A mute whose expiry has passed is not a mute, and one measured in days is
+    // an indefinite mute wearing a timestamp. `until` is the only incident
+    // field that points forward, which is why it gets its own assertion.
+    const until = incidentById('sev1', 'INC-2288')?.muted?.until;
+    const hours = (Date.parse(until ?? '') - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(0);
+    expect(hours).toBeLessThanOrEqual(12);
   });
 
   it('never acknowledges or mutes an incident before it existed', () => {
     for (const i of fixtures.sev1.incidents) {
       const opened = Date.parse(i.openedAt);
       if (i.ack) expect(Date.parse(i.ack.at)).toBeGreaterThan(opened);
-      if (i.muted?.until) expect(Date.parse(i.muted.until)).toBeGreaterThan(opened);
+      if (i.muted?.until) {
+        expect(Date.parse(i.muted.until)).toBeGreaterThan(opened);
+        expect(Date.parse(i.muted.until)).toBeGreaterThan(Date.now());
+      }
     }
   });
 
