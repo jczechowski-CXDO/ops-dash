@@ -561,12 +561,13 @@ describe('the testid hangs on the Card itself, not on a wrapper', () => {
     // on borderLeft, so the shorthand is deliberately not uniform.
     screen.getAllByTestId('service-tile').forEach((tile, i) => {
       expect(tile).toHaveStyle({
-        borderRadius: '12px',
+        // 10, not the recipe's 12 — the documented tile/alert-row override.
+        borderRadius: '10px',
         background: 'var(--background-paper)',
         borderLeft: `3px solid ${statusColor(tileLevel(sev1.services[i]!))}`,
       });
     });
-    expect(screen.getAllByTestId('alert-row')[0]).toHaveStyle({ borderRadius: '12px' });
+    expect(screen.getAllByTestId('alert-row')[0]).toHaveStyle({ borderRadius: '10px' });
   });
 });
 
@@ -888,5 +889,29 @@ describe('an acknowledged row says when it was acknowledged', () => {
     const muted = sev1.incidents.find((i) => i.muted)!;
     expect(rowOf(acked.id)).toHaveTextContent(`${ageLabel(acked.ack!.at)} ago`);
     expect(rowOf(muted.id)).toHaveTextContent(`until ${clockOf(muted.muted!.until!)}`);
+  });
+});
+
+describe('tiles and alert rows take the radius-10 override (G3½ MEDIUM)', () => {
+  // README:60 gives the card recipe radius 12 and says it is "used everywhere";
+  // README § Screens/views and the plan both then carve out "radius 12 on cards,
+  // 10 on tiles and alert rows", and the prototype carries exactly two
+  // border-radius:10px rules — these two elements. The generic sentence had won
+  // by default because nothing asserted the override.
+  it('gives tiles and alert rows 10, and leaves other cards on the recipe', () => {
+    at();
+    for (const tile of screen.getAllByTestId('service-tile')) {
+      expect(tile).toHaveStyle({ borderRadius: '10px' });
+    }
+    for (const row of screen.getAllByTestId('alert-row')) {
+      expect(row).toHaveStyle({ borderRadius: '10px' });
+    }
+  });
+
+  it('does not sweep the override across every card', () => {
+    // The other half: "set 10 everywhere" would pass the test above and quietly
+    // restyle the whole app.
+    at('quiet');
+    expect(screen.getByTestId('status-strip')).not.toHaveStyle({ borderRadius: '10px' });
   });
 });

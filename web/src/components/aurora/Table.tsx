@@ -15,6 +15,12 @@ export type Column<R> = {
   label: string;
   align?: 'left' | 'right';
   width?: string;
+  /** Let this column give up width first, with an ellipsis, instead of pushing
+   *  the table past its container. Exactly one column per table should set it —
+   *  the one carrying free text. README § Tables promises the last column
+   *  survives a ~1000px content well; without this, a long subject line pushed
+   *  Email's REASON column past the card border and it was clipped mid-word. */
+  truncate?: boolean;
   render?: (value: R[keyof R & string], row: R) => ReactNode;
 };
 
@@ -103,6 +109,9 @@ function Row<R extends Record<string, unknown>>({
             color: 'var(--text-primary)',
             borderBottom: '1px solid var(--divider)',
             whiteSpace: 'nowrap',
+            ...(c.truncate
+              ? { overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 }
+              : {}),
           }}
         >
           {c.render ? c.render(row[c.key], row) : (row[c.key] as ReactNode)}

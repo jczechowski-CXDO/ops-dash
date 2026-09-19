@@ -48,7 +48,8 @@ export function reasonTone(reason: string): BlastMetric['level'] {
 const blockedColumns: Column<BlockedMessage>[] = [
   { key: 'at', label: 'Time', render: (_v, row) => ago(row.at) },
   { key: 'from', label: 'Sender' },
-  { key: 'subject', label: 'Subject' },
+  // The one free-text column, so it is the one that yields. See Column.truncate.
+  { key: 'subject', label: 'Subject', truncate: true },
   {
     key: 'reason',
     label: 'Reason',

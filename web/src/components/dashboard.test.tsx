@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Table } from './aurora/Table.js';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Card } from './Card.js';
 import { StatCard } from './StatCard.js';
@@ -172,5 +173,40 @@ describe('SectionHeading', () => {
     render(<SectionHeading meta="4 open · 1 Sev1">Active incidents</SectionHeading>);
     expect(screen.getByRole('heading', { name: 'Active incidents' })).toBeInTheDocument();
     expect(screen.getByText('4 open · 1 Sev1')).toBeInTheDocument();
+  });
+});
+
+describe('Column.truncate (G3½ HIGH — the Email table was clipped at 1000px)', () => {
+  // README § Tables: columns are capped so "the last column survives a ~1000px
+  // content well". Email's free-text Subject pushed REASON past the card border
+  // and it was clipped mid-word — "Credential phishi…" — which the 1000px
+  // baselines recorded. A column that yields with an ellipsis is the fix, and
+  // it has to be opt-in: making every cell truncate would collapse the short
+  // columns that are meant to hold their width.
+  type Row = { a: string; b: string };
+  const rows: Row[] = [{ a: 'x'.repeat(200), b: 'REASON' }];
+
+  it('gives up width with an ellipsis, and only on the column that asked', () => {
+    const { container } = render(
+      <Table<Row>
+        columns={[
+          { key: 'a', label: 'A', truncate: true },
+          { key: 'b', label: 'B' },
+        ]}
+        rows={rows}
+      />,
+    );
+    const [truncating, holding] = [...container.querySelectorAll('tbody td')];
+    expect(truncating).toHaveStyle({ textOverflow: 'ellipsis', overflow: 'hidden' });
+    expect(holding).not.toHaveStyle({ textOverflow: 'ellipsis' });
+  });
+
+  it('leaves every column alone when nothing opts in', () => {
+    const { container } = render(
+      <Table<Row> columns={[{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }]} rows={rows} />,
+    );
+    for (const cell of container.querySelectorAll('tbody td')) {
+      expect(cell).not.toHaveStyle({ textOverflow: 'ellipsis' });
+    }
   });
 });

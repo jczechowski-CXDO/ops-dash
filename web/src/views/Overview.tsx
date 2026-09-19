@@ -246,7 +246,11 @@ const DOT = (size: number, color: string) => ({
  *  survived the whole suite until this existed. */
 export function StatusStrip({ services }: { services: ServiceStatus[] }) {
   return (
-    <Card padding="10px 14px" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+    <Card
+      data-testid="status-strip"
+      padding="10px 14px"
+      style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}
+    >
       <div
         style={{
           fontSize: 10.5,
@@ -327,7 +331,12 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
       data-testid="service-tile"
       padding="10px 12px"
       borderLeft={color}
-      style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+      // Radius 10, not the card recipe's 12. README § Screens/views and the plan
+      // both say "radius 12 on cards, 10 on tiles and alert rows", and the
+      // prototype carries exactly two `border-radius:10px` rules — these two
+      // elements. README:60's "card recipe used everywhere" is the generic
+      // recipe; this is its one documented override.
+      style={{ display: 'flex', flexDirection: 'column', gap: 6, borderRadius: 10 }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span data-testid="tile-dot" style={DOT(7, color)} />
@@ -419,6 +428,8 @@ function AlertRow({
         gridTemplateColumns: '52px 1fr auto',
         gap: 14,
         alignItems: 'center',
+        // Radius 10 — the same documented override as the tile above.
+        borderRadius: 10,
         ...(dimmed ? { opacity: 0.45 } : {}),
       }}
     >
