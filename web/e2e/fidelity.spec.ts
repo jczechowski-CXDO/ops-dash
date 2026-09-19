@@ -168,24 +168,33 @@ test.describe('measurements from README § "Screens / views"', () => {
     await expect(clock).toHaveCSS('font-variant-numeric', 'tabular-nums');
   });
 
-  test('the tile sparkline occupies exactly the 26px it is specified at', async ({ page }) => {
+  test('the tile sparkline occupies 26px and leaves a 6px gap under it', async ({ page }) => {
     // README § 1, sev1 row 2: the latency sparkline is
-    // `<svg viewBox="0 0 100 26">` at `width:100%; height:26px`.
+    // `<svg viewBox="0 0 100 26">` at `width:100%; height:26px`, in a tile whose
+    // rows are separated by `gap:6`.
     //
-    // The SVG is 26. Its container is 32, because an SVG is `display: inline`
-    // and the wrapper div added for `data-testid="tile-spark"` gives it a
-    // 24px line box with descender space under it. Every tile is therefore 6px
-    // taller than the spec and everything below the tile grid shifts down —
-    // 11px on the Overview, visible in the baseline diff.
+    // Both halves are needed, and the second is the one with history. A
+    // `data-testid` wrapper around the SVG measured 32px around a 26px child —
+    // an SVG is `display: inline`, so the wrapper's 24px line box added
+    // descender space beneath it — which left the SVG itself correct at 26
+    // while every tile grew 6px and the whole Overview below the grid shifted
+    // down 11px. Measuring the gap from the SVG's own bottom edge to the next
+    // row catches that no matter how the extra space is introduced.
     //
-    // This is the same lesson as the comment already in Overview.tsx about the
-    // testid moving from a wrapper onto the Card: "pixel identical is not
-    // structurally identical", one level further down. `display: block` on the
-    // svg, or `line-height: 0` on the wrapper, closes it.
+    // This test has no unit-suite equivalent and cannot have one: jsdom has no
+    // layout engine, so every height it reports here is 0.
     await visit(page, '/', 'sev1', 'light');
-    const spark = page.getByTestId('tile-spark').first();
-    const box = await spark.boundingBox();
-    expect(box?.height).toBe(26);
+    const tile = page.getByTestId('service-tile').first();
+    const geometry = await tile.evaluate((el) => {
+      const svg = el.querySelector('svg')!;
+      const below = el.children[2]!;
+      return {
+        sparkHeight: svg.getBoundingClientRect().height,
+        gapBelow: below.getBoundingClientRect().top - svg.getBoundingClientRect().bottom,
+      };
+    });
+    expect(geometry.sparkHeight).toBe(26);
+    expect(geometry.gapBelow).toBe(6);
   });
 
   test('the severity chip is 52x22 at radius 6', async ({ page }) => {

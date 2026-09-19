@@ -13,7 +13,7 @@ was written on and is refused outright (G-16).
 ## The baselines are platform- and machine-sensitive
 
 148 PNGs, **generated on Linux** (Chromium 153.0.8010.12 / playwright v1243,
-Node 22.22.3) against **`cc42f8f`**, except the eight Overview-with-tiles captures, which are deliberately held at `97ca020` (see below). Record both whenever you regenerate: when
+Node 22.22.3) against **`679852e`**. Record both whenever you regenerate: when
 someone sees a diff they need to know whether the app changed or the renderer
 did, and the SHA is what separates those two questions. The filenames carry a `-linux` suffix, so a Windows or macOS run
 will not compare against them at all — it will report them missing, which is the
@@ -65,6 +65,15 @@ webfont is really the one painting (measured against a fallback stack, not just
 those is not cosmetic: a paused clock freezes the light→dark colour transition
 part-way, and the contrast sweep reported 14 failures that do not exist.
 
+**One test here has no unit-suite equivalent and cannot have one.** "The tile
+sparkline occupies 26px and leaves a 6px gap under it" is a layout claim, and
+jsdom has no layout engine — every height it reports is 0. That test is the only
+possible home for the defect it pins: a `data-testid` wrapper around the SVG
+measured 32px around a 26px child, because an SVG is `display: inline` and the
+wrapper's line box added descender space beneath it. The SVG stayed correct at
+26 while every tile grew 6px and the Overview below the grid shifted 11px. It is
+the one thing in this repo that only a browser can assert.
+
 Two limits of this suite, both measured rather than assumed, and both worth
 knowing before someone trusts a green run:
 
@@ -81,34 +90,22 @@ knowing before someone trusts a green run:
   by looking at the image, not by the run. `shotAround` now scrolls when needed
   and refuses to capture a region the element does not fit inside — and scrolls
   *conditionally*, because scrolling unconditionally moves every other capture
-  relative to the sticky header and rewrites baselines that were fine.
+  relative to the sticky header and rewrites baselines that were fine. The
+  lesson underneath: **a fix to the capture harness is itself a change that
+  moves baselines**, and needs the same "which moved and why" account as a
+  change to the app.
 
 `fidelity.spec.ts` also carries an explicit M-9 coverage test, which names the
 captures that hold the acknowledged/muted treatment and fails if any of them
 stops holding it. "The state is on the page" and "a capture contains the state"
 are different claims.
 
-## What is currently red
+## What is currently red — one test, by design
 
 - `security.spec.ts` "the content security policy is present…" — Task 11A adds
   the meta tag to `web/index.html`. Written now, deliberately failing, per the
   plan.
-Everything else here is a defect awaiting a fix in a file this task does not
-own, and is left red on purpose rather than relaxed:
 
-- `interaction.spec.ts` "the service name is a real link, and clicking it
-  navigates exactly once" — the name `<Link>` and the tile's `onClick` both
-  fire on one click. Measured: `history.length` 2 → 4, and one Back press leaves
-  you on the same page.
-- `fidelity.spec.ts` "the tile sparkline occupies exactly the 26px it is
-  specified at" — the `data-testid="tile-spark"` wrapper renders 32px around a
-  26px SVG (`display: inline` inside a 24px line box), so every tile is 6px
-  taller than README § 1 and the whole Overview below the grid shifts.
-- **Eight held captures**: `overview-sev1-*` (4) and `state-tile-*` (4 tests,
-  including a `state-tile-namefocus-*` baseline that does not exist yet). They
-  are stale against `cc42f8f` *on purpose* — regenerating them would make the
-  6px shift the acceptance criterion. They regenerate in one pass once the
-  sparkline wrapper is fixed.
-
-Both earlier reds are gone: `/email` fits at 1000px, and its subjects render in
-full again at 1440.
+Everything that was red here has been fixed upstream and regenerated: the 1000px
+clip, the always-truncating Subject column, the 6px tile shift and the
+double history entry. The only expected red is the CSP test above.

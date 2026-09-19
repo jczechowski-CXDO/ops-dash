@@ -26,7 +26,11 @@ test('a service tile opens the service it names, from anywhere on the tile', asy
   // if every tile navigated to the same wrong service.
   const name = (await tile.getByRole('link').first().innerText()).trim();
   expect(name.length).toBeGreaterThan(0);
-  await tile.getByTestId('tile-spark').click();
+  // The status dot: a child that is not the link, so this exercises the part of
+  // the tile that was dead before cc42f8f. It is an element that already
+  // existed — a hook added solely to give a test something to click is what made
+  // every tile 6px taller.
+  await tile.getByTestId('tile-dot').click();
   await expect(page).toHaveURL(/\/services\/[a-z0-9]+/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText(name);
 });
