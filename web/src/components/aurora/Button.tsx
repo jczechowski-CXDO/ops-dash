@@ -14,31 +14,39 @@ const SIZES: Record<Size, { height: number; padX: number; font: string; gap: num
   medium: { height: 36, padX: 16, font: '0.875rem', gap: 8 },
 };
 
-const COLORS: Record<Color, { main: string; dark: string; contrast: string; border: string }> = {
+const COLORS: Record<Color, { text: string; hover: string; contrast: string; border: string }> = {
   primary: {
-    main: 'var(--primary-main)',
-    dark: 'var(--primary-dark)',
+    text: 'var(--primary-dark)',
+    hover: 'var(--primary-darker)',
     contrast: 'var(--primary-contrast)',
     border: 'var(--primary-states-outlinedborder)',
   },
   success: {
-    main: 'var(--success-main)',
-    dark: 'var(--success-dark)',
+    text: 'var(--success-dark)',
+    hover: 'var(--success-darker)',
     contrast: 'var(--success-contrast)',
     border: 'var(--success-states-outlinedborder)',
   },
   error: {
-    main: 'var(--error-main)',
-    dark: 'var(--error-dark)',
+    text: 'var(--error-dark)',
+    hover: 'var(--error-darker)',
     contrast: 'var(--error-contrast)',
     border: 'var(--error-states-outlinedborder)',
   },
   warning: {
-    main: 'var(--warning-main)',
-    dark: 'var(--warning-dark)',
+    text: 'var(--warning-dark)',
+    hover: 'var(--warning-darker)',
     contrast: 'var(--warning-contrast)',
     border: 'var(--warning-states-outlinedborder)',
   },
+  // G3 re-verification: a Button label is TEXT, so every foreground here is the
+  // -dark rung, not -main. The bundle's -main is decoration grade: as an
+  // outlined/text label on light paper it measures success 3.40, warning 2.40,
+  // primary 4.35 — all under the 4.5 bar. `-dark` and `-darker` are both
+  // theme-aware and lighten in the dark palette, so the fix holds in both.
+  // Contained fills with -dark rather than -main for the same reason: white on
+  // --warning-main is 2.40.
+  //
   // HIGH-1. The bundle maps neutral to text-primary / grey-900 / common-white,
   // mixing three unrelated families. In the dark palette that puts
   // rgb(235,242,245) behind rgb(255,255,255) — 1.13:1, an invisible label that
@@ -47,8 +55,8 @@ const COLORS: Record<Color, { main: string; dark: string; contrast: string; bord
   // not use it. Using it resolves to 16.28:1 / 18.48:1 in light and
   // 13.05:1 / 15.79:1 in dark, at rest and on hover.
   neutral: {
-    main: 'var(--neutral-main)',
-    dark: 'var(--neutral-dark)',
+    text: 'var(--neutral-dark)',
+    hover: 'var(--neutral-darker)',
     contrast: 'var(--neutral-contrast)',
     border: 'var(--neutral-states-outlinedborder)',
   },
@@ -98,24 +106,31 @@ export function Button({
   };
 
   if (variant === 'contained') {
-    base.background = hover ? c.dark : c.main;
+    base.background = hover ? c.hover : c.text;
     base.color = c.contrast;
     base.boxShadow = hover ? 'var(--shadow-sm)' : 'var(--shadow-xs)';
   } else if (variant === 'outlined') {
-    base.background = hover ? `color-mix(in srgb, ${c.main} 8%, transparent)` : 'transparent';
-    base.color = c.main;
-    base.borderColor = hover ? c.main : c.border;
+    base.background = hover ? `color-mix(in srgb, ${c.text} 8%, transparent)` : 'transparent';
+    base.color = c.text;
+    base.borderColor = hover ? c.text : c.border;
   } else {
-    base.background = hover ? `color-mix(in srgb, ${c.main} 8%, transparent)` : 'transparent';
-    base.color = c.main;
+    base.background = hover ? `color-mix(in srgb, ${c.text} 8%, transparent)` : 'transparent';
+    base.color = c.text;
   }
 
   if (disabled) {
     base.background = variant === 'contained' ? 'var(--action-disabledbackground)' : 'transparent';
-    base.color = 'var(--text-disabled)';
+    // --text-disabled is 2.29:1 light / 2.78:1 dark and fails AA as text.
+    // WCAG exempts disabled CONTROLS, but our disabled buttons are not all
+    // affordances: "Acknowledged" is a completed STATE the operator is meant to
+    // read. Judged as content, it has to be legible, so this is --text-secondary
+    // (7.23 / 8.75 on paper, 5.69 / 6.10 on the disabled fill). It still reads as
+    // unavailable — de-emphasised colour, flat fill, not-allowed cursor — it just
+    // does not vanish.
+    base.color = 'var(--text-secondary)';
     base.borderColor = variant === 'outlined' ? 'var(--action-disabledbackground)' : 'transparent';
     base.boxShadow = 'none';
-    base.opacity = variant === 'contained' ? 1 : 0.7;
+    // No opacity multiplier: it would scale the contrast back down again.
   }
 
   return (

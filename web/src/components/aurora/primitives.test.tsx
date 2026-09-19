@@ -30,11 +30,62 @@ describe('Button', () => {
     // invisible label that reappeared only on hover. Mixing families is the bug
     // class, so assert the pairing rather than a ratio that a unit test in jsdom
     // cannot resolve (jsdom does not compute var() against the token sheet).
+    //
+    // The RUNG moved at G3 re-verification (-main was decoration grade and a
+    // button label is text); the FAMILY pairing is the invariant and is what
+    // this test has always been about, so it is updated rather than retired.
     for (const color of ['primary', 'success', 'error', 'warning', 'neutral'] as const) {
       const { container } = render(<Button variant="contained" color={color}>Go</Button>);
-      expect(container.innerHTML).toContain(`var(--${color}-main)`);
+      expect(container.innerHTML).toContain(`var(--${color}-dark)`);
       expect(container.innerHTML).toContain(`var(--${color}-contrast)`);
+      expect(container.innerHTML).not.toContain(`var(--${color}-main)`);
     }
+  });
+
+  it('never paints a label with a decoration-grade -main token, in any state', () => {
+    // The call-site guard. The browser-free contrast suite in theme/ asserts that
+    // the PICKERS return readable colours; Button never calls them, so that suite
+    // structurally cannot see this — and did not. Seven of the eight elements
+    // still failing AA at G3 re-verification were this component.
+    //
+    // Asserted as "the colour is a -dark/-darker/-contrast rung", not as "no hex
+    // appears": forbidding a bad literal is the shape that has now failed four
+    // times on this build, because it also permits rgb(), a wrong token and a
+    // missing style.
+    const READABLE = /^var\(--(?:[a-z]+-(?:dark|darker|contrast)|text-(?:primary|secondary))\)$/;
+    const offenders: string[] = [];
+
+    for (const variant of ['contained', 'outlined', 'text'] as const) {
+      for (const color of ['primary', 'success', 'error', 'warning', 'neutral'] as const) {
+        for (const disabled of [false, true]) {
+          const { container, unmount } = render(
+            <Button variant={variant} color={color} disabled={disabled}>Act</Button>,
+          );
+          const el = container.querySelector('button')!;
+          const painted = el.style.color;
+          if (!READABLE.test(painted)) {
+            offenders.push(`${variant}/${color}${disabled ? '/disabled' : ''} -> ${painted}`);
+          }
+          // Hover recolours the label's backdrop; it must not recolour it wrongly.
+          fireEvent.mouseEnter(el);
+          const hovered = el.style.color;
+          if (!READABLE.test(hovered)) {
+            offenders.push(`${variant}/${color}${disabled ? '/disabled' : ''}:hover -> ${hovered}`);
+          }
+          unmount();
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('does not let a disabled label fall to the unreadable disabled grey', () => {
+    // 'Acknowledged' is a completed STATE the operator reads, not a greyed-out
+    // affordance, so it is judged as content. --text-disabled is 2.29:1.
+    const { container } = render(<Button disabled>Acknowledged</Button>);
+    const el = container.querySelector('button')!;
+    expect(el.style.color).toBe('var(--text-secondary)');
+    expect(el.style.opacity).toBe(''); // an opacity multiplier would scale it back down
   });
 
   it('uses only token colours', () => {
