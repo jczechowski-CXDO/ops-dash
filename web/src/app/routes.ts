@@ -49,8 +49,17 @@ export const NAV: readonly NavItem[] = [
  *  severity, then newest. With none open it points at the Overview, because a
  *  nav item that leads to "there is nothing here" is a dead end, and in quiet
  *  mode "nothing here" is the correct state of the world rather than an error. */
-export function navHref(item: { id: string; path: string }, incidents: { id: string }[]): string {
+export function navHref(
+  item: { id: string; path: string },
+  incidents: { id: string; resolvedAt?: string }[],
+): string {
   if (item.id !== 'incident') return item.path;
-  const first = incidents[0];
+  // The first OPEN one. This took incidents[0], which agrees only because no
+  // fixture currently carries resolvedAt — so a resolved incident sorting first
+  // would have pointed the nav at a closed incident, and the badge beside it
+  // (which does filter) would have disagreed with the link. The filter lives
+  // here rather than at the call site so the function is correct whatever it
+  // is handed.
+  const first = incidents.find((i) => !i.resolvedAt);
   return first ? `/incidents/${first.id}` : '/';
 }

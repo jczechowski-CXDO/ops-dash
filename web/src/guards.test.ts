@@ -266,6 +266,11 @@ describe('no optional contract field is carried by a fixture and read by nothing
     advisoryId:
       'Proofpoint carries hs-8841 and nothing renders it, so the one vendor advisory we can ' +
       'actually read is invisible. Owner: view-service, on ServiceDetail vendor card.',
+    maintenance:
+      'Amendment 2. Helpjuice carries a scheduled window and no view reads vendor.maintenance ' +
+      'at all — the parent of the two below. It passed until G3 because the guard was ' +
+      'name-keyed, and a StatusLevel rank map containing `maintenance: 1` counted as a read. ' +
+      'Owner: view-service.',
     scheduledFor:
       'Amendment 2 maintenance window. Helpjuice is in one and the screen cannot say when it ' +
       'started. Owner: view-service.',
@@ -316,7 +321,16 @@ describe('no optional contract field is carried by a fixture and read by nothing
       .filter((name) => carried.has(name))
       .filter((name) => !(name in DELIBERATELY_UNREAD))
       .filter((name) => !(name in OPEN_LOOPS))
-      .filter((name) => !new RegExp(`\\.${name}\\b|\\[['"]${name}['"]\\]|\\b${name}:`).test(consumers));
+      // Property ACCESS only: `x.name`, `x['name']`, or destructuring `{ name }`.
+      // The original also accepted `name:`, which matches an object KEY — so a
+      // StatusLevel rank map containing `maintenance: 1` counted as reading
+      // `vendor.maintenance`, and three carried-and-unread fields passed.
+      .filter(
+        (name) =>
+          !new RegExp(
+            `\\.${name}\\b|\\[['"\`]${name}['"\`]\\]|\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*=`,
+          ).test(consumers),
+      );
 
     expect(unread).toEqual([]);
   });
@@ -372,13 +386,36 @@ describe('no background token is blind to the theme', () => {
           // Bare `var(--x)` only. `var(--semantic, var(--ramp))` is fine: the
           // fallback fires only if the semantic token is missing, and all of
           // ours exist.
-          const m = /\bbackground(?:Color)?:\s*'var\((--[\w-]+)\)'/.exec(line);
+          // Any quoting, including template literals, and every property that
+          // paints a colour — not just `background`. The first version of this
+          // guard matched single quotes only, and the BLOCKER was reintroduced
+          // verbatim with double quotes while all fourteen guards passed.
+          const m =
+            /\b(?:background|backgroundColor|borderColor|outlineColor|fill|stroke):\s*['"`]var\((--[\w-]+)\)['"`]/.exec(
+              line,
+            );
           if (m && !aware.has(m[1]!)) {
             offenders.push(`${rel(file)}:${i + 1}  ${m[1]} has no dark override`);
           }
         });
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('is not defeated by how the value is quoted', () => {
+    // The hole this guard shipped with. Each of these is the same defect; the
+    // original pattern saw only the first.
+    const pattern =
+      /\b(?:background|backgroundColor|borderColor|outlineColor|fill|stroke):\s*['"`]var\((--[\w-]+)\)['"`]/;
+    for (const form of [
+      "background: 'var(--grey-grey-100)'",
+      'background: "var(--grey-grey-100)"',
+      'background: `var(--grey-grey-100)`',
+      'backgroundColor: "var(--grey-grey-100)"',
+      'borderColor: `var(--grey-grey-100)`',
+    ]) {
+      expect(pattern.exec(form)?.[1]).toBe('--grey-grey-100');
+    }
   });
 
   it('the dark block was actually found — this guard cannot pass vacuously', () => {
