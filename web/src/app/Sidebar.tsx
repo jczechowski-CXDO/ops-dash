@@ -2,6 +2,8 @@ import { NavLink } from 'react-router';
 import { Icon } from '../components/aurora/Icon.js';
 import { useDemoMode, DEMO_TOGGLE_VISIBLE } from './DemoModeProvider.js';
 import { NAV, navHref, type NavBadge } from './routes.js';
+import { severityFillColor, severityOnFillColor } from '../theme/statusColor.js';
+import type { Severity } from '@ops-dash/shared';
 import type { DemoMode } from '../fixtures/index.js';
 
 const MODES: readonly { mode: DemoMode; label: string }[] = [
@@ -9,9 +11,17 @@ const MODES: readonly { mode: DemoMode; label: string }[] = [
   { mode: 'sev1', label: 'Sev1' },
 ];
 
-const BADGE_COLOR: Record<NavBadge, string> = {
-  openIncidents: 'var(--warning-main)',
-  openSev1s: 'var(--error-main)',
+/** A nav badge IS a severity signal, so it takes the published severity fill pair
+ *  rather than a raw rung. `openIncidents` counts everything open, whose worst
+ *  ordinary case is a Sev 2 — warning. `openSev1s` is Sev 1 — error.
+ *
+ *  This was `--warning-main` / `--error-main` with a literal white, measured at
+ *  2.40:1 light and 2.04:1 dark. `-main` is decoration-grade: right for a dot,
+ *  wrong for a word on a fill. `severityOnFillColor` is theme-aware, so the
+ *  badge also stops needing a hex at all. */
+const BADGE_SEVERITY: Record<NavBadge, Severity> = {
+  openIncidents: 2,
+  openSev1s: 1,
 };
 
 export function Sidebar() {
@@ -109,8 +119,8 @@ export function Sidebar() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: BADGE_COLOR[item.badge],
-                    color: '#fff' /* prototype literal */,
+                    background: severityFillColor(BADGE_SEVERITY[item.badge]),
+                    color: severityOnFillColor(BADGE_SEVERITY[item.badge]),
                     fontSize: 10.5,
                     fontWeight: 700,
                   }}
@@ -143,7 +153,11 @@ export function Sidebar() {
               gap: 3,
               padding: 3,
               borderRadius: 999,
-              background: 'var(--grey-grey-100)',
+              // A SEMANTIC surface, not a raw ramp token. `--grey-grey-100` is a
+              // value in Aurora's ramp with no dark override, and in dark mode
+              // `--text-primary` resolves to that same value — 1.00:1. That is
+              // the Overview strip BLOCKER; this was its twin.
+              background: 'var(--background-cardelevation2)',
             }}
           >
             {MODES.map((m) => (
