@@ -116,7 +116,19 @@ The page has two states driven by `mode`.
 ### 7. Rules & integrations
 
 - Two columns, `repeat(auto-fit, minmax(320px,1fr))`, gap 16, `align-items: start`.
-- **Integrations** list: rows of `1fr auto`, padding `11px 16px`, bottom divider. Name 13px/700 over 11.5px secondary detail; right side a status pill (radius 999, padding `3px 9px`, 11px/700) using `--success-lighter`/`--success-dark`, `--info-lighter`/`--info-dark`, `--warning-lighter`/`--warning-dark`.
+- **Integrations** list: rows of `1fr auto`, padding `11px 16px`, bottom divider. Name 13px/700 over 11.5px secondary detail; right side a status pill (radius 999, padding `3px 9px`, 11px/700) using
+  `--success-lighter`/`--success-darker`, `--info-lighter`/`--info-darker`,
+  `--warning-lighter`/`--warning-darker`, `--error-lighter`/`--error-darker`.
+
+  > **Amended 2026-09-19 at gate G3.** This specified the `-dark` rung, and at the
+  > 11px/700 this same line mandates, `--warning-dark` on `--warning-lighter`
+  > measures **4.09:1** — below the 4.5 AA bar. `--info-dark` was 4.65, passing by
+  > 0.15. Measured in Chromium against the production build with fonts loaded, not
+  > computed. Any view following this line literally shipped a contrast failure, so
+  > the pairing is corrected here rather than only in the code: all four states move
+  > to the `-darker` rung together, because four states sharing one rule is the point
+  > of the mapping and a mixed rung leaves the next state added with nothing to
+  > follow. Shipped ratios: 8.91-11.79 light, 6.68-6.87 dark.
 - **Alert rules** list: same row shape, right side an Aurora `Switch`. Each rule's threshold is the secondary line.
 
 ### Tables
@@ -249,7 +261,7 @@ hard-coded.
 | `--background-paper` | white | Cards, sidebar, header |
 | `--background-default` | app background | Content well |
 | `--grey-grey-100` | | Status pills, segmented track |
-| `--success-lighter` / `--success-dark` (and warning/info equivalents) | | Integration status pills |
+| `--success-lighter` / `--success-darker` (and warning/info/error equivalents) | | Integration status pills — amended at G3, see § 7: the `-dark` rung fails AA at 11px/700 |
 
 Dark mode is the same token names under `:root[data-theme="dark"], .dark`. Because every
 color in the prototype is a token reference, the dark theme needs no extra CSS.
