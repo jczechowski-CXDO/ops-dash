@@ -3,14 +3,15 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
+import type { Incident } from '@ops-dash/shared';
 import { fixtures, serviceById, type DemoMode } from '../fixtures/index.js';
 import IncidentDetail from './IncidentDetail.js';
 
-const at = (id: string, mode: DemoMode = 'sev1') =>
+const at = (id: string, mode: DemoMode = 'sev1', props: { incident?: Incident } = {}) =>
   render(
     <MemoryRouter initialEntries={[`/incidents/${id}?demo=${mode}`]}>
       <ThemeProvider><DemoModeProvider>
-        <Routes><Route path="/incidents/:id" element={<IncidentDetail />} /></Routes>
+        <Routes><Route path="/incidents/:id" element={<IncidentDetail {...props} />} /></Routes>
       </DemoModeProvider></ThemeProvider>
     </MemoryRouter>,
   );
@@ -128,14 +129,52 @@ describe('IncidentDetail', () => {
     }
   });
 
-  it('shows an error panel for an id that is not open', () => {
+  it('shows a state, not a blank page, for an id that is not open', () => {
     at('INC-9999');
-    expect(screen.getByRole('alert')).toHaveTextContent(/no open incident/i);
+    expect(screen.getByText(/no open incident INC-9999/i)).toBeInTheDocument();
     expect(screen.queryAllByTestId('timeline-row')).toHaveLength(0);
   });
 
-  it('shows the same error in the quiet world, where nothing is open', () => {
+  // G3 HIGH-2, and the reason this one matters more than its Service detail
+  // twin: the Sidebar links straight to /incidents/INC-2291, so in the quiet
+  // world this page is ONE CLICK from anywhere, over a system with nothing
+  // wrong with it. A red 'unavailable' alert there is a lie about a healthy
+  // system, and an operator who sees it daily learns to discount red.
+  it('does not cry wolf in the quiet world, where nothing being open is the good outcome', () => {
     at('INC-2291', 'quiet');
-    expect(screen.getByRole('alert')).toHaveTextContent(/no open incident INC-2291/i);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(/No incidents are open/i)).toHaveTextContent('INC-2291');
+  });
+
+  it('does not cry wolf for a bad id in a world that does have incidents', () => {
+    at('INC-9999');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // The two absences are not the same absence, and the copy has to know which
+  // it is: 'nothing is open' is news about the system, 'no such id' is news
+  // about the link you followed. Asserted as the relationship — which sentence
+  // appears is decided by whether the world holds any incidents at all.
+  it('tells a quiet world apart from a wrong id', () => {
+    for (const mode of ['quiet', 'sev1'] as const) {
+      const { unmount } = at('INC-9999', mode);
+      const nothingOpen = fixtures[mode].incidents.length === 0;
+      expect(screen.queryByText(/No incidents are open/i) !== null, `${mode}`).toBe(nothingOpen);
+      expect(screen.queryByText(/no open incident/i) !== null, `${mode}`).toBe(!nothingOpen);
+      unmount();
+    }
+  });
+
+  // The designed empty state, reachable only through the seam: every fixture
+  // incident has a timeline, so without an injected one this branch would ship
+  // unrendered. An incident with nothing recorded on it yet is a real state —
+  // it is what the first second of an auto-created incident looks like.
+  it('renders the designed empty state for an incident with nothing recorded yet', () => {
+    const base = fixtures.sev1.incidents[0]!;
+    at('INC-2292', 'sev1', { incident: { ...base, timeline: [] } });
+    expect(screen.getByText(/Nothing has been recorded on this incident yet/i)).toBeInTheDocument();
+    expect(screen.queryAllByTestId('timeline-row')).toHaveLength(0);
+    // The hero is still there: an empty timeline is not an empty page.
+    expect(screen.getByRole('heading', { name: base.title })).toBeInTheDocument();
   });
 });

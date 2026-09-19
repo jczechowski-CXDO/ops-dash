@@ -3,17 +3,29 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
+import type { CheckRun, ServiceStatus } from '@ops-dash/shared';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
 import ServiceDetail from './ServiceDetail.js';
 
-const at = (id: string, mode: DemoMode = 'sev1') =>
+const at = (id: string, mode: DemoMode = 'sev1', props: { service?: ServiceStatus; runs?: CheckRun[] } = {}) =>
   render(
     <MemoryRouter initialEntries={[`/services/${id}?demo=${mode}`]}>
       <ThemeProvider><DemoModeProvider>
-        <Routes><Route path="/services/:id" element={<ServiceDetail />} /></Routes>
+        <Routes><Route path="/services/:id" element={<ServiceDetail {...props} />} /></Routes>
       </DemoModeProvider></ThemeProvider>
     </MemoryRouter>,
   );
+
+/** The same service with its vendor poll removed / restored. `exactOptionalPropertyTypes`
+ *  is on, so "absent" means the key is genuinely not there — not set to undefined. */
+const withoutPoll = (s: ServiceStatus): ServiceStatus => {
+  const { lastSuccessfulPoll: _dropped, ...vendor } = s.vendor;
+  return { ...s, vendor };
+};
+const withPoll = (s: ServiceStatus, at_: string): ServiceStatus => ({
+  ...s,
+  vendor: { ...s.vendor, lastSuccessfulPoll: at_ },
+});
 
 /** Every (mode, service) pair the fixtures can render — fourteen shapes. The
  *  relationship tests below run over all of them rather than over the one or two
@@ -145,9 +157,60 @@ describe('ServiceDetail', () => {
     }
   });
 
-  it('shows an error panel, not a blank page, for an unknown service id', () => {
+  it('shows a state, not a blank page, for an unknown service id', () => {
     at('nope');
-    expect(screen.getByRole('alert')).toHaveTextContent(/not a monitored service/i);
+    expect(screen.getByText(/not a monitored service/i)).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  // G3 HIGH-2. A route param naming a service we do not watch is an ordinary
+  // navigation, not a source failure. Panel's error state means "we could not
+  // read the feed" and paints red; using it here trains an operator to discount
+  // red. The assertion is on the ABSENCE of the alert role, because that is the
+  // part a later edit would quietly undo.
+  it('does not cry wolf: an unknown id is an empty state, not a red error', () => {
+    at('nope');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // The designed empty state, reachable only through the seam: `checkRunsFor` is
+  // total but every one of the seven has rows today, so without an injected
+  // empty list this branch would ship unrendered and unasserted.
+  it('renders the designed empty state when a service has no check runs', () => {
+    at('m365', 'sev1', { runs: [] });
+    expect(screen.getByText(/No check runs recorded/i)).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // The half-cards still render: an empty probe history is not an empty page.
+    expect(screen.getByText('Vendor status page')).toBeInTheDocument();
+  });
+});
+
+/**
+ * G3 HIGH-3. The fourteen fixture shapes carry only two (id, hasPoll)
+ * combinations — m365 without a poll, everything else with one — so a
+ * provenance line derived from `vendor.lastSuccessfulPoll` and one derived from
+ * `id === 'm365'` are the SAME FUNCTION over that data, and the fourteen-shape
+ * test above cannot tell them apart. These two hold the id fixed and flip only
+ * the field, which is the only way the distinction is observable.
+ */
+describe('ServiceDetail — provenance is derived from the field, not from the name', () => {
+  it('says a poll succeeded for an m365 whose feed did return', () => {
+    const m365 = fixtures.sev1.services.find((s) => s.id === 'm365')!;
+    expect(m365.vendor.lastSuccessfulPoll, 'precondition: the fixture has no poll').toBeUndefined();
+
+    at('m365', 'sev1', { service: withPoll(m365, new Date(Date.now() - 120_000).toISOString()) });
+
+    expect(screen.getByText(/Last successful poll/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No successful poll on record/i)).not.toBeInTheDocument();
+  });
+
+  it('says no poll is on record for a non-m365 service whose feed never returned', () => {
+    const zendesk = fixtures.sev1.services.find((s) => s.id === 'zendesk')!;
+    expect(zendesk.vendor.lastSuccessfulPoll, 'precondition: the fixture has a poll').toBeDefined();
+
+    at('zendesk', 'sev1', { service: withoutPoll(zendesk) });
+
+    expect(screen.getByText(/No successful poll on record/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Last successful poll/i)).not.toBeInTheDocument();
   });
 });

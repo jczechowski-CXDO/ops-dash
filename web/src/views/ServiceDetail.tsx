@@ -150,19 +150,46 @@ const CHECK_COLUMNS: Column<CheckRun>[] = [
   },
 ];
 
-export default function ServiceDetail() {
+/**
+ * The injection seam (G3 HIGH-3).
+ *
+ * The other five views take a `snapshot?` / `rules?` prop and can therefore be
+ * asserted over shapes the fixtures do not contain. Without one here, every
+ * assertion about this page ran over the fourteen (mode × service) pairs — and
+ * across those fourteen there are only TWO distinct (id, hasPoll) combinations,
+ * which align perfectly. A reviewer rewrote `vendorProvenance` to branch on
+ * `id === 'm365'`, the exact thing its comment rules out, and the whole file
+ * stayed green: over this data the field-derived and name-derived predicates are
+ * the same function. Fourteen shapes of two combinations is two shapes.
+ *
+ * `service` and `runs` exist so a test can construct the combinations the
+ * fixtures cannot: an unknown vendor WITH a successful poll, and an m365-id
+ * service WITHOUT one. They are test-only and the app never passes them; the
+ * route remains the only source of truth in the running application.
+ */
+export default function ServiceDetail({
+  service: injectedService,
+  runs: injectedRuns,
+}: {
+  service?: ServiceStatus;
+  runs?: CheckRun[];
+} = {}) {
   const { id } = useParams();
   const { mode } = useDemoMode();
-  const service = serviceById(mode, id ?? '');
+  const service = injectedService ?? serviceById(mode, id ?? '');
 
   if (!service) {
     return (
       <div data-testid="view-service">
+        {/* G3 HIGH-2: NOT `kind: 'error'`. Panel documents that state as a
+            SOURCE failure — a feed we could not read — and paints it red. A
+            route param naming something that does not exist is an ordinary
+            navigation, not a failed fetch, and red here teaches an operator to
+            distrust red. */}
         <Panel
           state={{
-            kind: 'error',
-            source: 'Service detail',
-            message: `${id ?? ''} is not a monitored service`,
+            kind: 'empty',
+            message: `${id ?? ''} is not a monitored service. We watch seven; pick one from the Overview.`,
           }}
         >
           {null}
@@ -171,7 +198,7 @@ export default function ServiceDetail() {
     );
   }
 
-  const runs = checkRunsFor(mode, service.id);
+  const runs = injectedRuns ?? checkRunsFor(mode, service.id);
   const checkState: PanelState =
     runs.length === 0
       ? { kind: 'empty', message: 'No check runs recorded in this window.' }

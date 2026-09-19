@@ -117,10 +117,17 @@ function TimelineRow({ entry, last }: { entry: TimelineEntry; last: boolean }) {
   );
 }
 
-export default function IncidentDetail() {
+/**
+ * `incident` is the injection seam (G3 HIGH-3), matching the one on
+ * ServiceDetail and the `snapshot?` prop the other five views already take. It
+ * lets a test construct what the fixtures do not hold — an incident with an
+ * empty timeline, a severity other than 1 — rather than asserting only over the
+ * four incidents that happen to exist today. The app never passes it.
+ */
+export default function IncidentDetail({ incident: injected }: { incident?: Incident } = {}) {
   const { id } = useParams();
-  const { mode } = useDemoMode();
-  const incident = incidentById(mode, id ?? '');
+  const { mode, bundle } = useDemoMode();
+  const incident = injected ?? incidentById(mode, id ?? '');
 
   // Local, view-only state. Milestone 4 persists these; until then flipping a
   // label is the whole behaviour, and it is deliberately not written anywhere.
@@ -129,15 +136,21 @@ export default function IncidentDetail() {
   const [resolved, setResolved] = useState(false);
 
   if (!incident) {
+    // G3 HIGH-2. The Sidebar links straight here, so in the quiet world this is
+    // the FIRST thing an operator sees after one click — over a system with
+    // nothing wrong with it. `Panel`'s error state is documented as a source
+    // failure and renders a red alert; an id that is not open is neither a
+    // failure nor a surprise. Empty state, and copy that says what is true:
+    // when nothing is open, nothing being found is the good outcome.
+    const nothingOpen = bundle.incidents.length === 0;
     return (
       <div data-testid="view-incident">
         <Panel
           state={{
-            kind: 'error',
-            source: 'Incident detail',
-            // Quiet mode has nothing open, so this is the honest wording for
-            // both a bad id and a correct id in a world where it is closed.
-            message: `There is no open incident ${id ?? ''}`,
+            kind: 'empty',
+            message: nothingOpen
+              ? `No incidents are open, so there is nothing to show for ${id ?? ''}. That is the good outcome.`
+              : `There is no open incident ${id ?? ''}. It may already be resolved, or the id may be wrong.`,
           }}
         >
           {null}
