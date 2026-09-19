@@ -385,3 +385,40 @@ describe('IncidentDetail', () => {
     expect(screen.getByRole('heading', { name: base.title })).toBeInTheDocument();
   });
 });
+
+describe('an older instant never prints as a bare time (G3½ MEDIUM)', () => {
+  // Found by photographing a two-day-old incident for the first time: the hero
+  // read "Opened 09:41 · 48h 00m elapsed" and the timeline rows were stamped
+  // 09:41 and 09:43 against a frozen clock of 09:41:02 — so the newest entry
+  // appeared to be two minutes in the FUTURE. Invisible while INC-2291, opened
+  // this morning, was the only incident anyone rendered.
+  //
+  // Same ruling the team already made for ack.at — "'at 14:30' on a two-day-old
+  // acknowledgement reads as today" — applied to the two places it was missed.
+  const base = fixtures.sev1.incidents.find((i) => i.severity === 1)!;
+  const shift = (iso: string, days: number) =>
+    new Date(Date.parse(iso) - days * 24 * 60 * 60_000).toISOString();
+
+  const dayQualified = /(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d/;
+
+  it('day-qualifies the hero and every timeline row when the incident is not from today', () => {
+    const old = {
+      ...base,
+      openedAt: shift(base.openedAt, 2),
+      timeline: base.timeline.map((t) => ({ ...t, at: shift(t.at, 2) })),
+    };
+    at(old.id, 'sev1', { incident: old });
+    expect(screen.getByText(/^Opened /)).toHaveTextContent(dayQualified);
+    for (const row of screen.getAllByTestId('timeline-time')) {
+      expect(row.textContent, row.textContent ?? '').toMatch(dayQualified);
+    }
+  });
+
+  it('keeps a bare clock when the incident IS from today', () => {
+    // The other half. Without it, "always day-qualify" would pass — and the
+    // prototype's clock format would be gone from every screen.
+    at(base.id);
+    expect(screen.getByText(/^Opened /)).not.toHaveTextContent(dayQualified);
+    expect(screen.getByText(/^Opened /)).toHaveTextContent(/Opened \d\d:\d\d/);
+  });
+});

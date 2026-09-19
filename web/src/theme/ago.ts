@@ -39,3 +39,31 @@ export function signedDelta(n: number): string {
   const formatted = n.toLocaleString('en-US');
   return n > 0 ? `+${formatted}` : formatted;
 }
+
+/**
+ * A wall-clock stamp that cannot be mistaken for today: '09:41' when the
+ * instant falls on today's date, 'Thu 09:41' when it does not.
+ *
+ * The team ruled once already that "'at 14:30' on a two-day-old acknowledgement
+ * reads as today", and applied it to the credit line. This is the same ruling
+ * applied to the two places that were missed: the incident hero's
+ * `Opened {time}` and every timeline row. Photographing a two-day-old incident
+ * for the first time is what exposed them — its timeline rows read 09:41 and
+ * 09:43 against a frozen clock of 09:41:02, so the newest entry appeared to be
+ * two minutes in the FUTURE.
+ *
+ * A clock time is kept rather than replaced by a magnitude, because on an
+ * incident timeline the ordering and the gaps between entries are the point,
+ * and 'two days ago / two days ago / two days ago' loses both.
+ */
+export function clockStamp(iso: string, now: number = Date.now()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'unknown time';
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const n = new Date(now);
+  const sameDay =
+    d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  if (sameDay) return hhmm;
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  return `${day} ${hhmm}`;
+}

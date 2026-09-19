@@ -10,7 +10,8 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
 import { incidentById, serviceById } from '../fixtures/index.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
-import { clockOf, span } from '../fixtures/time.js';
+import { span } from '../fixtures/time.js';
+import { clockStamp } from '../theme/ago.js';
 import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 import {
   blastTextColor,
@@ -89,8 +90,11 @@ function TimelineRow({ entry, last }: { entry: TimelineEntry; last: boolean }) {
       data-testid="timeline-row"
       style={{ display: 'grid', gridTemplateColumns: '60px 18px 1fr', gap: 12, paddingBottom: 16 }}
     >
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>
-        {clockOf(entry.at)}
+      <div
+        data-testid="timeline-time"
+        style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}
+      >
+        {clockStamp(entry.at)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <span
@@ -209,7 +213,7 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
               {incident.id}
             </span>
             <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-              {`Opened ${clockOf(incident.openedAt)} · ${span(elapsedMinutes)} elapsed`}
+              {`Opened ${clockStamp(incident.openedAt)} · ${span(elapsedMinutes)} elapsed`}
             </span>
             <AffectedService serviceId={incident.serviceId} />
           </div>

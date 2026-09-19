@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ago, agePhrase, signedDelta } from './ago.js';
+import { ago, agePhrase, signedDelta, clockStamp } from './ago.js';
 import { UNKNOWN_AGE } from './ageLabel.js';
 
 const NOW = Date.parse('2026-09-19T12:00:00.000Z');
@@ -38,5 +38,27 @@ describe('signedDelta', () => {
     expect(signedDelta(1102)).toBe('+1,102');
     expect(signedDelta(-2)).toBe('-2');
     expect(signedDelta(0)).toBe('0');
+  });
+});
+
+describe('clockStamp', () => {
+  const at = (iso: string) => clockStamp(iso, NOW);
+
+  it('is a bare clock for today and day-qualified for anything older', () => {
+    expect(at(minutesAgo(90))).toMatch(/^\d\d:\d\d$/);
+    // Two days back: the case that read as today on the incident hero.
+    expect(at(minutesAgo(2 * 24 * 60))).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d$/);
+  });
+
+  it('never lets an older instant pass as a bare time', () => {
+    // The relationship, not the two samples: any instant on a different
+    // calendar day must carry its day, at every offset.
+    for (const days of [1, 2, 3, 7, 30]) {
+      expect(at(minutesAgo(days * 24 * 60)), `${days}d`).not.toMatch(/^\d\d:\d\d$/);
+    }
+  });
+
+  it('degrades to prose on an unparseable instant rather than printing NaN:NaN', () => {
+    expect(at('not-a-date')).toBe('unknown time');
   });
 });
