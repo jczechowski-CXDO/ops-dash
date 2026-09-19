@@ -1,7 +1,7 @@
-import { NavLink } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { Icon } from '../components/aurora/Icon.js';
 import { useDemoMode, DEMO_TOGGLE_VISIBLE } from './DemoModeProvider.js';
-import { NAV, navHref, type NavBadge } from './routes.js';
+import { NAV, navHref, isNavCurrent, type NavBadge } from './routes.js';
 import { severityFillColor, severityOnFillColor } from '../theme/statusColor.js';
 import type { Severity } from '@ops-dash/shared';
 import type { DemoMode } from '../fixtures/index.js';
@@ -26,6 +26,7 @@ const BADGE_SEVERITY: Record<NavBadge, Severity> = {
 
 export function Sidebar() {
   const { mode, setMode, bundle } = useDemoMode();
+  const { pathname } = useLocation();
 
   // Both counts are read off the bundle on every render. An incident is open
   // while it has no resolvedAt — that is the contract's definition, not a
@@ -84,15 +85,18 @@ export function Sidebar() {
       <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: 10 }}>
         {NAV.map((item) => {
           const count = item.badge ? counts[item.badge] : 0;
+          const href = navHref(item, bundle.incidents);
+          // Computed rather than taken from NavLink's isActive, which can only
+          // compare against `to`. Two entries were current at once on '/' in
+          // quiet, and the Incident entry was NOT current on an incident page
+          // whose id differed from the one its href resolved to.
+          const isActive = isNavCurrent(item, pathname, href);
           return (
-            <NavLink
+            <Link
               key={item.id}
-              to={navHref(item, bundle.incidents)}
-              // Exact match. Unobservable with today's flat route table — react-router
-              // special-cases '/' — but the day a nested route lands, its absence marks
-              // Overview current on every page.
-              end
-              style={({ isActive }) => ({
+              to={href}
+              aria-current={isActive ? 'page' : undefined}
+              style={{
                 display: 'grid',
                 gridTemplateColumns: '20px 1fr auto',
                 alignItems: 'center',
@@ -105,7 +109,7 @@ export function Sidebar() {
                 background: isActive ? 'var(--primary-lighter)' : 'transparent',
                 color: isActive ? 'var(--primary-dark)' : 'var(--text-secondary)',
                 fontWeight: isActive ? 700 : 600,
-              })}
+              }}
             >
               <Icon name={item.icon} size={20} />
               <span>{item.label}</span>
@@ -128,7 +132,7 @@ export function Sidebar() {
                   {count}
                 </span>
               ) : null}
-            </NavLink>
+            </Link>
           );
         })}
       </nav>
