@@ -283,6 +283,9 @@ describe('no optional contract field is carried by a fixture and read by nothing
     return [...new Set(names)];
   }
 
+  const stripComments = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+
   /** Every property name present (and not undefined) anywhere in the fixtures. */
   function namesCarriedByFixtures(node: unknown, acc = new Set<string>()): Set<string> {
     if (Array.isArray(node)) {
@@ -301,9 +304,12 @@ describe('no optional contract field is carried by a fixture and read by nothing
     const carried = namesCarriedByFixtures(fixtures);
 
     // Consumers only: not the fixtures that supply the value, not the guards.
+    // Comments are stripped, because prose mentioning a field is not code
+    // reading it — `statusColor.ts` cites `SourceResult.empty` in a doc comment,
+    // which would otherwise count as a consumer and let a genuine open loop pass.
     const consumers = src()
       .filter((f) => !f.includes(`${sep}fixtures${sep}`))
-      .map(read)
+      .map((f) => stripComments(read(f)))
       .join('\n');
 
     const unread = optionalContractFields()
