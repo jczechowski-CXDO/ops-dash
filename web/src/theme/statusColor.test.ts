@@ -264,7 +264,18 @@ describe('contrast of the text-grade colours', () => {
     // a status dot is squarely subject to: it is a graphical object conveying
     // information) does NOT hold on light paper. Measured, not assumed. This is
     // pinned rather than deleted so the gap is visible and any drift fails here.
-    // Ruling is the lead's, since changing the return value is a Wave 3 break.
+    //
+    // RULED at G3, and the ruling is NOT a colour change. Where a dot has a text
+    // equivalent it is decoration and -main is correct: the service tile carries
+    // "Vendor: {label}" and "Ours: {label}" (README section 1), so its dot is
+    // redundant. Where a dot was the SOLE carrier of status — the Overview strip
+    // pill, which was [dot][service name] and nothing else — the defect was
+    // larger than contrast: WCAG 1.4.1 Use of Color at Level A, and a screen
+    // reader announced the service with no status at all. The fix is the text
+    // equivalent (w3-overview added srOnly status text), not a darker dot.
+    // Darkening would have satisfied a contrast checker while leaving a blind
+    // user with nothing — a green signal that does not mean what it says.
+    // This list is therefore a recorded decision, not an open failure.
     const gaps: string[] = [];
     for (const [theme, palette] of THEMES) {
       for (const level of ALL_LEVELS) {
