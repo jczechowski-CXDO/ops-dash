@@ -25,7 +25,7 @@ export const sev1Incidents: Incident[] = [
     serviceId: 'm365',
     openedAt: minutesAgo(T0),
     summary:
-      'Microsoft advisory EX1084221 reports delayed transport in North America. Our synthetic mailflow probe is failing from three of four regions, which matches the vendor claim.',
+      'Microsoft advisory EX1084221, read by hand from the admin centre, reports delayed transport in North America. Our synthetic mailflow probe is failing from three of four regions, which matches it. We have no automated vendor signal for M365 while Service Health consent is pending, so this correlation rests on our own probes and a human reading the advisory.',
     metaParts: ['Microsoft 365', `opened ${clock(T0)}`, '384 users affected', 'advisory EX1084221'],
     ruleKey: 'vendor',
     blastRadius: [
@@ -47,8 +47,8 @@ export const sev1Incidents: Incident[] = [
       {
         at: minutesAgo(VENDOR_CONFIRMED),
         kind: 'vendor',
-        title: 'Vendor confirmed',
-        body: 'Microsoft posted EX1084221 and identified a transport infrastructure fault.',
+        title: 'Vendor confirmed, by hand',
+        body: 'Advisory EX1084221 read in the Microsoft 365 admin centre: a transport infrastructure fault. Not visible to us automatically — Service Health consent is still pending.',
       },
       {
         at: minutesAgo(T0 - 19),
@@ -66,7 +66,12 @@ export const sev1Incidents: Incident[] = [
         at: minutesAgo(T0),
         kind: 'opened',
         title: 'Incident opened',
-        body: 'Auto-created from rule "Vendor status page degraded + our check failing".',
+        // The rule this incident belongs to could not fire: amendment 1 says
+        // `unknown` never satisfies the vendor side, and M365's vendor half is
+        // unknown while Service Health consent is pending. Opened by hand off
+        // the failing probes instead. `ruleKey` still names the rule, which is
+        // how the Settings page explains why nothing alerted.
+        body: 'Opened by hand from three failing mailflow regions. The "Vendor degraded + our check failing" rule could not fire — we have no vendor signal for M365 while Service Health consent is pending.',
       },
     ],
   },

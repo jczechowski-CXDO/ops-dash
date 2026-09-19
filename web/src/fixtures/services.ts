@@ -105,7 +105,8 @@ const healthy = (b: Base): ServiceStatus => {
  *  because the day is quiet. The consequence is deliberate and John decided it
  *  explicitly: "ALL SYSTEMS OPERATIONAL" is unreachable while Zendesk is one of
  *  the seven, because the strip asserts health only when every service is
- *  affirmatively operational. The quiet strip reads "6 AFFIRMED · 1 UNKNOWN".
+ *  affirmatively operational. With m365 blind for its own reason (see
+ *  `noVendorFeed`), the quiet strip reads "5 AFFIRMED · 2 UNKNOWN".
  *
  *  This must render `var(--text-disabled)`, never green, and must never count
  *  toward the all-clear. Do not "fix" it to operational. */
@@ -117,32 +118,57 @@ const unknownVendor = (): ServiceStatus['vendor'] => ({
   lastSuccessfulPoll: secondsAgo(60),
 });
 
-const withUnknownZendesk = (s: ServiceStatus): ServiceStatus =>
-  s.id === 'zendesk' ? { ...s, vendor: unknownVendor() } : s;
+/** The same ruling, applied to the other service we genuinely cannot see.
+ *
+ *  There is no public per-workload status feed for commercial M365 at all, so
+ *  Graph is the only path, and our Service Health consent is still pending —
+ *  `rules.ts` carries that as the `needs_auth` integration with no
+ *  `lastSuccessAt`, because the feed has never once authenticated. A tile
+ *  claiming "no advisories posted in the last 7 days, polled every 60 seconds"
+ *  beside that row was showing a successful poll from a feed that has never run.
+ *
+ *  `lastSuccessfulPoll` is therefore ABSENT, not stale: there has never been
+ *  one. Note the vendor-feeds integration names six vendors for seven services,
+ *  which is the same fact seen from the other side.
+ *
+ *  Our own half is unaffected and stays real: our synthetic probes against M365
+ *  are ours, not Microsoft's. Being blind to the vendor's claim while our own
+ *  checks fail is exactly the case the contract's two-level model exists for. */
+const noVendorFeed = (): ServiceStatus['vendor'] => ({
+  level: 'unknown',
+  label: 'Unknown',
+  note: 'No vendor signal. Microsoft publishes no per-workload status feed for commercial M365, and our Graph Service Health consent (ServiceHealth.Read.All + ServiceMessage.Read.All) is still pending, so this feed has never returned. This is not an assertion of health.',
+  incidentsSince: [],
+});
 
-export const quietServices: ServiceStatus[] = SERVICE_BASES.map(healthy).map(withUnknownZendesk);
+const withUnknownVendors = (s: ServiceStatus): ServiceStatus =>
+  s.id === 'zendesk'
+    ? { ...s, vendor: unknownVendor() }
+    : s.id === 'm365'
+      ? { ...s, vendor: noVendorFeed() }
+      : s;
 
-/** Degraded on both halves: the vendor says so and our own probes agree. This is
- *  the pair that makes the 'vendor degraded + our check failing' rule fire. */
+export const quietServices: ServiceStatus[] = SERVICE_BASES.map(healthy).map(withUnknownVendors);
+
+/** The Sev1, with one half of the screen blank on purpose.
+ *
+ *  Our probes are failing from three of four regions and we have NO vendor
+ *  statement to corroborate them, because Service Health consent is pending.
+ *  The advisory exists — a human read EX1084221 in the admin centre — but it
+ *  reached us out of band, so it lives on the incident, where a person put it,
+ *  and not on the vendor half, which is fed by an adapter that has never run.
+ *
+ *  The consequence is stated on the incident and is the honest one: the
+ *  'vendor degraded + our check failing' rule COULD NOT fire, because amendment
+ *  1 is explicit that `unknown` never satisfies the vendor side. The Sev1 rests
+ *  on our own probes and a human decision. That is the operational cost of the
+ *  missing consent, and it is now visible on the screen rather than papered
+ *  over by a vendor half that was telling us what we wanted to hear. */
 const m365Sev1 = (): ServiceStatus => {
   const series = spark(3, 210, true);
   return {
     ...healthy(serviceBase('m365')),
-    vendor: {
-      level: 'degraded',
-      label: 'Degraded',
-      note: `Advisory EX1084221 — "Users may experience delays receiving email." Last vendor update ${VENDOR_CONFIRMED_MINUTES_AGO} minutes ago.`,
-      advisoryId: 'EX1084221',
-      incidentsSince: [
-        {
-          id: 'EX1084221',
-          title: 'Users may experience delays receiving email',
-          level: 'degraded',
-          startedAt: minutesAgo(SEV1_OPENED_MINUTES_AGO),
-        },
-      ],
-      lastSuccessfulPoll: secondsAgo(41),
-    },
+    vendor: noVendorFeed(),
     ours: {
       level: 'outage',
       label: 'Failing',

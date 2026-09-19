@@ -34,11 +34,12 @@ describe('quiet mode', () => {
   // unreachable, in the fixtures and in production alike, and the quiet strip
   // reads "6 AFFIRMED · 1 UNKNOWN". A quiet world that claimed the all-clear
   // would be showing a screen the live system can never render.
-  it('affirms six services and leaves exactly one unknown', () => {
+  it('affirms five services and leaves two unknown', () => {
     const levels = q.services.map((s) => s.vendor.level);
-    expect(levels.filter((l) => l === 'operational')).toHaveLength(6);
-    expect(levels.filter((l) => l === 'unknown')).toHaveLength(1);
-    expect(q.services.find((s) => s.vendor.level === 'unknown')?.id).toBe('zendesk');
+    expect(levels.filter((l) => l === 'operational')).toHaveLength(5);
+    expect(levels.filter((l) => l === 'unknown')).toHaveLength(2);
+    expect(q.services.filter((s) => s.vendor.level === 'unknown').map((s) => s.id))
+      .toEqual(['m365', 'zendesk']);
   });
 
   it('cannot claim all systems operational', () => {
@@ -61,10 +62,27 @@ describe('sev1 mode', () => {
     expect(s.incidents.map((i) => i.severity)).toEqual([1, 2, 2, 3]);
   });
 
-  it('degrades m365 on both halves, which is what makes the headline rule fire', () => {
+  // Inverted from the plan's original (HIGH-4). The plan had m365 degraded on
+  // both halves, "which is what makes the headline rule fire" — but we cannot
+  // see M365 vendor health at all: there is no public per-workload feed, and
+  // Graph Service Health consent is still pending, which `rules.ts` records as
+  // a needs_auth integration that has never had a successful poll. The vendor
+  // half is therefore `unknown`, our half is real and failing, and the Sev1
+  // rests on our probes alone. That is the screen the live system can render.
+  it('leaves m365 blind on the vendor half and failing on ours', () => {
     const m365 = serviceById('sev1', 'm365');
-    expect(m365?.vendor.level).toBe('degraded');
+    expect(m365?.vendor.level).toBe('unknown');
     expect(m365?.ours.level).toBe('outage');
+  });
+
+  it('never claims a successful poll from a feed that has never authenticated', () => {
+    const m365 = serviceById('sev1', 'm365');
+    expect(m365?.vendor.lastSuccessfulPoll).toBeUndefined();
+    expect('lastSuccessfulPoll' in (m365?.vendor ?? {})).toBe(false);
+    expect(m365?.vendor.note).toContain('ServiceHealth.Read.All');
+    const consent = fixtures.sev1.integrations.find((i) => i.key === 'm365health');
+    expect(consent?.state).toBe('needs_auth');
+    expect(consent?.lastSuccessAt).toBeUndefined();
   });
 
   it('puts proofpoint on a vendor advisory with our probes merely slow', () => {
@@ -288,10 +306,13 @@ describe('the numbers on the response-time card agree with the curve', () => {
 });
 
 describe('the copy quotes the timestamps it sits beside', () => {
-  it('anchors "last vendor update" to the vendor entry on the timeline', () => {
-    const vendorEntry = incidentById('sev1', 'INC-2291')?.timeline.find((t) => t.kind === 'vendor');
-    const minutes = Math.round((Date.now() - Date.parse(vendorEntry!.at)) / 60_000);
-    expect(serviceById('sev1', 'm365')?.vendor.note).toContain(`Last vendor update ${minutes} minutes ago`);
+  it('quotes no vendor update time on a tile with no vendor feed', () => {
+    // This assertion replaced one that anchored "Last vendor update N minutes
+    // ago" to the timeline; under HIGH-4 the m365 tile has no vendor update to
+    // quote at all, and saying otherwise is the lie the whole ruling is about.
+    const note = serviceById('sev1', 'm365')?.vendor.note ?? '';
+    expect(note).not.toMatch(/last vendor update/i);
+    expect(note).not.toMatch(/no advisories posted/i);
   });
 
   it('cannot queue the oldest message after the incident opened', () => {
@@ -348,14 +369,30 @@ describe('the sev1 world does not contradict itself', () => {
     expect(serviceById('sev1', 'm365')?.lastStateChange).toBe(inc.openedAt);
   });
 
-  it('carries the same advisory on the service, its incidentsSince and the incident', () => {
+  it('keeps the advisory where it actually came from', () => {
+    // EX1084221 reached us out of band — a person read it in the admin centre —
+    // so it belongs to the incident, not to a vendor half fed by an adapter
+    // that has never run. Putting it on the tile would claim a feed we do not
+    // have. The incident keeps it, which is what IncidentDetail renders.
     const m365 = serviceById('sev1', 'm365')!;
     const inc = incidentById('sev1', 'INC-2291')!;
-    expect(m365.vendor.advisoryId).toBe('EX1084221');
-    expect(m365.vendor.incidentsSince.map((v) => v.id)).toEqual(['EX1084221']);
-    expect(m365.vendor.incidentsSince[0]?.startedAt).toBe(inc.openedAt);
+    expect(m365.vendor.advisoryId).toBeUndefined();
+    expect(m365.vendor.incidentsSince).toEqual([]);
     expect(inc.summary).toContain('EX1084221');
     expect(inc.metaParts).toContain('advisory EX1084221');
+    expect(inc.timeline.find((t) => t.kind === 'vendor')?.body).toContain('EX1084221');
+  });
+
+  it('does not let the Sev1 rest on a vendor half we cannot see', () => {
+    // Amendment 1: `unknown` never satisfies the vendor side of the rule, so
+    // the rule cannot have fired and the incident must not claim it did.
+    const inc = incidentById('sev1', 'INC-2291')!;
+    expect(inc.ruleKey).toBe('vendor');
+    expect(serviceById('sev1', 'm365')?.vendor.level).toBe('unknown');
+    const opened = inc.timeline.find((t) => t.kind === 'opened');
+    expect(opened?.body).not.toMatch(/auto-created/i);
+    expect(opened?.body).toMatch(/by hand/i);
+    expect(opened?.body).toMatch(/consent is pending/i);
   });
 
   it('matches the failing probe count to the failing-probe note', () => {
@@ -393,6 +430,17 @@ describe('the sev1 world does not contradict itself', () => {
     const spike = s.entra.signals.find((x) => x.key === 'failed_spike');
     expect(spike?.count).toBe(s.entra.stats.failedSignIns24h);
     expect(spike?.lastSeen).toBe(incidentById('sev1', 'INC-2290')?.openedAt);
+  });
+
+  it('keeps our own half real on a service whose vendor half is blind', () => {
+    // The two halves are independently sourced, which is the point of the page.
+    // Being unable to see Microsoft's claim does not stop our probes working,
+    // and our probes failing is what the operator needs to act on.
+    const m365 = serviceById('sev1', 'm365')!;
+    expect(m365.vendor.level).toBe('unknown');
+    expect(m365.ours.level).toBe('outage');
+    expect(m365.ours.passing).toBe(1);
+    expect(serviceById('quiet', 'm365')?.ours.level).toBe('operational');
   });
 
   it('leaves zendesk unknown rather than green, with the reason on the record', () => {
