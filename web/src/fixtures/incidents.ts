@@ -1,6 +1,14 @@
 import type { Incident } from '@ops-dash/shared';
-import { clock, dayAgoAt, minutesAgo } from './time.js';
-import { SEV1_OPENED_MINUTES_AGO as T0 } from './services.js';
+import { clock, clockOf, dayAgoAt, minutesAgo, span } from './time.js';
+import {
+  MAILFLOW_LAST_SUCCESS_MINUTES_AGO as LAST_SUCCESS,
+  SEV1_OPENED_MINUTES_AGO as T0,
+  VENDOR_CONFIRMED_MINUTES_AGO as VENDOR_CONFIRMED,
+} from './services.js';
+
+/** INC-2288 opened by hand at yesterday 17:20. The instant and the copy that
+ *  quotes it are derived from this one value. */
+const EPC_OPENED = dayAgoAt(1, 17, 20);
 
 /** The four open incidents of the Sev1 world, ordered so severity reads
  *  [1, 2, 2, 3] — the order the Overview alert list renders.
@@ -24,7 +32,10 @@ export const sev1Incidents: Incident[] = [
       { label: 'Users affected', value: '384', note: 'of 512 licensed mailboxes', level: 'error' },
       { label: 'Mail queue depth', value: '2,140', note: 'inbound messages held', level: 'error' },
       { label: 'Median delay', value: '18m 40s', note: 'up from 4s baseline', level: 'warning' },
-      { label: 'Oldest message', value: '1h 12m', note: `queued since ${clock(72)}`, level: 'warning' },
+      // The oldest still-queued message is the one that missed the last
+      // successful mailflow round trip, so it shares that anchor: it cannot be
+      // younger than the incident, which `clock(72)` made it by eleven minutes.
+      { label: 'Oldest message', value: span(LAST_SUCCESS), note: `queued since ${clock(LAST_SUCCESS)}`, level: 'warning' },
     ],
     timeline: [
       {
@@ -34,7 +45,7 @@ export const sev1Incidents: Incident[] = [
         body: 'Delay down to 18m 40s from a 31m peak. Monitoring.',
       },
       {
-        at: minutesAgo(T0 - 46),
+        at: minutesAgo(VENDOR_CONFIRMED),
         kind: 'vendor',
         title: 'Vendor confirmed',
         body: 'Microsoft posted EX1084221 and identified a transport infrastructure fault.',
@@ -93,10 +104,10 @@ export const sev1Incidents: Incident[] = [
     severity: 2,
     title: '14 Endpoint Central agents stale for 21+ days',
     serviceId: 'endpointcentral',
-    openedAt: dayAgoAt(1, 17, 20),
+    openedAt: EPC_OPENED,
     summary:
       'Fourteen managed endpoints have not checked in for 21 days or more. Their patch and encryption state is unknown rather than compliant, so they are excluded from the compliance figures until they report.',
-    metaParts: ['Endpoint Central', 'opened yesterday 17:20', '9 laptops, 5 desktops'],
+    metaParts: ['Endpoint Central', `opened yesterday ${clockOf(EPC_OPENED)}`, '9 laptops, 5 desktops'],
     ruleKey: 'stale',
     blastRadius: [
       { label: 'Agents stale', value: '14', note: 'of 612 managed endpoints', level: 'warning' },
@@ -110,10 +121,14 @@ export const sev1Incidents: Incident[] = [
         body: 'Nine laptops and five desktops, none of them reporting since the 21-day threshold.',
       },
       {
-        at: dayAgoAt(1, 17, 20),
+        at: EPC_OPENED,
         kind: 'opened',
         title: 'Incident opened',
-        body: 'Auto-created from rule "No check-in for 21 days".',
+        // The 'Agent stale' rule is the one rule disabled by default, both in
+        // the prototype and on our Settings page, so nothing fired: this one was
+        // raised by hand. `ruleKey` still names the rule the incident belongs
+        // to, which is how the Settings page explains why it was missed.
+        body: 'Opened by hand during the weekly endpoint review. The "Agent stale" rule is disabled, so nothing alerted on this.',
       },
     ],
   },

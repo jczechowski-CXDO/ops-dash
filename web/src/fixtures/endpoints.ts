@@ -5,7 +5,7 @@ import { daysAgo, hoursAgo, minutesAgo } from './time.js';
  *  CXDO- -> DEMO- and stay that way permanently; `os` is carried because the
  *  contract keeps it even though the table dropped the column for width.
  *  Each row's `lastCheckIn` agrees with the age quoted in its `issue` string. */
-export const endpoints: EndpointSnapshot = {
+export const sev1Endpoints: EndpointSnapshot = {
   stats: {
     total: 612,
     patchCompliance: 0.914,
@@ -19,6 +19,25 @@ export const endpoints: EndpointSnapshot = {
     { computer: 'DEMO-DT-0117', assignedTo: 'shared / reception', os: 'Windows 10 22H2', issue: 'BitLocker not enabled', issueKind: 'no_bitlocker', lastCheckIn: minutesAgo(18) },
     { computer: 'DEMO-LT-0355', assignedTo: 'k.obrien', os: 'macOS 15.2', issue: 'Agent stale · 27 days', issueKind: 'stale_agent', lastCheckIn: daysAgo(27) },
     { computer: 'DEMO-LT-0501', assignedTo: 'd.silva', os: 'Windows 11 24H2', issue: '4 critical patches missing', issueKind: 'missing_patches', lastCheckIn: minutesAgo(41) },
+    { computer: 'DEMO-DT-0092', assignedTo: 'lab / QA', os: 'Windows 10 22H2', issue: 'EOL build · upgrade required', issueKind: 'eol_build', lastCheckIn: daysAgo(3) },
+  ],
+};
+
+/** The quiet world: better compliance and, crucially, **no stale agents** — the
+ *  Sev1 world's INC-2288 is fourteen agents silent for 21+ days, and carrying
+ *  those rows into a world with no open incidents contradicted it. What remains
+ *  is the routine backlog that never justifies an incident. */
+export const quietEndpoints: EndpointSnapshot = {
+  stats: {
+    total: 612,
+    patchCompliance: 0.972,
+    checkedIn7d: 609,
+    bitlockerEncrypted: 601,
+    criticalPatchesMissing: 6,
+  },
+  attention: [
+    { computer: 'DEMO-DT-0117', assignedTo: 'shared / reception', os: 'Windows 10 22H2', issue: 'BitLocker not enabled', issueKind: 'no_bitlocker', lastCheckIn: minutesAgo(18) },
+    { computer: 'DEMO-LT-0501', assignedTo: 'd.silva', os: 'Windows 11 24H2', issue: '2 critical patches missing', issueKind: 'missing_patches', lastCheckIn: minutesAgo(41) },
     { computer: 'DEMO-DT-0092', assignedTo: 'lab / QA', os: 'Windows 10 22H2', issue: 'EOL build · upgrade required', issueKind: 'eol_build', lastCheckIn: daysAgo(3) },
   ],
 };

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { fixtures, serviceById, incidentById } from './index.js';
+import type { CheckRun } from '@ops-dash/shared';
+import { fixtures, serviceById, incidentById, checkRunsFor } from './index.js';
 
 const ORDER = ['m365', 'proofpoint', 'jira', 'zendesk', 'helpjuice', 'claude', 'openai'];
 
@@ -26,11 +27,26 @@ describe('quiet mode', () => {
     expect(q.incidents).toHaveLength(0);
   });
 
-  it('is affirmatively operational on both halves of every service', () => {
-    for (const s of q.services) {
-      expect(s.vendor.level).toBe('operational');
-      expect(s.ours.level).toBe('operational');
-    }
+  // Inverted from the plan's original, on John's decision. The Zendesk SSP has
+  // no per-service status field, so its level is `unknown` in BOTH worlds — an
+  // adapter does not gain the ability to tell "healthy" from "heard nothing"
+  // because the day is quiet. Amendment 1 then makes ALL SYSTEMS OPERATIONAL
+  // unreachable, in the fixtures and in production alike, and the quiet strip
+  // reads "6 AFFIRMED · 1 UNKNOWN". A quiet world that claimed the all-clear
+  // would be showing a screen the live system can never render.
+  it('affirms six services and leaves exactly one unknown', () => {
+    const levels = q.services.map((s) => s.vendor.level);
+    expect(levels.filter((l) => l === 'operational')).toHaveLength(6);
+    expect(levels.filter((l) => l === 'unknown')).toHaveLength(1);
+    expect(q.services.find((s) => s.vendor.level === 'unknown')?.id).toBe('zendesk');
+  });
+
+  it('cannot claim all systems operational', () => {
+    expect(q.services.every((s) => s.vendor.level === 'operational')).toBe(false);
+  });
+
+  it('keeps our own probes green on every service', () => {
+    for (const s of q.services) expect(s.ours.level).toBe('operational');
   });
 
   it('carries five closed incidents in recent history', () => {
@@ -156,21 +172,26 @@ describe('blocked-message reasons stay inside the documented union', () => {
 });
 
 describe('the counts the two worlds are specified with', () => {
-  it.each(['quiet', 'sev1'] as const)('%s has 7 services, 5 history rows, 5 check runs, 6 rules, 6 integrations', (mode) => {
+  it.each(['quiet', 'sev1'] as const)('%s has 7 services, 5 history rows, 6 rules, 6 integrations', (mode) => {
     const b = fixtures[mode];
     expect({
       services: b.services.length,
       recentHistory: b.recentHistory.length,
-      checkRuns: b.checkRuns.length,
       rules: b.rules.length,
       integrations: b.integrations.length,
       entraSignals: b.entra.signals.length,
-      endpointsAttention: b.endpoints.attention.length,
-      recentBlocked: b.email.recentBlocked.length,
-    }).toEqual({
-      services: 7, recentHistory: 5, checkRuns: 5, rules: 6, integrations: 6,
-      entraSignals: 8, endpointsAttention: 6, recentBlocked: 5,
-    });
+    }).toEqual({ services: 7, recentHistory: 5, rules: 6, integrations: 6, entraSignals: 8 });
+  });
+
+  it.each(['quiet', 'sev1'] as const)('%s gives all seven services five check runs of their own', (mode) => {
+    for (const s of fixtures[mode].services) {
+      const runs = checkRunsFor(mode, s.id);
+      expect(runs).toHaveLength(5);
+      // Every probe name belongs to this service, not to whichever service
+      // happened to be first: a single shared array put m365's mailflow probe
+      // on six other vendors' detail pages.
+      expect(new Set(runs.map((r) => r.check)).size).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('quiet has no open incidents and sev1 has four', () => {
@@ -178,6 +199,10 @@ describe('the counts the two worlds are specified with', () => {
     expect(fixtures.sev1.incidents).toHaveLength(4);
   });
 });
+
+/** Every check run in a bundle, across all seven services. */
+const allRuns = (mode: 'quiet' | 'sev1'): CheckRun[] =>
+  fixtures[mode].services.flatMap((s) => checkRunsFor(mode, s.id));
 
 describe('every timestamp is a real ISO instant in the past', () => {
   const stamps = (mode: 'quiet' | 'sev1'): string[] => {
@@ -189,7 +214,7 @@ describe('every timestamp is a real ISO instant in the past', () => {
         ...s.vendor.incidentsSince.map((v) => v.startedAt),
       ]),
       ...b.incidents.flatMap((i) => [i.openedAt, ...i.timeline.map((t) => t.at)]),
-      ...b.checkRuns.map((c) => c.at),
+      ...allRuns(mode).map((c) => c.at),
       ...b.entra.audit.map((a) => a.at),
       ...b.entra.signals.map((s) => s.lastSeen),
       ...b.endpoints.attention.map((e) => e.lastCheckIn),
@@ -203,6 +228,114 @@ describe('every timestamp is a real ISO instant in the past', () => {
     for (const at of stamps(mode)) {
       expect(Number.isNaN(Date.parse(at))).toBe(false);
       expect(Date.parse(at)).toBeLessThanOrEqual(now);
+    }
+  });
+
+  // The one deliberate exception: a maintenance window is announced, so it is
+  // the only fixture timestamp allowed to postdate now.
+  it('schedules maintenance in the future and ends it after it starts', () => {
+    const windows = [...fixtures.quiet.services, ...fixtures.sev1.services]
+      .map((s) => s.vendor.maintenance)
+      .filter((m) => m !== undefined);
+    expect(windows.length).toBeGreaterThan(0);
+    for (const w of windows) {
+      expect(Date.parse(w.scheduledFor)).toBeGreaterThan(Date.now());
+      expect(Date.parse(w.scheduledUntil)).toBeGreaterThan(Date.parse(w.scheduledFor));
+    }
+  });
+});
+
+describe('amendment 2 is reachable on a screen', () => {
+  it('puts one service into a scheduled maintenance window', () => {
+    const inMaintenance = fixtures.sev1.services.filter((s) => s.vendor.level === 'maintenance');
+    expect(inMaintenance.map((s) => s.id)).toEqual(['helpjuice']);
+    const only = inMaintenance[0];
+    expect(only?.vendor.label).toBe('Maintenance');
+    expect(only?.vendor.maintenance?.title).toBe('Search index rebuild');
+    // Maintenance is not a fault: our own probes are unaffected.
+    expect(only?.ours.level).toBe('operational');
+  });
+
+  it('records the vendor incidents a maintenance window did not produce', () => {
+    // `incidentsSince` is everything published since the last successful poll,
+    // not a current-state diff, so an announcement with no incident is [].
+    expect(serviceById('sev1', 'helpjuice')?.vendor.incidentsSince).toEqual([]);
+  });
+});
+
+describe('the numbers on the response-time card agree with the curve', () => {
+  it.each(['quiet', 'sev1'] as const)('%s derives latency, p50 and p95 from the series', (mode) => {
+    for (const s of fixtures[mode].services) {
+      const sorted = [...s.spark].sort((a, b) => a - b);
+      expect(s.latencyMs).toBe(s.spark[s.spark.length - 1]);
+      expect(s.p50Ms).toBeGreaterThanOrEqual(sorted[0] ?? 0);
+      expect(s.p50Ms).toBeLessThanOrEqual(s.p95Ms);
+      // At most 5% of 28 samples — one — may sit above p95. Zero is possible
+      // when the two highest samples tie, which is why this is a bound and not
+      // an equality. The plan's flat p95 left ten samples above the line.
+      expect(s.spark.filter((v) => v > s.p95Ms).length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('makes "above p95 from us-east" true of proofpoint rather than decorative', () => {
+    const pfpt = serviceById('sev1', 'proofpoint');
+    expect(pfpt?.ours.note).toContain('above p95');
+    expect(pfpt!.latencyMs).toBeGreaterThan(pfpt!.p95Ms);
+    const newest = checkRunsFor('sev1', 'proofpoint')[0];
+    expect(newest?.region).toBe('us-east');
+    expect(newest?.latencyMs).toBe(pfpt?.latencyMs);
+  });
+});
+
+describe('the copy quotes the timestamps it sits beside', () => {
+  it('anchors "last vendor update" to the vendor entry on the timeline', () => {
+    const vendorEntry = incidentById('sev1', 'INC-2291')?.timeline.find((t) => t.kind === 'vendor');
+    const minutes = Math.round((Date.now() - Date.parse(vendorEntry!.at)) / 60_000);
+    expect(serviceById('sev1', 'm365')?.vendor.note).toContain(`Last vendor update ${minutes} minutes ago`);
+  });
+
+  it('cannot queue the oldest message after the incident opened', () => {
+    const inc = incidentById('sev1', 'INC-2291')!;
+    const oldest = inc.blastRadius.find((b) => b.label === 'Oldest message');
+    const minutes = Number(/(\d+)h (\d+)m/.exec(oldest?.value ?? '')?.[1]) * 60
+      + Number(/(\d+)h (\d+)m/.exec(oldest?.value ?? '')?.[2]);
+    const queuedAt = Date.now() - minutes * 60_000;
+    expect(queuedAt).toBeLessThanOrEqual(Date.parse(inc.openedAt));
+  });
+
+  it('leaves no hard-coded wall-clock literal in the incident copy', () => {
+    // Every HH:MM in the fixtures is derived from an anchor. A literal would
+    // drift away from the timestamp it describes the moment the app is opened
+    // at a different hour, and the Overview row and incident hero would disagree.
+    for (const inc of fixtures.sev1.incidents) {
+      const opened = inc.metaParts.find((p) => p.startsWith('opened '));
+      const stamp = /(\d{2}):(\d{2})/.exec(opened ?? '');
+      if (!stamp) continue;
+      const d = new Date(inc.openedAt);
+      expect(stamp[0]).toBe(
+        `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      );
+    }
+  });
+});
+
+describe('a disabled rule cannot have produced an incident', () => {
+  it('reconciles INC-2288 with the Agent stale rule being off', () => {
+    const stale = fixtures.sev1.rules.find((r) => r.key === 'stale');
+    const inc = incidentById('sev1', 'INC-2288');
+    expect(stale?.enabled).toBe(false);
+    expect(inc?.ruleKey).toBe('stale');
+    const opened = inc?.timeline.find((t) => t.kind === 'opened');
+    // The rule is off, so nothing fired: this one says it was raised by hand.
+    expect(opened?.body).not.toMatch(/auto-created/i);
+    expect(opened?.body).toMatch(/by hand/i);
+  });
+
+  it('keeps every other incident attributable to an enabled rule', () => {
+    const enabled = new Set(fixtures.sev1.rules.filter((r) => r.enabled).map((r) => r.key));
+    for (const inc of fixtures.sev1.incidents) {
+      const opened = inc.timeline.find((t) => t.kind === 'opened');
+      if (/auto-created/i.test(opened?.body ?? '')) expect(enabled.has(inc.ruleKey)).toBe(true);
     }
   });
 });
@@ -229,8 +362,16 @@ describe('the sev1 world does not contradict itself', () => {
     const m365 = serviceById('sev1', 'm365')!;
     expect(m365.ours.passing).toBe(1);
     expect(m365.ours.total).toBe(4);
-    expect(s.checkRuns.filter((c) => c.result !== 'pass')).toHaveLength(1);
-    expect(s.checkRuns.find((c) => c.result === 'timeout')?.latencyMs).toBeNull();
+    const runs = checkRunsFor('sev1', 'm365');
+    const failed = runs.filter((c) => c.result !== 'pass');
+    // Named, not merely counted: the note calls out three regions by name, and
+    // flipping only the newest row left two of them visibly green in the table.
+    expect(failed.map((c) => c.region)).toEqual(['us-east', 'us-west', 'eu-west']);
+    for (const c of failed) expect(c.latencyMs).toBeNull();
+    expect(runs.find((c) => c.region === 'ap-south')?.result).toBe('pass');
+    for (const region of ['us-east', 'us-west', 'eu-west']) {
+      expect(m365.ours.note).toContain(region);
+    }
   });
 
   it('keeps every incident timeline newest first', () => {
@@ -273,12 +414,24 @@ describe('the quiet world does not contradict itself either', () => {
   const q = fixtures.quiet;
 
   it('passes every check run', () => {
-    expect(q.checkRuns.every((c) => c.result === 'pass')).toBe(true);
-    expect(q.checkRuns.every((c) => typeof c.latencyMs === 'number')).toBe(true);
+    const runs = allRuns('quiet');
+    expect(runs.every((c) => c.result === 'pass')).toBe(true);
+    expect(runs.every((c) => typeof c.latencyMs === 'number')).toBe(true);
   });
 
   it('publishes no vendor incidents at all', () => {
     for (const s of q.services) expect(s.vendor.incidentsSince).toEqual([]);
+  });
+
+  it('is quieter than the Sev1 world on every security page, not just the tiles', () => {
+    expect(q.entra.stats.failedSignIns24h).toBeLessThan(fixtures.sev1.entra.stats.failedSignIns24h);
+    expect(q.entra.stats.riskyConfirmedCompromised).toBe(0);
+    // No open incident means no rule fired, so nothing may be sitting on the
+    // Entra page that a rule would have raised an incident for.
+    expect(q.entra.signals.find((x) => x.key === 'expiring_credentials')?.count).toBe(0);
+    expect(q.endpoints.attention.some((e) => e.issueKind === 'stale_agent')).toBe(false);
+    expect(q.endpoints.stats.patchCompliance).toBeGreaterThan(fixtures.sev1.endpoints.stats.patchCompliance);
+    expect(q.email.stats.credentialPhishingDelta).toBeLessThan(0);
   });
 
   it('keeps every probe passing four of four', () => {
@@ -290,6 +443,14 @@ describe('the quiet world does not contradict itself either', () => {
 });
 
 describe('lookups', () => {
+  it('returns an empty check list for an id that is not a service', () => {
+    // The detail page indexes by route param, i.e. an arbitrary string. This has
+    // to be total, or a bad URL reads a Record with a key it does not have.
+    expect(checkRunsFor('sev1', 'nope')).toEqual([]);
+    expect(checkRunsFor('sev1', 'constructor')).toEqual([]);
+    expect(checkRunsFor('sev1', '__proto__')).toEqual([]);
+  });
+
   it('returns undefined rather than throwing for an id that is not there', () => {
     expect(serviceById('sev1', 'nope')).toBeUndefined();
     expect(incidentById('sev1', 'INC-9999')).toBeUndefined();

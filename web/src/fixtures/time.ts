@@ -21,11 +21,28 @@ export const minutesAgo = (n: number): string => iso(NOW - n * 60_000);
 export const hoursAgo = (n: number): string => minutesAgo(n * 60);
 export const daysAgo = (n: number): string => minutesAgo(n * 24 * 60);
 
-/** Local HH:MM, n minutes before now — the prototype's clock format. */
-export function clock(minutesBefore: number): string {
-  const d = new Date(NOW - minutesBefore * 60_000);
+/** Local HH:MM of an instant — the prototype's clock format. Every wall-clock
+ *  string in the fixture copy goes through here, so no literal time can drift
+ *  away from the timestamp it describes. */
+export function clockOf(at: string): string {
+  const d = new Date(at);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+
+/** Local HH:MM, n minutes before now. */
+export const clock = (minutesBefore: number): string => clockOf(minutesAgo(minutesBefore));
+
+/** '1h 27m' / '43m' — an elapsed span, in the prototype's format. */
+export function span(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/** An instant in the future, for a scheduled maintenance window. The only
+ *  forward-looking helper here, and the only place a fixture timestamp is
+ *  allowed to postdate now. */
+export const hoursAhead = (n: number): string => iso(NOW + n * 60 * 60_000);
 
 /** Local HH:MM on the calendar day `days` before today — 'yesterday 17:20'. */
 export function dayAgoAt(days: number, hour: number, minute: number): string {
