@@ -59,12 +59,11 @@ Linux notes:
 
 ## Pick up here
 
-**Wave 3½ — Task 10A, `ops-e2e` solo.** Playwright: 28 visual baselines, the interaction tests
-and the real offline proof. Read "Task 10A environment notes" and "How to set the theme when
-measuring or screenshotting" below **before starting** — six facts are already established and
-rediscovering them costs hours. Then gate G3½, then Wave 4.
+**Wave 4 — Tasks 11, 11A and 12, lead solo.** Wiring and the fidelity pass, the security review,
+and `CLAUDE.md`. Read "What Task 11's fidelity pass should and should not redo" first — 152
+baselines already discharge most of it, and the remainder is listed in priority order.
 
-Superseded, for the record: Wave 2 (Task 6, shell) and Wave 1 (Tasks 4 and 5). `ops-primitives` builds the eight
+Superseded, for the record: Waves 0-3½. `ops-primitives` builds the eight
 primitives, the five shared dashboard components and `theme/statusColor.ts`; `ops-fixtures`
 builds the prototype-derived fixture modules. Disjoint ownership; dispatch both together, then
 run gate G1.
@@ -399,6 +398,66 @@ independent implementations could, and did — that was the pre-G1 `ageLabel` si
 why publishing it was the fix that mattered. The hoist is tidying, not a defect repair. Anyone
 reading "fourth instance of the duplication pattern" without this paragraph will reasonably go
 looking for something broken on screen and find nothing.
+
+## Gate G3.5 — closed (2026-09-19)
+
+Task 10A complete at `79a4154`, tagged `wave-3.5`. **152 baselines, 153 e2e tests, one expected
+red** (the CSP test Task 11A lands). 513 unit tests, typecheck 0, build 0.
+
+**The task's own tooling was wrong twice, in the same way, at two scales.** The plan specified
+`maxDiffPixelRatio: 0.01` — about 13,000 pixels on a full-page capture — and a 348-pixel
+regression passed green. Tightened to `maxDiffPixels: 40`, a **16-pixel** radius change then
+passed. Now 4.
+
+The method that settles it: **calibrate on the noise floor, not on a mutation's magnitude.** A
+budget set from one mutation is set to that mutation's size. Measured here: **0** on a repeat
+run, **2** cross-build jitter, **16** the smallest real design change, **348** the smallest
+regression. The 8x gap between jitter and real change is the budget.
+
+And the detection signal, which will recur: **a commit predicted a visual change and the
+baselines did not move.** The suite was green and wrong, and the tolerance is the first suspect.
+
+**Holding a stale baseline is sometimes the right call.** Eight captures were held deliberately
+rather than regenerated around a 6px layout shift. After the fix they compared at **zero** pixels
+against images from before the shift existed — proof it was reverted rather than improved.
+Regenerating would have made the shift the acceptance criterion and re-blessed it silently.
+
+**Two lessons worth carrying past this milestone:**
+
+- **Measure the element AND the gap to its neighbour.** A `data-testid` wrapper left the
+  sparkline correct at 26px and put 6px *underneath* it, so an assertion on the SVG alone stayed
+  green through the whole episode. Most spacing defects live between elements, where nothing is
+  wrong with either one.
+- **A fix to a capture harness is itself a baseline-moving change** and needs the same "which
+  moved and why" account as a code change. A `shotAround` bug produced silently-green **empty**
+  captures; the first fix scrolled unconditionally and rewrote six clips that were fine.
+
+## What Task 11's fidelity pass should and should not redo
+
+`ops-e2e`'s scoping, adopted. **Cut**: walking screens for regressions, and every measurement
+traceable to a README line — seven routes x two worlds x two themes x two viewports are
+pixel-compared at a 4-pixel budget, with hover, focus and disabled states. Contrast over 1,696
+text nodes in a real engine beats any eyeball. The offline proof and console cleanliness are
+mechanical.
+
+**Keep, in priority order:**
+
+1. **Compare against the prototype.** The baselines prove the app matches *itself*; nothing in
+   the suite has ever opened `IT Ops Dashboard.dc.html`. **Both fidelity defects found at G3.5 —
+   radius 10, the clickable tile — came from reading the prototype's source, never from a test.**
+   *Caveat:* the prototype carries placeholder ten-service data, so this needs someone who
+   already knows which differences are intended — seven services, the quiet subtitle, the
+   amended pill rung, `unknown` never green. A naive comparison generates false findings faster
+   than real ones.
+2. **Judgement with no assertion form.** Is the quiet `/incidents/:id` empty state — one bare
+   sentence, no card, no icon — acceptable beside the Overview's iconned, carded one? Is
+   "Outstanding invoice #8..." enough subject at 1000px? Is the alert row's action set right
+   when it wraps to three lines?
+3. **Copy.** No pixel test reads words: seven services throughout, tense, and the honesty of the
+   `needs_auth` and `unknown` wording.
+4. **The two viewports nobody has looked at** — 768 and 1920.
+5. **Dark mode as a designed artefact** rather than a contrast score. Zero AA failures does not
+   answer whether the palette reads as deliberate.
 
 ## Gate G3 — closed with accepted findings (2026-09-19)
 
