@@ -23,7 +23,8 @@
 
 import type { ServiceId, StatusLevel, VendorPlatform, Incident, CheckRun } from '@ops-dash/shared';
 import { openStore, type Store } from './store/db.js';
-import { loadVendorFeeds, type Vendor } from './adapters/vendorstatus/common.js';
+import { currentLevel } from './store/currentLevel.js';
+import { loadVendorFeeds } from './adapters/vendorstatus/common.js';
 import { pollVendor } from './adapters/vendorstatus/index.js';
 import { runAll, DEFAULT_PROBES } from './adapters/synthetic/runner.js';
 import { createSchedule, type Source } from './poller/schedule.js';
@@ -128,27 +129,20 @@ export function createApp(opts: AppOptions = {}) {
     return SERVICE_ORDER.map((id) => {
       const platform = SERVICE_PLATFORM[id];
       const snapshot = store.getSnapshot(vendorSource(id));
-      const vendorData = snapshot?.data as Vendor | undefined;
 
-      let level: StatusLevel = 'unknown';
+      // `currentLevel`, never `data.level`. A degraded snapshot's payload is
+      // history: the last reading we could actually take. Feeding it to a live
+      // rule would open a Sev1 on evidence that is minutes old — see the
+      // argument in store/currentLevel.ts.
+      const level: StatusLevel = currentLevel(snapshot);
       let errorCode: string | undefined;
       if (!snapshot) {
         // No adapter, or never polled. Both are "we have not read this", and
         // `platform_unsupported` is the code the blackout rule keys off to tell
         // a documented gap from a feed that broke.
         errorCode = feeds.some((f) => f.id === id) ? 'never_polled' : 'platform_unsupported';
-      } else {
-        // The level comes from the payload; the error comes from the envelope.
-        // Amendment 9 — they are not mutually exclusive, and a stale panel is
-        // exactly the case where both are present.
-        level = vendorData?.level ?? 'unknown';
-        if (snapshot.error) {
-          errorCode = snapshot.error.code;
-          // A failed read never renders as green, one layer below the UI. The
-          // stored payload may be an operational one from ten minutes ago; it
-          // is not evidence about now.
-          level = 'unknown';
-        }
+      } else if (snapshot.error) {
+        errorCode = snapshot.error.code;
       }
 
       return {

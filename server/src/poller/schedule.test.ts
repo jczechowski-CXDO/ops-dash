@@ -343,3 +343,106 @@ describe('a thrown value that resists being stringified', () => {
     }
   });
 });
+
+
+describe('the poller says what it is doing', () => {
+  /** Captures instead of printing. Passed explicitly everywhere below, so these
+   *  tests assert the lines rather than merely keeping stdout tidy. */
+  const capture = () => {
+    const lines: string[] = [];
+    return { lines, log: (l: string) => void lines.push(l) };
+  };
+
+  it('announces the baseline in a log line, not only in the return value', async () => {
+    // Global Constraints: the first successful poll "must say so explicitly in
+    // its return value AND its log line". The return value half was covered;
+    // this half was missing entirely and no later task owned it. It matters
+    // because the first successful poll is the one moment an operator cannot
+    // tell a real all-clear from a cold start.
+    const c = capture();
+    const s = createSchedule([src()], c.log);
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(c.lines.filter((l) => l.startsWith('baseline '))).toEqual([
+      'baseline vendor:jira — first successful poll, nothing to compare against yet',
+    ]);
+
+    // And exactly once. Sixty "still the baseline" lines an hour would bury it.
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(c.lines.filter((l) => l.startsWith('baseline '))).toHaveLength(1);
+    s.stop();
+  });
+
+  it('never announces a baseline for a source that has only ever failed', async () => {
+    const c = capture();
+    const s = createSchedule([src({ run: vi.fn(async () => errored()) })], c.log);
+    s.start();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(c.lines.filter((l) => l.startsWith('baseline '))).toEqual([]);
+    expect(c.lines.some((l) => l.includes('http_503'))).toBe(true);
+    s.stop();
+  });
+
+  it('distinguishes our bug from a vendor outage in what it logs', async () => {
+    // Same distinction as `lastError`'s prefix, at the place a human reads it.
+    const c = capture();
+    const s = createSchedule(
+      [
+        src({ name: 'boom', run: vi.fn(async () => { throw new Error('adapter is broken'); }) }),
+        src({ name: 'feed', run: vi.fn(async () => errored('http_500')) }),
+      ],
+      c.log,
+    );
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(c.lines.some((l) => l.startsWith('ERROR boom') && l.includes('our bug'))).toBe(true);
+    expect(c.lines.some((l) => l.startsWith('fail feed') && l.includes('http_500'))).toBe(true);
+    // The feed failing is NOT reported as our bug.
+    expect(c.lines.some((l) => l.startsWith('ERROR feed'))).toBe(false);
+    s.stop();
+  });
+});
+
+describe('a source that hangs forever', () => {
+  it('records WHEN a tick was skipped, not just how many were', async () => {
+    // G2 MEDIUM 8. `lastRunAt` freezes at the start of a run that never settles,
+    // so staleness computed from it stops growing — a source hung for an hour
+    // looks exactly as stale as it did a minute in. `skipped` climbs, so the
+    // skip was never silent, but nothing recorded when it last happened.
+    const hangs = src({ run: vi.fn(() => new Promise<never>(() => {})) });
+    const s = createSchedule([hangs], () => {});
+    s.start();
+
+    await vi.advanceTimersByTimeAsync(0);
+    const st0 = s.statusOf('vendor:jira')!;
+    expect(st0.skipped).toBe(0);
+    expect(st0.lastSkipAt).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    const st1 = s.statusOf('vendor:jira')!;
+    expect(st1.runs).toBe(1);
+    expect(st1.skipped).toBe(3);
+    expect(st1.lastSkipAt).toBeDefined();
+
+    // The point: lastRunAt is frozen, lastSkipAt is not. A consumer now has a
+    // clock that keeps moving while the source is wedged.
+    const frozen = st1.lastRunAt;
+    await vi.advanceTimersByTimeAsync(120_000);
+    const st2 = s.statusOf('vendor:jira')!;
+    expect(st2.lastRunAt).toBe(frozen);
+    expect(Date.parse(st2.lastSkipAt!)).toBeGreaterThan(Date.parse(st1.lastSkipAt!));
+    s.stop();
+  });
+
+  it('does not stop the other sources while it hangs', async () => {
+    const hangs = src({ name: 'hangs', run: vi.fn(() => new Promise<never>(() => {})) });
+    const alive = src({ name: 'alive' });
+    const s = createSchedule([hangs, alive], () => {});
+    s.start();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(alive.run).toHaveBeenCalledTimes(4);
+    s.stop();
+  });
+});

@@ -54,6 +54,14 @@ export type SourceStatus = {
    *  than hidden: a source skipping steadily is one whose interval is too short
    *  for its upstream, and nobody would otherwise find out. */
   skipped: number;
+  /** When the most recent tick was dropped.
+   *
+   *  G2 MEDIUM 8. `lastRunAt` freezes at the START of a run that never settles,
+   *  so a consumer computing staleness from it sees a fixed age rather than a
+   *  growing one — a source hung for an hour looks exactly as stale as it did a
+   *  minute in. `skipped` climbs, so the skip is not silent, but nothing
+   *  recorded WHEN. This does. */
+  lastSkipAt?: string;
 };
 
 /** The one place a poll is recorded as failed, so the two paths into it — an
@@ -85,7 +93,17 @@ function describe(cause: unknown): string {
   }
 }
 
-export function createSchedule(sources: Source[]) {
+/** Where the poller talks.
+ *
+ *  A parameter with a default rather than a bare `console.log`, because a test
+ *  that has to silence stdout to stay readable is a test that will one day
+ *  silence the thing it was meant to check. The default writes to stderr:
+ *  stdout may one day carry structured output, and a log line is not a result. */
+export type Logger = (line: string) => void;
+
+const defaultLog: Logger = (line) => process.stderr.write(`[poller] ${line}\n`);
+
+export function createSchedule(sources: Source[], log: Logger = defaultLog) {
   const status = new Map<string, SourceStatus & { inFlight: boolean; hasSucceeded: boolean }>();
   const timers: NodeJS.Timeout[] = [];
   for (const s of sources) {
@@ -100,6 +118,8 @@ export function createSchedule(sources: Source[]) {
     // finds, which is honest and costs one cycle.
     if (st.inFlight) {
       st.skipped += 1;
+      st.lastSkipAt = new Date().toISOString();
+      log(`skip ${source.name} — previous run still in flight (${st.skipped} so far)`);
       return;
     }
 
@@ -115,18 +135,25 @@ export function createSchedule(sources: Source[]) {
       // 4); a degraded one told us most of it. Neither is a failure to look.
       if (result.error) {
         fail(st, `${result.error.code}: ${result.error.message}`);
+        log(`fail ${source.name} — ${st.lastError}`);
         return;
       }
       st.baseline = !st.hasSucceeded;   // true on the first SUCCESS only
       st.hasSucceeded = true;
       st.lastOkAt = st.lastRunAt;
       delete st.lastError;
+      // Global Constraints: a baseline "must say so explicitly in its return
+      // value AND its log line". The return value half was done; this is the
+      // other half. It matters because the first successful poll is the one
+      // moment the operator cannot tell a real all-clear from a cold start.
+      if (st.baseline) log(`baseline ${source.name} — first successful poll, nothing to compare against yet`);
     } catch (cause) {
       // Swallowed on purpose, and recorded. An unhandled rejection here would
       // take the process down and with it every other source. Reaching this
       // means an adapter broke its own contract, which is OUR bug, so the
       // message says so rather than reading like a vendor outage.
       fail(st, `threw: ${describe(cause)}`);
+      log(`ERROR ${source.name} threw — this is our bug, not the vendor's: ${st.lastError}`);
     } finally {
       st.inFlight = false;
     }
@@ -137,8 +164,20 @@ export function createSchedule(sources: Source[]) {
       for (const source of sources) {
         // Immediately, then on the interval. Waiting a full interval would mean
         // fifteen empty minutes after every restart for a 15-minute source.
-        void tick(source);
-        const t = setInterval(() => void tick(source), source.intervalMs);
+        // A second floor under the error boundary. `tick` already catches
+        // everything, including a value that resists being stringified — but
+        // this is called as `void tick(...)`, so if anything ever DID escape it
+        // would become an unhandled rejection, and Node 24 kills the process on
+        // those. That would take every other source down with it, which is the
+        // exact blackout-of-our-own-making this file exists to prevent. Cheap
+        // insurance against a future edit to the catch block.
+        const guarded = () => {
+          tick(source).catch((cause: unknown) => {
+            log(`ERROR ${source.name} escaped its own error boundary: ${describe(cause)}`);
+          });
+        };
+        guarded();
+        const t = setInterval(guarded, source.intervalMs);
         // Do not hold the process open for a timer; the server's listener does
         // that, and a poller that outlives it is a leak in tests.
         t.unref?.();
