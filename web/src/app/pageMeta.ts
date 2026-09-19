@@ -1,4 +1,5 @@
 import type { ServiceStatus } from '@ops-dash/shared';
+import { isAffirmed } from '../theme/statusColor.js';
 import type { FixtureBundle } from '../fixtures/index.js';
 import { ROUTE } from './routes.js';
 
@@ -8,16 +9,13 @@ const SERVICE_PREFIX = ROUTE.service.replace(':id', '');
 const INCIDENT_PREFIX = ROUTE.incident.replace(':id', '');
 
 /**
- * A service counts as affirmed only when BOTH halves say so — the vendor's own
- * feed and our synthetic probes. This is the same predicate `allOperational`
- * applies across the whole list (amendment 1), spelled once here because the
- * subtitle needs the count and not only the verdict; `pageMeta.test.ts` pins the
- * two to each other so they cannot drift apart.
+ * How many services are affirmatively healthy, using the ONE definition of that
+ * (G2 HIGH-1). This file used to re-implement the predicate; two copies of "is
+ * this healthy" is how the header comes to say 7 of 7 affirmed while the
+ * Overview banner, one component away, says the opposite. `isAffirmed` lives in
+ * theme/statusColor.ts beside `allOperational`, which is now defined in terms
+ * of it, so there is nothing left here to drift.
  */
-function isAffirmed(s: ServiceStatus): boolean {
-  return s.vendor.level === 'operational' && s.ours.level === 'operational';
-}
-
 export function affirmedCount(services: ServiceStatus[]): number {
   return services.filter(isAffirmed).length;
 }
