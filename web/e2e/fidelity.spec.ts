@@ -259,6 +259,37 @@ test('every table keeps its last column reachable, in both worlds', async ({ pag
   expect(tables).toBeGreaterThan(10);
 });
 
+test('no table cell is truncated where there is room for it', async ({ page }, testInfo) => {
+  // The companion to the test above, and the reason it needs one: `truncate`
+  // fixed the 1000px clip by putting `max-width: 0` on the Subject cell, which
+  // under `table-layout: auto` makes that column give up width FIRST and
+  // ALWAYS. At 1440 the Email subjects now read "Outstanding invoic…" with
+  // roughly 180px of empty table between them and the Reason column — text that
+  // rendered in full before the fix, lost at the viewport most people use.
+  //
+  // "Yield when there is no room" and "always be the narrowest column" are
+  // different behaviours, and only the first is what the narrow fix needed.
+  // The usual shape is `max-width: 0` together with `width: 100%`, so the cell
+  // absorbs the slack and truncates only when there is none.
+  //
+  // Skipped at 1000px, where truncating IS the correct behaviour.
+  test.skip(testInfo.project.name === 'narrow-1000', 'truncation is correct at 1000px');
+  const ellipsised: string[] = [];
+  for (const world of WORLDS) {
+    for (const [, path] of ROUTES) {
+      await visit(page, path, world, 'light');
+      ellipsised.push(
+        ...(await page.evaluate(() =>
+          [...document.querySelectorAll('td')]
+            .filter((el) => el.scrollWidth > el.clientWidth + 1)
+            .map((el) => `${location.pathname} "${(el.textContent ?? '').trim().slice(0, 24)}"`),
+        )),
+      );
+    }
+  }
+  expect(ellipsised).toEqual([]);
+});
+
 test('the only animation on the page is the refresh dot', async ({ page }) => {
   // README § Shell: the auto-refresh dot is "animated pulseDot 2s ease-in-out
   // infinite". Anything else animating is something nobody asked for.

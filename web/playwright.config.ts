@@ -48,25 +48,31 @@ export default defineConfig({
     // differ.
     colorScheme: 'light',
   },
-  // Pixel-diff tolerance, MEASURED rather than guessed.
+  // Pixel-diff tolerance, MEASURED rather than guessed, and re-measured once the
+  // numbers said the first answer was wrong.
   //
-  // The plan specified `maxDiffPixelRatio: 0.01`. That is 1% of a 1440x900
-  // full-page capture — about 13,000 pixels — and it is far too loose to
-  // protect anything: a mutation that changed the h1's letter-spacing on every
-  // baseline moved **348 pixels** and the suite stayed green. A baseline that
-  // cannot see a changed heading is decoration.
+  // Four data points, all from this machine:
+  //   0 px   — a repeat run against the same build, across all 114 captures,
+  //            confirmed twice at zero tolerance. The noise floor is genuinely
+  //            zero, not "small".
+  //   2 px   — the largest jitter seen ACROSS builds, on a focus-ring clip.
+  //  16 px   — the smallest real DESIGN change measured: tiles and alert rows
+  //            moving from radius 12 to the prototype's 10, over twelve
+  //            elements on a 1440x900 page. A 2px radius only alters a sliver
+  //            of each corner, and most of that sliver sits against a
+  //            same-coloured background.
+  // 348 px   — the smallest REGRESSION measured, an h1 letter-spacing change.
   //
-  // A clean re-run of all 56 route baselines on the generating machine differs
-  // by **0** pixels, so the same-machine noise floor is zero and the only thing
-  // the tolerance buys is slack for a different machine's font rasterisation.
-  // 40 absolute pixels is roughly a ninth of the smallest regression measured
-  // here, and it applies to the small state clips too, where a ratio would have
-  // been meaninglessly generous.
+  // The plan's `maxDiffPixelRatio: 0.01` is ~13,000 pixels and swallowed the
+  // 348. My own first answer, 40, was calibrated against that mutation alone
+  // and would have swallowed the 16 — so a radius regression would have been
+  // invisible. 4 sits above the cross-build jitter and four times below the
+  // smallest change anyone has actually made here.
   //
-  // Note that these baselines carry a `-linux` suffix but not a machine
-  // identity: a Linux box with different fontconfig settings WILL diff, and
-  // this tolerance makes that visible rather than papering over it.
-  expect: { toHaveScreenshot: { maxDiffPixels: 40, animations: 'disabled' } },
+  // These baselines carry a `-linux` suffix but not a machine identity: a Linux
+  // box with different fontconfig settings WILL diff, and this tolerance makes
+  // that visible rather than papering over it.
+  expect: { toHaveScreenshot: { maxDiffPixels: 4, animations: 'disabled' } },
   projects: [
     { name: 'desktop-1440', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'narrow-1000', use: { ...devices['Desktop Chrome'], viewport: { width: 1000, height: 900 } } },
