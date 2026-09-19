@@ -57,8 +57,18 @@ describe('every colour is a token', () => {
 
 describe('nothing reaches off-box', () => {
   it('no outbound reference in the served assets', () => {
-    const assets = walk(join(WEB, 'public'), ['.css', '.html', '.js']);
-    const offenders = assets.filter((f) => /https?:\/\//.test(read(f)));
+    // web/index.html is the file that actually ships and the file Task 11A edits,
+    // and it sits OUTSIDE public/ — scoping this to public/ alone left the most
+    // important file unguarded. Extensions beyond css/html/js are included because
+    // an .svg, .json or .webmanifest dropped into public/ is served just the same.
+    const assets = [
+      ...walk(join(WEB, 'public'), ['.css', '.html', '.js', '.svg', '.json', '.webmanifest']),
+      join(WEB, 'index.html'),
+    ];
+    // Also catches protocol-relative //host/path, which inherits the page scheme
+    // and is just as outbound as an explicit https://.
+    const outbound = /https?:\/\/|(^|[^:])\/\/[a-z0-9.-]+\.[a-z]{2,}/i;
+    const offenders = assets.filter((f) => outbound.test(read(f)));
     expect(offenders.map(rel)).toEqual([]);
   });
 
@@ -85,7 +95,12 @@ describe('no credentials, ever', () => {
 });
 
 describe('fixtures stay redacted', () => {
-  const fixtures = () => walk(join(WEB, 'src/fixtures'), ['.ts']).map(read).join('\n');
+  // Deliberately scans ALL of web/src, not just src/fixtures. Scoping this to one
+  // directory meant a redaction failure one level up — web/src/fixtures.ts rather
+  // than web/src/fixtures/*.ts — passed every guard, and made "directory absent"
+  // indistinguishable from "nothing found". Redaction binds everywhere, tests
+  // included, so the guard should look everywhere.
+  const fixtures = () => src().map(read).join('\n');
 
   it('carries no real corporate identifier', () => {
     // CXDO-GraphExport and Stellar-Connector are app-registration names, not
@@ -104,7 +119,12 @@ describe('fixtures stay redacted', () => {
 describe('HTML sinks', () => {
   it('only Icon.tsx may use dangerouslySetInnerHTML', () => {
     const offenders = src().filter(
-      (f) => read(f).includes('dangerouslySetInnerHTML') && !f.endsWith('aurora/Icon.tsx'),
+      (f) =>
+        read(f).includes('dangerouslySetInnerHTML') &&
+        !f.endsWith('aurora/Icon.tsx') &&
+        // Icon.test.tsx proves the sink cannot be hijacked via prop spread, so it
+        // must name it. That test is the reason this exclusion is safe to make.
+        !f.endsWith('aurora/Icon.test.tsx'),
     );
     expect(offenders.map(rel)).toEqual([]);
   });
@@ -117,5 +137,69 @@ describe('HTML sinks', () => {
       const decoded = JSON.parse(`"${body}"`);
       expect(decoded.replace(/<path\b[^>]*\/>/g, '').trim()).toBe('');
     }
+  });
+});
+
+describe('the contract test cannot become a tautology', () => {
+  // contracts.ts is frozen; contracts.test.ts is not. The cheapest way to green a
+  // failing exact-shape assertion is to paste the shape out of contracts.ts — and
+  // the result still reports every assertion passing, with nothing to signal that
+  // the test now only proves the file equals itself. That is defect G-2's failure
+  // class one level up: a green suite asserting nothing.
+  //
+  // This makes the check permanent: the field set is derived from all three files
+  // and all three must agree. Because the expected shapes must match
+  // DATA_CONTRACTS.md — the source of record — it also enforces "amend the
+  // document first" mechanically rather than by convention.
+  //
+  // It lives here, not in shared/, because this file is already node-environment
+  // and already does disk I/O; a node:fs import under shared/ would reproduce the
+  // B-1 typecheck failure.
+
+  const DOC = join(REPO, 'design_handoff_it_ops_dashboard/DATA_CONTRACTS.md');
+  const CONTRACT = join(REPO, 'shared/src/contracts.ts');
+  const CONTRACT_TEST = join(REPO, 'shared/src/contracts.test.ts');
+
+  /** `name: type` and `name?: type` pairs, comments and whitespace normalised away. */
+  function fields(source: string): string[] {
+    const out: string[] = [];
+    for (const raw of source.split('\n')) {
+      const line = raw.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '').trim();
+      const m = /^([A-Za-z_$][\w$]*)(\??):\s*(.+?);?$/.exec(line);
+      if (!m) continue;
+      const [, name, opt, type] = m;
+      // Skip prose and code that merely looks like a field.
+      if (/^(import|export|const|let|var|function|return|it|describe)$/.test(name!)) continue;
+      out.push(`${name}${opt}: ${type!.replace(/\s+/g, ' ').trim()}`);
+    }
+    return out.sort();
+  }
+
+  /** Only the fenced ```ts blocks of the markdown are contract text. */
+  function tsBlocks(md: string): string {
+    return [...md.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
+  }
+
+  it('DATA_CONTRACTS.md, contracts.ts and contracts.test.ts declare the same fields', () => {
+    const doc = fields(tsBlocks(read(DOC)));
+    const impl = fields(read(CONTRACT));
+    // The test instantiates the SourceResult<T> generic at number, so normalise it
+    // back to T. This is the single known, legitimate difference between the three.
+    // Stop at the sentinel: below it the test file uses deliberately malformed
+    // literals as hostile probes, which are not contract shapes.
+    const testSource = read(CONTRACT_TEST).split('@contract-shapes-end')[0]!;
+    const spec = fields(testSource).map((f) => f.replace(/^data: number$/, 'data: T'));
+
+    const missing = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
+
+    expect({
+      inDocNotInImpl: missing(doc, impl),
+      inImplNotInDoc: missing(impl, doc),
+    }).toEqual({ inDocNotInImpl: [], inImplNotInDoc: [] });
+
+    expect({
+      inDocNotInTest: missing(doc, spec),
+      inTestNotInDoc: missing(spec, doc),
+    }).toEqual({ inDocNotInTest: [], inTestNotInDoc: [] });
   });
 });

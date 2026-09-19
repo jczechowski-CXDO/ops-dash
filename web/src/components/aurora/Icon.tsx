@@ -7,7 +7,14 @@ export type IconProps = {
   color?: string;
   className?: string;
   style?: CSSProperties;
-} & Omit<SVGProps<SVGSVGElement>, 'name' | 'color' | 'style' | 'className'>;
+} & Omit<
+  SVGProps<SVGSVGElement>,
+  // dangerouslySetInnerHTML is omitted deliberately: this component is the ONLY
+  // sanctioned HTML sink in the app, and a caller that could pass it would turn
+  // <Icon {...props} /> into an arbitrary-markup injection point. The repository
+  // guard greps for the literal string, so such a call site would pass unnoticed.
+  'name' | 'color' | 'style' | 'className' | 'dangerouslySetInnerHTML'
+>;
 
 export function Icon({
   name,
@@ -27,9 +34,11 @@ export function Icon({
       className={`aur-icon ${className}`}
       aria-hidden={rest['aria-label'] ? undefined : true}
       style={{ display: 'inline-block', flexShrink: 0, color, verticalAlign: 'middle', ...style }}
-      // Build-time-generated geometry from the vendored Aurora bundle. No user input.
-      dangerouslySetInnerHTML={{ __html: glyph.body }}
       {...rest}
+      // Build-time-generated geometry from the vendored Aurora bundle. No user input.
+      // MUST stay below {...rest}: JSX spread is last-wins, so with this above it a
+      // caller could replace the glyph body with arbitrary markup.
+      dangerouslySetInnerHTML={{ __html: glyph.body }}
     />
   );
 }

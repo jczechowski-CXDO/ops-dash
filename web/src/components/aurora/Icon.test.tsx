@@ -26,3 +26,22 @@ describe('Icon', () => {
     expect(container.querySelector('svg')).not.toHaveAttribute('aria-hidden');
   });
 });
+
+describe('Icon is not an injection point', () => {
+  it('a caller cannot replace the glyph body via prop spread', () => {
+    // Regression for G0 finding H-1. Before the fix, {...rest} was spread AFTER
+    // dangerouslySetInnerHTML, so this rendered <image href="x" onerror="1">.
+    // The cast is the point of the test: it proves the runtime is safe even when
+    // the type-level Omit is defeated, which is what `<Icon {...someProps} />`
+    // in a view would do. The repository guard cannot catch that — it greps for
+    // the literal string and a spread does not contain it.
+    const hostile = {
+      dangerouslySetInnerHTML: { __html: '<image href="x" onerror="1">' },
+    } as unknown as { 'aria-label'?: string };
+    const { container } = render(<Icon name="shield" {...hostile} />);
+    const svg = container.querySelector('svg');
+    expect(svg?.innerHTML).toContain('<path');
+    expect(svg?.innerHTML).not.toContain('<image');
+    expect(svg?.innerHTML).not.toContain('onerror');
+  });
+});

@@ -231,7 +231,13 @@ describe('contracts — endpoints', () => {
 });
 
 describe('contracts — email', () => {
-  it('BlockedMessage is exact, and reason stays open-ended', () => {
+  // NOTE: `reason`'s six documented literals are NOT observable in the type system.
+  // TypeScript collapses `'Credential phishing' | ... | string` to plain `string`,
+  // on both sides of the assertion, so this test cannot tell the documented union
+  // from bare `string` and does not try to. The literals are enforced nowhere by
+  // types; enforce them where they can be seen — a fixture assertion that every
+  // reason is one of the six, and a default branch in the Email view.
+  it('BlockedMessage is exact (reason degrades to string — see note above)', () => {
     expectTypeOf<BlockedMessage>().toEqualTypeOf<{
       at: string;
       from: string;
@@ -284,5 +290,49 @@ describe('contracts — log sources, rules and integrations', () => {
       stateLabel: string;
       lastSuccessAt?: string;
     }>();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// @contract-shapes-end
+//
+// Everything BELOW this marker uses deliberately malformed object literals as
+// hostile probes — they are not contract shapes and must not be read as such.
+// The three-way field-set guard in web/src/guards.test.ts stops extracting here.
+// ---------------------------------------------------------------------------
+
+describe('contracts — optional fields reject an explicit undefined', () => {
+  // tsconfig.base.json sets exactOptionalPropertyTypes: true, which makes
+  // `x?: string` and `x?: string | undefined` DIFFERENT types — only the second
+  // legalises writing `x: undefined` explicitly. toEqualTypeOf cannot separate
+  // them, so the exact-shape assertions above are blind to that widening. These
+  // catch it, and they are aimed squarely at gate G1's "silent undefined" concern.
+
+  it('VendorIncident.resolvedAt cannot be set to an explicit undefined', () => {
+    expectTypeOf<{
+      id: string; title: string; level: 'unknown'; startedAt: string; resolvedAt: undefined;
+    }>().not.toMatchTypeOf<VendorIncident>();
+  });
+
+  it('SourceResult.empty and .error cannot be set to an explicit undefined', () => {
+    expectTypeOf<{
+      data: number; fetchedAt: string; degraded: boolean; empty: undefined;
+    }>().not.toMatchTypeOf<SourceResult<number>>();
+    expectTypeOf<{
+      data: number; fetchedAt: string; degraded: boolean; error: undefined;
+    }>().not.toMatchTypeOf<SourceResult<number>>();
+  });
+
+  it('Incident.ack and .muted cannot be set to an explicit undefined', () => {
+    expectTypeOf<{
+      id: string; severity: Severity; title: string; serviceId: string; openedAt: string;
+      summary: string; metaParts: string[]; ruleKey: string; blastRadius: BlastMetric[];
+      timeline: TimelineEntry[]; ack: undefined;
+    }>().not.toMatchTypeOf<Incident>();
+    expectTypeOf<{
+      id: string; severity: Severity; title: string; serviceId: string; openedAt: string;
+      summary: string; metaParts: string[]; ruleKey: string; blastRadius: BlastMetric[];
+      timeline: TimelineEntry[]; muted: undefined;
+    }>().not.toMatchTypeOf<Incident>();
   });
 });
