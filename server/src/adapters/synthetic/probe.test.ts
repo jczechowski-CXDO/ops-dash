@@ -178,7 +178,10 @@ describe('runProbe — reachability, and the three diagnoses it can return', () 
         ok: true,
         status: 200,
         statusText: 'stub',
-        body: { cancel: async () => undefined },
+        // `headers` is not optional on a real Response, and fetchJson reads
+        // content-length before deciding how to read the body.
+        headers: new Headers({ 'content-type': 'text/html' }),
+        body: null,
         text: async () => html,
       }) as unknown as Response;
 
@@ -187,5 +190,68 @@ describe('runProbe — reachability, and the three diagnoses it can return', () 
 
     const run = await runProbe(SPEC, stub);
     expect(run.result).toBe('pass');
+  });
+});
+
+describe('a probe will not be redirected somewhere it should not go', () => {
+  const redirectTo = (location: string) => new Response('', { status: 302, headers: { location } });
+  const okRes = () => new Response('', { status: 200 });
+
+  const chain = (...responses: Response[]) => {
+    const asked: string[] = [];
+    let i = 0;
+    const impl: FetchLike = async (url) => {
+      asked.push(url);
+      return responses[Math.min(i++, responses.length - 1)]!;
+    };
+    return { impl, asked };
+  };
+
+  it('refuses a non-https or private target outright, without dialling it', async () => {
+    for (const url of ['http://status.example.com/', 'https://127.0.0.1/', 'https://169.254.169.254/']) {
+      const c = chain(okRes());
+      const run = await runProbe({ ...SPEC, url }, c.impl);
+      expect(run.result, `${url} was not refused`).toBe('fail');
+      // Null, not 0: nothing was timed, because nothing was attempted.
+      expect(run.latencyMs).toBeNull();
+      expect(c.asked, `${url} was dialled`).toEqual([]);
+    }
+  });
+
+  it('refuses a redirect into loopback and never opens it', async () => {
+    // A probe reads no body, so it cannot hand an internal service's response
+    // back — but it still MAKES the request, and its latency and status
+    // disclose whether something is listening there.
+    const c = chain(redirectTo('http://127.0.0.1:8080/admin'), okRes());
+    const run = await runProbe(SPEC, c.impl);
+    expect(run.result).toBe('fail');
+    expect(c.asked).toHaveLength(1);
+  });
+
+  it('follows a legitimate https redirect and scores the destination', async () => {
+    // The floor must not be a wall — real help centres redirect.
+    const c = chain(redirectTo('https://support.crexendo.com/hc/en-us'), okRes());
+    const run = await runProbe(SPEC, c.impl);
+    expect(run.result).toBe('pass');
+    expect(c.asked).toEqual([SPEC.url, 'https://support.crexendo.com/hc/en-us']);
+  });
+
+  it('applies expectStatus to the END of the chain, not to the redirect', async () => {
+    // A 302 is not the answer; the thing it points at is. Scoring the redirect
+    // itself would fail every host that redirects, and pass one that redirected
+    // to a 500.
+    const restricted: ProbeSpec = { ...SPEC, expectStatus: 401 };
+    const c = chain(redirectTo('https://help.netsapiens.com/api/v2/x.json'), new Response('', { status: 401 }));
+    expect((await runProbe(restricted, c.impl)).result).toBe('pass');
+
+    const bad = chain(redirectTo('https://help.netsapiens.com/api/v2/x.json'), new Response('', { status: 500 }));
+    expect((await runProbe(restricted, bad.impl)).result).toBe('fail');
+  });
+
+  it('gives up on a redirect loop rather than following forever', async () => {
+    const c = chain(redirectTo('https://status.example.com/again'));
+    const run = await runProbe(SPEC, c.impl);
+    expect(run.result).toBe('fail');
+    expect(c.asked.length).toBeLessThanOrEqual(4);
   });
 });

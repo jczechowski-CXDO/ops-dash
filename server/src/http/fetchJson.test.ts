@@ -124,3 +124,212 @@ describe('fetchJson — a broken feed is data, not an exception', () => {
     await expect(fetchJson('https://x/y', { fetchImpl: nasty })).resolves.toBeDefined();
   });
 });
+
+describe('the SSRF floor applies to every hop, not just the one we typed', () => {
+  /** A stub that replays a scripted sequence of responses and records every URL
+   *  it was asked for. The URL list is the assertion: what matters is not only
+   *  what came back but *where this process went*. */
+  const chain = (...responses: Response[]) => {
+    const asked: string[] = [];
+    let i = 0;
+    const impl: FetchLike = async (url) => {
+      asked.push(url);
+      return responses[Math.min(i++, responses.length - 1)]!;
+    };
+    return { impl, asked };
+  };
+
+  const redirectTo = (location: string, status = 302) =>
+    new Response('', { status, headers: { location } });
+
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  it('refuses a redirect that downgrades to http, and never opens it', async () => {
+    // Reproduced against two local servers before this was written: the
+    // redirect was followed, the scheme downgraded, an internal address was
+    // fetched, and the body came back as a clean un-degraded SourceResult —
+    // indistinguishable from a good vendor read.
+    const c = chain(redirectTo('http://127.0.0.1:9/latest/meta-data/'), json({ secret: 'internal' }));
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+
+    expect(result.error?.code).toBe('not_https');
+    expect(result.data).toBeUndefined();
+    // The assertion that matters most: we never dialled it. A check that
+    // rejected the *response* would still have made the request.
+    expect(c.asked).toEqual(['https://status.example.com/feed.json']);
+  });
+
+  it('refuses an https redirect to loopback or a private-looking host', async () => {
+    for (const target of [
+      'https://127.0.0.1/admin',
+      'https://localhost/admin',
+      'https://[::1]/admin',
+      'https://10.0.0.5/admin',
+      'https://192.168.1.1/admin',
+      'https://169.254.169.254/latest/meta-data/',
+      'https://2130706433/admin',
+      'https://printer.local/admin',
+    ]) {
+      const c = chain(redirectTo(target), json({ secret: 'internal' }));
+      const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+      expect(result.error?.code, `${target} was not refused`).toBe('private_target');
+      expect(c.asked, `${target} was dialled`).toHaveLength(1);
+    }
+  });
+
+  it('refuses a URL carrying credentials', async () => {
+    const c = chain(json({}));
+    const result = await fetchJson<unknown>('https://user:pw@status.example.com/feed.json', { fetchImpl: c.impl });
+    expect(result.error?.code).toBe('url_credentials');
+    expect(c.asked).toEqual([]);
+  });
+
+  it('follows a legitimate https redirect and re-validates the destination', async () => {
+    // The floor must not be a wall. Real status hosts do redirect.
+    const c = chain(redirectTo('https://status.example.com/v2/feed.json'), json({ ok: 1 }));
+    const result = await fetchJson<{ ok: number }>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+    expect(result.error).toBeUndefined();
+    expect(result.data).toEqual({ ok: 1 });
+    expect(c.asked).toEqual([
+      'https://status.example.com/feed.json',
+      'https://status.example.com/v2/feed.json',
+    ]);
+  });
+
+  it('resolves a relative Location and still validates it', async () => {
+    const c = chain(redirectTo('/v2/feed.json'), json({ ok: 1 }));
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+    expect(result.error).toBeUndefined();
+    expect(c.asked[1]).toBe('https://status.example.com/v2/feed.json');
+  });
+
+  it('gives up rather than looping forever', async () => {
+    const c = chain(redirectTo('https://status.example.com/again'));
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+    expect(result.error?.code).toBe('too_many_redirects');
+    // Bounded, and the bound is small.
+    expect(c.asked.length).toBeLessThanOrEqual(4);
+  });
+
+  it('treats a redirect with no Location as the http error it is', async () => {
+    const c = chain(new Response('', { status: 302 }));
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', { fetchImpl: c.impl });
+    expect(result.error?.code).toBe('http_302');
+  });
+});
+
+describe('a hostile body cannot exhaust memory', () => {
+  /** A response whose stream keeps producing chunks. Streamed rather than a big
+   *  string, because the defect is about what gets BUFFERED — a test built from
+   *  an already-materialised string proves the check runs, not that it saves
+   *  anything. */
+  const streaming = (chunkBytes: number, chunks: number, headers: Record<string, string> = {}) => {
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        if (sent++ >= chunks) return void ctrl.close();
+        ctrl.enqueue(new Uint8Array(chunkBytes).fill(0x20));
+      },
+    });
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/json', ...headers } });
+  };
+
+  it('refuses a body past the cap with its own error code', async () => {
+    const impl: FetchLike = async () => streaming(64 * 1024, 200);   // ~12.5 MB
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', {
+      fetchImpl: impl, maxBytes: 1024 * 1024,
+    });
+    expect(result.error?.code).toBe('body_too_large');
+    expect(result.data).toBeUndefined();
+    // A failure like any other: reported, never thrown.
+    expect(result.fetchedAt).toBeTruthy();
+  });
+
+  it('stops pulling instead of reading to the end', async () => {
+    // The whole point. A cap enforced after `text()` resolves has already spent
+    // the memory it was meant to save, so assert on how much was PULLED.
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        pulled += 1;
+        ctrl.enqueue(new Uint8Array(64 * 1024).fill(0x20));
+      },
+    });
+    const impl: FetchLike = async () =>
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', {
+      fetchImpl: impl, maxBytes: 256 * 1024,
+    });
+    expect(result.error?.code).toBe('body_too_large');
+    // 256 KB cap at 64 KB a chunk: a handful of pulls, not an unbounded stream.
+    expect(pulled).toBeLessThan(10);
+  });
+
+  it('rejects on a declared content-length without draining the stream', async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctrl) { pulled += 1; ctrl.enqueue(new Uint8Array(1024)); },
+    });
+    const impl: FetchLike = async () =>
+      new Response(body, { status: 200, headers: { 'content-length': String(50 * 1024 * 1024) } });
+
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', {
+      fetchImpl: impl, maxBytes: 1024 * 1024,
+    });
+    expect(result.error?.code).toBe('body_too_large');
+
+    // At most one, and the one is ours on purpose: the header check cancels the
+    // stream, and cancelling pulls the chunk already queued under the default
+    // strategy. Chasing zero here would mean NOT cancelling, which leaves the
+    // peer streaming into a socket nobody is reading — worse than the chunk it
+    // saves. What this rules out is the read loop: 50 MB at 1 KB a chunk is
+    // fifty thousand pulls, and the bound below is two.
+    expect(pulled).toBeLessThanOrEqual(1);
+  });
+
+  it('does not trust a lying content-length', async () => {
+    // A hostile server declares 10 bytes and sends megabytes. The cheap header
+    // check must be a shortcut, never the only check.
+    const impl: FetchLike = async () => streaming(64 * 1024, 100, { 'content-length': '10' });
+    const result = await fetchJson<unknown>('https://status.example.com/feed.json', {
+      fetchImpl: impl, maxBytes: 512 * 1024,
+    });
+    expect(result.error?.code).toBe('body_too_large');
+  });
+
+  it('reads a normal payload unchanged, including one just under the cap', async () => {
+    // The cap must not corrupt or truncate ordinary reads, and a multi-chunk
+    // body must reassemble byte-exact.
+    const payload = { items: Array.from({ length: 5_000 }, (_, i) => ({ i, name: `item-${i}` })) };
+    const text = JSON.stringify(payload);
+    const impl: FetchLike = async () =>
+      new Response(text, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await fetchJson<typeof payload>('https://status.example.com/feed.json', {
+      fetchImpl: impl, maxBytes: text.length + 1,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.data).toEqual(payload);
+  });
+
+  it('reassembles multi-byte UTF-8 split across chunk boundaries', async () => {
+    // Decoding each chunk separately would mangle a character straddling a
+    // boundary. The payload is chunked at a byte offset chosen to split one.
+    const value = { note: 'déjà vu — naïve café 日本語' };
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    const split = 12;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(bytes.slice(0, split));
+        ctrl.enqueue(bytes.slice(split));
+        ctrl.close();
+      },
+    });
+    const impl: FetchLike = async () =>
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await fetchJson<typeof value>('https://status.example.com/feed.json', { fetchImpl: impl });
+    expect(result.error).toBeUndefined();
+    expect(result.data).toEqual(value);
+  });
+});

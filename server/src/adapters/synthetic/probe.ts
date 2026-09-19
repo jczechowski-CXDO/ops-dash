@@ -1,5 +1,6 @@
 import type { CheckRun, ServiceId } from '@ops-dash/shared';
 import type { FetchLike } from '../../http/fetchJson.js';
+import { refuseTarget } from '../../http/safeTarget.js';
 
 /** One HTTPS reachability check against one host, in one region.
  *
@@ -38,6 +39,16 @@ export type ProbeSpec = {
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Generous for a status host; the real ones use zero or one. A probe that
+ *  redirects more than this is not a host we can say anything useful about. */
+const MAX_REDIRECTS = 3;
+
+/** The statuses that carry a `Location`. 304 is a cache response, not a
+ *  redirect, and a probe should score it on its own merits. */
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
 
 /**
  * Run one probe and return the `CheckRun` row the store will keep.
@@ -89,6 +100,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  * because a zero renders as an extremely fast probe — the exact opposite of
  * what happened. The contract's `number | null` exists for this.
  */
+// deliberately not fetchJson — the default parameter below aliases the global,
+// and this line is the licence for it. The argument is the block comment above.
 export async function runProbe(spec: ProbeSpec, fetchImpl: FetchLike = fetch): Promise<CheckRun> {
   const at = new Date().toISOString();
   const controller = new AbortController();
@@ -105,20 +118,43 @@ export async function runProbe(spec: ProbeSpec, fetchImpl: FetchLike = fetch): P
   const since = () => Math.round(performance.now() - started);
 
   try {
-    // deliberately not fetchJson — see the block comment above. A reachability
-    // probe must not parse, or even download, the body.
-    const response = await fetchImpl(spec.url, {
-      method: 'GET',
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: { accept: '*/*' },
-    });
-    const latencyMs = since();
+    // The same SSRF floor `fetchJson` applies, for the same reason and with the
+    // same limits. A probe reads no body, so it cannot hand an internal
+    // service's response back — but it still MAKES the request, and its latency
+    // and status disclose whether something is listening. `redirect: 'manual'`
+    // with an explicit loop, because `follow` would let a vendor's `Location`
+    // header pick the address instead of us.
+    let target = spec.url;
+    let response: Response;
+    let latencyMs = 0;
 
-    // Latency is measured to the response HEADERS, above, and the body is
-    // dropped on the floor here. Reading it would fold the size of the
-    // vendor's home page into a number we present as reachability.
-    await response.body?.cancel().catch(() => undefined);
+    for (let hop = 0; ; hop += 1) {
+      const refusal = refuseTarget(target);
+      // A refused target is a `fail`, not a throw and not a timeout: we reached
+      // a decision about this host without reaching the host. Latency is null
+      // because nothing was timed.
+      if (refusal) return row(spec, at, 'fail', null);
+
+      // deliberately not fetchJson — see the block comment above. A reachability
+      // probe must not parse, or even download, the body.
+      response = await fetchImpl(target, {
+        method: 'GET',
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: { accept: '*/*' },
+      });
+      latencyMs = since();
+
+      // Latency is measured to the response HEADERS, above, and the body is
+      // dropped on the floor here. Reading it would fold the size of the
+      // vendor's home page into a number we present as reachability.
+      await response.body?.cancel().catch(() => undefined);
+
+      const location = isRedirect(response.status) ? response.headers?.get('location') : null;
+      if (!location) break;
+      if (hop >= MAX_REDIRECTS) return row(spec, at, 'fail', latencyMs);
+      target = new URL(location, target).href;
+    }
 
     return row(spec, at, healthy(spec, response.status) ? 'pass' : 'fail', latencyMs);
   } catch {

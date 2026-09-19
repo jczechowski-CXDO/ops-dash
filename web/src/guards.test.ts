@@ -44,8 +44,19 @@ const src = () =>
 const read = (p: string) => readFileSync(p, 'utf8');
 const rel = (p: string) => p.slice(REPO.length + 1).replace(/\\/g, '/');
 /** Prose mentioning a thing is not code doing it — several guards depend on this. */
+/**
+ * Blank out comments **without moving any line**.
+ *
+ * The old form replaced a block comment with a single space, which collapses a
+ * forty-line doc comment into one line — so every offender line number a guard
+ * reported after one was wrong, and any rule wanting to relate a source line to
+ * a comment near it was impossible to write. Each non-newline character becomes
+ * a space instead, so offsets and line numbers are identical to the original.
+ */
 const stripComments = (text: string) =>
-  text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  text
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/^(\s*)\/\/.*$/gm, '$1');
 
 describe('every colour is a token', () => {
   it('no literal hex in web/src', () => {
@@ -459,6 +470,24 @@ describe('the server talks to the network only through its one helper', () => {
    *  a decision on the record rather than a bypass nobody noticed. */
   const EXEMPT_MARKER = 'deliberately not fetchJson';
 
+  /**
+   * How close the marker has to be to the thing it licenses.
+   *
+   * This used to be file-scoped: the marker anywhere in a file exempted the
+   * WHOLE file, checked against the raw text before comments were stripped — so
+   * one comment licensed every line in the file forever. The security review
+   * reproduced it both ways with a probe file, and the realistic path to it is
+   * not malice but copy-paste: `probe.ts` is the file you read to learn the
+   * convention, and an M3 adapter that copies its header comment gets a blanket
+   * pass on all four failure rules.
+   *
+   * Line-scoped, the entire server has exactly ONE site needing a licence —
+   * `probe.ts`'s `fetchImpl: FetchLike = fetch` default parameter. Its actual
+   * call is `fetchImpl(...)`, which is not the global and never trips the guard.
+   * So the block comment stays as the argument; it just stops being the licence.
+   */
+  const EXEMPT_LINES_ABOVE = 2;
+
   it('the global fetch is not reachable outside the helper, by call OR by alias', () => {
     // Matches the IDENTIFIER, not the call. The first version of this guard
     // looked for `fetch(` and was therefore blind to the most natural way to
@@ -487,16 +516,77 @@ describe('the server talks to the network only through its one helper', () => {
     const offenders: string[] = [];
     for (const file of serverSrc()) {
       if (file === HELPER) continue;
-      if (read(file).includes(EXEMPT_MARKER)) continue;
+      const raw = read(file).split('\n');
+      // The marker lives in a comment, so it is found in the RAW text; the
+      // offending code is found in the stripped text. `stripComments` now
+      // preserves line numbers exactly, which is what makes the two comparable.
+      const licensed = new Set<number>();
+      raw.forEach((line, i) => {
+        if (line.includes(EXEMPT_MARKER)) {
+          for (let d = 0; d <= EXEMPT_LINES_ABOVE; d += 1) licensed.add(i + d);
+        }
+      });
       stripComments(read(file))
         .split('\n')
         .forEach((line, i) => {
+          if (licensed.has(i)) return;
           if (BARE_GLOBAL.test(line) || VIA_GLOBAL.test(line) || RAW_HTTP.test(line)) {
             offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
           }
         });
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('a marker elsewhere in the file does not license a bare fetch', () => {
+    // The guard's own control, and the thing that makes the rule above worth
+    // anything. This is the exact shape the security review reproduced: a file
+    // whose header comment carries the marker — the most natural way to write
+    // an M3 adapter, since probe.ts is the file you read to learn the
+    // convention — and a bare `fetch` fifteen lines down.
+    //
+    // Run against the real rule rather than a re-implementation of it, so the
+    // two cannot drift: same regexes, same EXEMPT_LINES_ABOVE, same
+    // stripComments.
+    const BARE_GLOBAL = /(?<![.\w$])fetch(?![\w$])/;
+    const file = [
+      '/**',
+      ' * An adapter for some vendor.',
+      ' *',
+      ' * deliberately not fetchJson — copied from probe.ts without thinking.',
+      ' */',
+      'export async function poll(url: string) {',
+      '  const res = await fetch(url);',
+      '  return res.json();',
+      '}',
+    ].join('\n');
+
+    const raw = file.split('\n');
+    const licensed = new Set<number>();
+    raw.forEach((line, i) => {
+      if (line.includes(EXEMPT_MARKER)) {
+        for (let d = 0; d <= EXEMPT_LINES_ABOVE; d += 1) licensed.add(i + d);
+      }
+    });
+    const caught = stripComments(file)
+      .split('\n')
+      .filter((line, i) => !licensed.has(i) && BARE_GLOBAL.test(line));
+
+    expect(caught).toHaveLength(1);
+    expect(caught[0]).toContain('await fetch(url)');
+
+    // And the positive half: a marker on the line above DOES license it, or the
+    // rule would be a wall rather than a floor and probe.ts could not exist.
+    const withMarker = ['// deliberately not fetchJson', 'const res = await fetch(url);'];
+    const ok = new Set<number>();
+    withMarker.forEach((line, i) => {
+      if (line.includes(EXEMPT_MARKER)) for (let d = 0; d <= EXEMPT_LINES_ABOVE; d += 1) ok.add(i + d);
+    });
+    expect(
+      stripComments(withMarker.join('\n'))
+        .split('\n')
+        .filter((line, i) => !ok.has(i) && BARE_GLOBAL.test(line)),
+    ).toEqual([]);
   });
 
   it('catches every shape of reaching the global, not just the one we thought of', () => {
