@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Alert } from './aurora/Alert.js';
 import { Skeleton } from './aurora/Skeleton.js';
 import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
+import { srOnly } from '../theme/srOnly.js';
 
 /**
  * The per-source states the prototype does not cover and README "What the
@@ -25,19 +26,6 @@ function agePhrase(iso: string): string {
   return age === UNKNOWN_AGE ? 'of unknown age' : `${age} old`;
 }
 
-/** Off-screen but announced. No stylesheet exists under web/src to hold a class. */
-const SR_ONLY = {
-  position: 'absolute',
-  width: 1,
-  height: 1,
-  margin: -1,
-  padding: 0,
-  overflow: 'hidden',
-  clipPath: 'inset(50%)',
-  whiteSpace: 'nowrap',
-  border: 0,
-} as const;
-
 export function Panel({ state, children }: { state: PanelState; children: ReactNode }) {
   switch (state.kind) {
     // The Skeleton itself stays decorative (aria-hidden). The fact that a panel
@@ -47,7 +35,7 @@ export function Panel({ state, children }: { state: PanelState; children: ReactN
     case 'loading':
       return (
         <div role="status" aria-busy="true" aria-live="polite">
-          <span style={SR_ONLY}>Loading</span>
+          <span style={srOnly}>Loading</span>
           <Skeleton variant="text" lines={state.rows ?? 4} />
         </div>
       );

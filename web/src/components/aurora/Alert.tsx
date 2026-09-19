@@ -3,6 +3,7 @@ import { Icon } from './Icon.js';
 // IconName lives in the generated module; Icon.tsx consumes it without
 // re-exporting it, and Icon.tsx is Wave 0's file and not ours to change.
 import type { IconName } from './icons.generated.js';
+import { srOnly } from '../../theme/srOnly.js';
 
 // Ported from _ds_bundle.js lines 2563-2686 (variant="soft"). Dropped: the
 // outlined and filled variants, severity="primary", onClose, action, custom
@@ -57,19 +58,6 @@ const SEV: Record<
   },
 };
 
-/** Off-screen but announced, so role="alert" carries the severity, not just hue. */
-const SR_ONLY = {
-  position: 'absolute',
-  width: 1,
-  height: 1,
-  margin: -1,
-  padding: 0,
-  overflow: 'hidden',
-  clipPath: 'inset(50%)',
-  whiteSpace: 'nowrap',
-  border: 0,
-} as const;
-
 const SEVERITY_WORD = {
   success: 'Success',
   info: 'Information',
@@ -104,7 +92,7 @@ export function Alert({
         background: c.fill,
       }}
     >
-      <span style={SR_ONLY}>{SEVERITY_WORD[severity]}:</span>
+      <span style={srOnly}>{SEVERITY_WORD[severity]}:</span>
       {c.icon ? (
         <Icon name={c.icon} size={20} color={c.main} style={{ flexShrink: 0, marginTop: 1 }} />
       ) : null}
