@@ -1,5 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { SourceResult } from '@ops-dash/shared';
 import { createSchedule, type Source } from './schedule.js';
+
+/** A successful read. Adapters return an envelope, never a bare value — see
+ *  the `Source.run` docblock for why the poller now insists on it. */
+const ok = (): SourceResult<unknown> => ({ data: {}, fetchedAt: new Date().toISOString(), degraded: false });
+
+/** A completed read that failed. This is what a 503 looks like coming out of
+ *  `fetchJson`: resolved, no throw, `error` set. */
+const errored = (code = 'http_503'): SourceResult<unknown> => ({
+  fetchedAt: new Date().toISOString(),
+  degraded: true,
+  error: { code, message: 'Service Unavailable' },
+});
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -7,7 +20,7 @@ afterEach(() => vi.useRealTimers());
 const src = (over: Partial<Source> = {}): Source => ({
   name: 'vendor:jira',
   intervalMs: 60_000,
-  run: vi.fn(async () => ({ ok: true })),
+  run: vi.fn(async () => ok()),
   ...over,
 });
 
@@ -15,7 +28,7 @@ describe('each source keeps its own interval', () => {
   it('a slow source does not delay a fast one', async () => {
     // The failure this prevents: one sequential loop over all sources, where a
     // 9-second Graph call makes the 60s vendor feeds drift by 9s every cycle.
-    const slow = src({ name: 'slow', intervalMs: 300_000, run: vi.fn(async () => new Promise((r) => setTimeout(() => r({}), 120_000))) });
+    const slow = src({ name: 'slow', intervalMs: 300_000, run: vi.fn(async () => new Promise<SourceResult<unknown>>((r) => setTimeout(() => r(ok()), 120_000))) });
     const fast = src({ name: 'fast', intervalMs: 60_000 });
     const s = createSchedule([slow, fast]);
     s.start();
@@ -71,7 +84,7 @@ describe('runs of one source never overlap', () => {
         maxConcurrent = Math.max(maxConcurrent, ++inFlight);
         await new Promise((r) => setTimeout(r, 35_000));
         inFlight--;
-        return {};
+        return ok();
       }),
     });
     const s = createSchedule([slow]);
@@ -111,7 +124,7 @@ describe('the first run announces itself', () => {
     const flaky = src({
       run: vi.fn(async () => {
         if (++attempt === 1) throw new Error('first poll failed');
-        return {};
+        return ok();
       }),
     });
     const s = createSchedule([flaky]);
@@ -163,5 +176,170 @@ describe('start and stop', () => {
     s.stop();
     await vi.advanceTimersByTimeAsync(600_000);
     expect(a.run).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('an errored result is a failed poll, not a successful one', () => {
+  // G2 BLOCKER 1. Nothing in this repo throws: `fetchJson` and both adapters
+  // turn a broken feed into an errored `SourceResult`. Before this, the poller
+  // counted any resolved promise as a success, so the only failure it could see
+  // was the one that never happens.
+
+  it('a source whose feed fails forever never reports a successful poll', async () => {
+    // The exact shape G2 pinned. Every field asserted positively: this is the
+    // whole claim, and "not true" would pass for a field that stopped existing.
+    const dead = src({ run: vi.fn(async () => errored()) });
+    const s = createSchedule([dead]);
+    s.start();
+    await vi.advanceTimersByTimeAsync(180_000);
+
+    const st = s.statusOf('vendor:jira')!;
+    expect(dead.run).toHaveBeenCalledTimes(4);
+    expect(st.runs).toBe(4);
+    expect(st.baseline).toBe(false);
+    expect(st.lastOkAt).toBeUndefined();
+    expect(st.lastError).toBe('http_503: Service Unavailable');
+    // It kept trying. A source that fails is retried, never quarantined.
+    expect(st.lastRunAt).toBeDefined();
+    s.stop();
+  });
+
+  it('does not baseline on the first errored poll', async () => {
+    // The inversion that made this a BLOCKER rather than a MEDIUM: on tick 1 a
+    // permanently-broken source announced itself as the baseline, which is a
+    // claim to know the starting state of something we have never read.
+    const dead = src({ run: vi.fn(async () => errored('network')) });
+    const s = createSchedule([dead]);
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.statusOf('vendor:jira')!.baseline).toBe(false);
+    s.stop();
+  });
+
+  it('baselines the first poll that succeeds after a run of errored results', async () => {
+    // The discriminating case, now reachable through the path production
+    // actually takes. Two ticks errored, the third clean: baseline belongs to
+    // the third, and `lastError` must be gone rather than merely stale.
+    let tick = 0;
+    const flaky = src({ run: vi.fn(async () => (++tick <= 2 ? errored() : ok())) });
+    const s = createSchedule([flaky]);
+    s.start();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.statusOf('vendor:jira')!.baseline).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const st = s.statusOf('vendor:jira')!;
+    expect(st.baseline).toBe(true);
+    expect(st.lastOkAt).toBeDefined();
+    expect(st.lastError).toBeUndefined();
+
+    // And the baseline is spent: the fourth poll is not a second first.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.statusOf('vendor:jira')!.baseline).toBe(false);
+    s.stop();
+  });
+
+  it('keeps lastOkAt when a healthy source starts failing, and says it is failing', async () => {
+    // Both halves matter and they are different facts. `lastOkAt` answers "when
+    // did we last read this?" and must NOT be cleared by a failure — the store's
+    // last-good/last-attempt split (G0 BLOCKER 2) is the same idea. `lastError`
+    // answers "are we failing now?".
+    let tick = 0;
+    const decays = src({ run: vi.fn(async () => (++tick === 1 ? ok() : errored('timeout'))) });
+    const s = createSchedule([decays]);
+    s.start();
+
+    await vi.advanceTimersByTimeAsync(0);
+    const good = s.statusOf('vendor:jira')!.lastOkAt;
+    expect(good).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    const st = s.statusOf('vendor:jira')!;
+    expect(st.lastOkAt).toBe(good);          // unchanged, not refreshed
+    expect(st.lastError).toBe('timeout: Service Unavailable');
+    expect(st.baseline).toBe(false);
+    s.stop();
+  });
+
+  it('counts an empty result as a successful read, not a failure', async () => {
+    // Amendment 4, and the distinction the whole store depends on. `empty` means
+    // the fetch completed and the feed published nothing — it has told us
+    // something true. Only `error` means we failed to look. A poller that
+    // treated empty as a failure would report a quiet vendor as unreachable.
+    const quiet = src({
+      run: vi.fn(async (): Promise<SourceResult<unknown>> => ({
+        data: [], fetchedAt: new Date().toISOString(), degraded: false, empty: true,
+      })),
+    });
+    const s = createSchedule([quiet]);
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const st = s.statusOf('vendor:jira')!;
+    expect(st.lastOkAt).toBeDefined();
+    expect(st.lastError).toBeUndefined();
+    expect(st.baseline).toBe(true);
+    s.stop();
+  });
+
+  it('counts a degraded result as a successful read too', async () => {
+    // `degraded` means some pages or regions failed and we still have most of
+    // it. Partial data is data.
+    const partial = src({
+      run: vi.fn(async (): Promise<SourceResult<unknown>> => ({
+        data: {}, fetchedAt: new Date().toISOString(), degraded: true,
+      })),
+    });
+    const s = createSchedule([partial]);
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.statusOf('vendor:jira')!.lastOkAt).toBeDefined();
+    s.stop();
+  });
+
+  it('distinguishes an adapter throwing from a feed failing, in the message', async () => {
+    // A throw is OUR bug — an adapter broke its contract — and must not read
+    // like a vendor outage in the health output. Different prefixes, asserted
+    // as literals rather than by matching whatever the code produced.
+    const thrower = src({ name: 'boom', run: vi.fn(async () => { throw new Error('adapter is broken'); }) });
+    const failer = src({ name: 'feed', run: vi.fn(async () => errored('http_500')) });
+    const s = createSchedule([thrower, failer]);
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(s.statusOf('boom')!.lastError).toBe('threw: adapter is broken');
+    expect(s.statusOf('feed')!.lastError).toBe('http_500: Service Unavailable');
+    s.stop();
+  });
+});
+
+describe('a thrown value that resists being stringified', () => {
+  it('does not escape the catch and kill the process', async () => {
+    // G2 HIGH 3. `String(cause?.message ?? cause)` throws on a null-prototype
+    // object and on a throwing `toString` — and it throws INSIDE the catch, so
+    // it leaves `tick`, which is called as `void tick(source)` from a timer.
+    // That is an unhandled rejection: the process death the catch exists to
+    // prevent, reached through the catch itself.
+    const hostile = [
+      Object.assign(Object.create(null), { message: Object.create(null) }),
+      { get message() { throw new Error('nope'); }, toString() { throw new Error('nope'); } },
+      Object.create(null),
+    ];
+    for (const value of hostile) {
+      const bad = src({ name: 'hostile', run: vi.fn(async () => { throw value; }) });
+      const alive = src({ name: 'alive', intervalMs: 60_000 });
+      const s = createSchedule([bad, alive]);
+      s.start();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      // Recorded as a failure rather than lost, and the sibling kept polling —
+      // which is the thing an escaping throw would have stopped.
+      expect(s.statusOf('hostile')!.lastError).toBeDefined();
+      expect(s.statusOf('hostile')!.lastOkAt).toBeUndefined();
+      expect(alive.run).toHaveBeenCalledTimes(3);
+      s.stop();
+    }
   });
 });

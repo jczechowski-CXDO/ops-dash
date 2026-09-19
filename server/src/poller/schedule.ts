@@ -1,3 +1,5 @@
+import type { SourceResult } from '@ops-dash/shared';
+
 /**
  * One interval per source, isolated failures.
  *
@@ -12,8 +14,28 @@
 export type Source = {
   name: string;
   intervalMs: number;
-  /** Must not be assumed to return — it is wrapped, and a throw is expected. */
-  run: () => Promise<unknown>;
+  /**
+   * Must return a `SourceResult`, and the return type is the whole point.
+   *
+   * G2 BLOCKER 1. This was `Promise<unknown>`, and a poll counted as
+   * successful if the promise resolved. But **nothing in this repo throws**:
+   * `fetchJson` and both adapters turn a broken feed into *data* — an errored
+   * `SourceResult` — deliberately, because a transport failure is a fact to
+   * report and not an exception to handle. So the only failure the poller could
+   * see was the one that never happens, and a source whose feed answered 503
+   * every minute for an hour reported `lastOkAt` seconds old and, on its first
+   * tick, `baseline: true`.
+   *
+   * That is not a missing feature, it is the product's central promise
+   * inverted: a failed fetch rendering as green, one layer below the UI where
+   * every guard was pointed. `/api/health` already serves `allStatus()`, so it
+   * was a served green for a source never once read.
+   *
+   * It is still wrapped and a throw is still caught — an adapter CAN throw by
+   * mistake, and that must not take the other sources down. A throw is simply
+   * no longer the only way to fail.
+   */
+  run: () => Promise<SourceResult<unknown>>;
 };
 
 export type SourceStatus = {
@@ -24,6 +46,8 @@ export type SourceStatus = {
   baseline: boolean;
   lastRunAt?: string;
   lastOkAt?: string;
+  /** Why the last poll failed, whether it threw or returned an errored
+   *  result. Cleared on a success, so its presence means "failing now". */
   lastError?: string;
   runs: number;
   /** Ticks dropped because the previous run was still going. Surfaced rather
@@ -31,6 +55,35 @@ export type SourceStatus = {
    *  for its upstream, and nobody would otherwise find out. */
   skipped: number;
 };
+
+/** The one place a poll is recorded as failed, so the two paths into it — an
+ *  errored result and a throw — cannot drift apart. `lastOkAt` is deliberately
+ *  left alone: it means "when we last succeeded", and a failure does not change
+ *  when that was. It is `lastError` being set that says we are failing now. */
+function fail(st: { baseline: boolean; lastError?: string }, why: string): void {
+  st.baseline = false;
+  st.lastError = why;
+}
+
+/** Stringify a thrown value that may be actively hostile to being stringified.
+ *
+ *  G2 HIGH 3. `String((cause as Error)?.message ?? cause)` throws on a
+ *  null-prototype object and on anything with a throwing `toString` — and it
+ *  throws INSIDE the catch, so it escapes `tick`, which is called as
+ *  `void tick(source)` from a timer. That is an unhandled rejection: the exact
+ *  process death the catch exists to prevent, reachable through the catch
+ *  itself. */
+function describe(cause: unknown): string {
+  try {
+    if (cause instanceof Error && typeof cause.message === 'string') return cause.message;
+    const message = (cause as { message?: unknown } | null | undefined)?.message;
+    if (typeof message === 'string') return message;
+    return String(cause);
+  } catch {
+    // Nothing about the value can be trusted, including its type tag.
+    return 'unstringifiable thrown value';
+  }
+}
 
 export function createSchedule(sources: Source[]) {
   const status = new Map<string, SourceStatus & { inFlight: boolean; hasSucceeded: boolean }>();
@@ -54,16 +107,26 @@ export function createSchedule(sources: Source[]) {
     st.runs += 1;
     st.lastRunAt = new Date().toISOString();
     try {
-      await source.run();
+      const result = await source.run();
+      // The BLOCKER-1 line. A resolved promise is not a successful poll: the
+      // adapters report failure IN the envelope. `error` is the only signal
+      // that means "we did not read this" — `empty` and `degraded` are both
+      // completed reads. An empty feed has told us something true (amendment
+      // 4); a degraded one told us most of it. Neither is a failure to look.
+      if (result.error) {
+        fail(st, `${result.error.code}: ${result.error.message}`);
+        return;
+      }
       st.baseline = !st.hasSucceeded;   // true on the first SUCCESS only
       st.hasSucceeded = true;
       st.lastOkAt = st.lastRunAt;
       delete st.lastError;
     } catch (cause) {
       // Swallowed on purpose, and recorded. An unhandled rejection here would
-      // take the process down and with it every other source.
-      st.baseline = false;
-      st.lastError = String((cause as Error)?.message ?? cause);
+      // take the process down and with it every other source. Reaching this
+      // means an adapter broke its own contract, which is OUR bug, so the
+      // message says so rather than reading like a vendor outage.
+      fail(st, `threw: ${describe(cause)}`);
     } finally {
       st.inFlight = false;
     }
