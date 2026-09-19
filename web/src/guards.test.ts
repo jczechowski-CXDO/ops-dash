@@ -459,19 +459,58 @@ describe('the server talks to the network only through its one helper', () => {
    *  a decision on the record rather than a bypass nobody noticed. */
   const EXEMPT_MARKER = 'deliberately not fetchJson';
 
-  it('no bare fetch outside the helper', () => {
+  it('the global fetch is not reachable outside the helper, by call OR by alias', () => {
+    // Matches the IDENTIFIER, not the call. The first version of this guard
+    // looked for `fetch(` and was therefore blind to the most natural way to
+    // use the global without calling it directly:
+    //
+    //     async function runProbe(spec, fetchImpl: FetchLike = fetch)
+    //
+    // There is no literal `fetch(` on that line, so the guard passed — and
+    // deleting the exemption marker from the file changed nothing. Found by the
+    // probes agent testing whether the marker it had been told to write was
+    // load-bearing. It was not. Aliasing the global is exactly how an M3
+    // adapter would bypass the four failure rules without meaning to.
+    //
+    // `fetchJson`, `fetchImpl`, `x.fetch` and a parameter named fetch are all
+    // fine: the negative lookarounds below exclude an identifier that is part
+    // of a longer name or reached through a property.
+    const BARE_GLOBAL = /(?<![.\w$])fetch(?![\w$])/;
     const offenders: string[] = [];
     for (const file of serverSrc()) {
       if (file === HELPER) continue;
+      if (read(file).includes(EXEMPT_MARKER)) continue;
       stripComments(read(file))
         .split('\n')
         .forEach((line, i) => {
-          if (/\bfetch\s*\(/.test(line) && !read(file).includes(EXEMPT_MARKER)) {
-            offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
-          }
+          if (BARE_GLOBAL.test(line)) offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
         });
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('catches every shape of reaching the global, not just the one we thought of', () => {
+    // The guard's own control. Each of these is a real way to get at the
+    // global, and the first version caught only the first.
+    const BARE_GLOBAL = /(?<![.\w$])fetch(?![\w$])/;
+    for (const shape of [
+      'await fetch(url)',
+      'const f = fetch;',
+      'function p(impl = fetch) {}',
+      'run(fetch, url)',
+      'export const client = { get: fetch };',
+    ]) {
+      expect(BARE_GLOBAL.test(shape), shape).toBe(true);
+    }
+    // And must NOT fire on these, or the guard is unusable.
+    for (const ok of [
+      'const r = await fetchJson(url);',
+      'fetchImpl(spec.url)',
+      'await this.fetcher.fetch(url)',
+      'import { fetchJson } from "../http/fetchJson.js";',
+    ]) {
+      expect(BARE_GLOBAL.test(ok), ok).toBe(false);
+    }
   });
 
   it('this guard is watching a directory that exists', () => {
