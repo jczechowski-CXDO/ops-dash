@@ -145,6 +145,33 @@ procedure its read-only tools cannot perform — it now states that it verifies 
 reports while the lead performs the edit, so a change to a frozen file always passes
 through a second pair of hands.
 
+## The trap that has now caught us three times
+
+**`Type Errors  no errors` in a Vitest run is a claim about `shared` only.** Typecheck mode is
+enabled in `shared/vitest.config.ts` and nowhere else, so Vitest never typechecks `web` at all.
+Demonstrated: injecting two real type errors into `web/src/components/aurora/Alert.tsx` gives
+`Tests 45 passed` and `Type Errors no errors`, while `tsc -b shared web` reports both.
+
+This has produced three separate defects:
+
+1. **BLOCKER B-1** — `npm run typecheck` exited 2 from Task 3A until G0, while `npm test` and
+   `npm run build` both stayed green. Neither typechecks `web`.
+2. **`TS2459` in `Alert.tsx`** — importing `IconName` from `./Icon.js`, which consumes the type
+   without re-exporting it. Every Vitest run said no type errors; `tsc -b` failed. Found at G1.
+3. My own reporting of a green typecheck twice, from reading `$?` after a pipe to `tail`.
+
+Consequences, all load-bearing:
+
+- **`pretest: npm run typecheck` must not be removed or softened.** It is the only thing in the
+  default workflow that typechecks `web`. When a parallel agent's in-flight errors make it
+  inconvenient, isolate with
+  `npx tsc -b shared web 2>&1 | grep 'error TS' | grep -v 'src/fixtures/'` rather than disabling
+  the hook.
+- **Never read `$?` after a pipe.** It reports the last command in the pipeline. Run the command
+  bare, or use `${PIPESTATUS[0]}`.
+- **`tsc -b` is incremental.** It writes `*.tsbuildinfo` (gitignored) and can skip work; delete
+  those if a result looks impossible.
+
 ## Three further plan defects, found by running it
 
 Beyond the six the plan already records:
