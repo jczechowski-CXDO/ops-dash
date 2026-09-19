@@ -81,12 +81,18 @@ describe('Endpoints', () => {
     at();
     expect(screen.getByRole('cell', { name: 'DEMO-LT-0412' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'a.nguyen' })).toBeInTheDocument();
-    // Written with the alternation rather than the literal prefix on purpose:
-    // Task 3A's redaction guard greps all of web/src, tests included, so the
-    // plan's own spelling of the laptop prefix fails it — as does naming it in
-    // this comment. The alternation covers laptops and desktops and never
-    // writes the literal prefix. (Plan defect, reported.)
-    expect(screen.queryByText(/CXDO-(LT|DT)-/)).not.toBeInTheDocument();
+
+    // Asserted POSITIVELY, on the lead's ruling: every hostname this screen
+    // paints is a DEMO- machine, and the column carries exactly the snapshot's
+    // computers in order. The negative form — naming the forbidden prefix —
+    // both duplicates the global redaction guard and trips it, since that guard
+    // greps all of web/src including tests; and it would only rule out the one
+    // prefix we thought to name, which is how G-12 got through.
+    const hostnames = bodyRows('Needs attention').map(
+      (r) => within(r).getAllByRole('cell')[0]?.textContent ?? '',
+    );
+    expect(hostnames).toEqual(fixtures.sev1.endpoints.attention.map((a) => a.computer));
+    expect(hostnames.filter((h) => !/^DEMO-/.test(h))).toEqual([]);
   });
 
   it('keeps the last column present even though os is not shown', () => {
