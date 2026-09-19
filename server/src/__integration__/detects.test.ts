@@ -29,8 +29,12 @@ function realPayloads(): Map<string, unknown> {
     ['https://status.helpjuice.com/api/v2/summary.json', load('statuspage-helpjuice-summary.json')],
     ['https://status.claude.com/api/v2/summary.json', load('statuspage-claude-summary.json')],
     ['https://status.openai.com/api/v2/summary.json', load('statuspage-openai-summary.json')],
-    ['https://status.zendesk.com/api/ssp/incidents.json', load('zendesk-ssp-incidents.json')],
-    ['https://status.zendesk.com/api/ssp/services.json', load('zendesk-ssp-services.json')],
+    // Pod-scoped, one per tenant — the adapter queries both accounts and the
+    // stub refuses anything it was not given, which is how this caught the
+    // change rather than quietly reporting an empty Zendesk.
+    ['https://status.zendesk.com/api/ssp/incidents.json?subdomain=crexendo', load('zendesk-ssp-incidents.json')],
+    ['https://status.zendesk.com/api/ssp/incidents.json?subdomain=netsapiens', load('zendesk-ssp-incidents.json')],
+    ['https://status.zendesk.com/api/ssp/services.json?subdomain=crexendo', load('zendesk-ssp-services.json')],
   ]);
 }
 

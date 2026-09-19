@@ -25,6 +25,22 @@ import {
  * Two documents, joined JSON:API style: `incidents.json` carries the incidents
  * and `included[]` carries one `incidentService` row per affected service.
  * `feed.url` is the SSP base and the adapter appends the document names.
+ *
+ * **Scoped to our pod, one query per tenant.** `?subdomain=<ours>` resolves an
+ * account to the pod it lives on; without it the feed answers for every Zendesk
+ * pod on earth. Measured 2026-09-19: 17 global incidents against the 10
+ * affecting Pod 23 (East Coast US, N. Virginia, AWS), where both our accounts
+ * sit. Seven of the seventeen were about infrastructure we are not on, and a
+ * tile whose incidents are usually irrelevant is a tile the operator stops
+ * reading — the same failure as a tile that is permanently red, arrived at from
+ * the other direction.
+ *
+ * The "no status field" claim above was re-verified WITH the subdomain applied,
+ * because scoping was the obvious thing that might have changed it. It did not:
+ * service attributes are `deprecated, description, hasSubservices, name,
+ * position, slug` either way. Zendesk's own status PAGE renders green bars, but
+ * it derives them from incident history — it is making exactly the inference
+ * this adapter declines to make.
  */
 
 /** Zendesk's impact words, used only when the explicit `outage` / `degradation`
@@ -124,18 +140,27 @@ function publishedServiceNames(body: unknown): string[] {
 }
 
 const ABSENCE_NOTE =
-  'Zendesk SSP publishes no per-service status field, so the only green signal available is the absence of an open incident — and an absence is not an affirmation (amendment 4). Reading is global Zendesk, not necessarily our pod.';
+  'Zendesk SSP publishes no per-service status field, so the only green signal available is the absence of an open incident — and an absence is not an affirmation (amendment 4).';
 
 export async function pollZendeskSsp(feed: VendorFeed, fetchImpl?: FetchLike): Promise<SourceResult<Vendor>> {
   const base = feed.url.replace(/\/+$/, '');
   const opts = fetchImpl === undefined ? {} : { fetchImpl };
+  // One query per tenant, because the feed is scoped per account. Unscoped it
+  // answers for every Zendesk pod on earth — measured 2026-09-19, 17 global
+  // incidents against the 10 affecting ours. `[undefined]` is the no-tenant
+  // case: one unscoped pass, so the loop below has a single shape.
+  const scopes: (string | undefined)[] = feed.tenants ?? [undefined];
+  const podScope = (t: string | undefined) => (t === undefined ? '' : `?subdomain=${encodeURIComponent(t)}`);
   const wanted = feed.component;
 
   // services.json is fetched only when we are watching one named service: it
   // exists here to prove that service is still published. A service that
   // disappears must read unknown, not quietly drop out of a rollup.
   if (wanted !== undefined) {
-    const services = await fetchJson<unknown>(`${base}/services.json`, opts);
+    // The service list is a property of the platform, not of one account, so
+    // the first tenant's view is enough to answer "is this service still
+    // published at all".
+    const services = await fetchJson<unknown>(`${base}/services.json${podScope(scopes[0])}`, opts);
     if (services.error !== undefined) {
       return {
         ...services,
@@ -157,32 +182,47 @@ export async function pollZendeskSsp(feed: VendorFeed, fetchImpl?: FetchLike): P
     }
   }
 
-  const result = await fetchJson<unknown>(`${base}/incidents.json`, opts);
+  // Every tenant, and ALL of them must answer. A partial read that renders
+  // clean is the precise failure this product exists to prevent: if we could
+  // not see netsapiens, we cannot speak for Zendesk, however healthy crexendo
+  // looked. The first failure ends it.
+  const byId = new Map<string, SspIncident>();
+  let result!: SourceResult<unknown>;
+  for (const tenant of scopes) {
+    result = await fetchJson<unknown>(`${base}/incidents.json${podScope(tenant)}`, opts);
+    const who = tenant === undefined ? 'the Zendesk incident feed' : `the Zendesk incident feed for ${tenant}`;
 
-  if (result.error !== undefined) {
-    return {
-      ...result,
-      data: unknownVendor(
-        feed.platform,
-        `We could not read the Zendesk incident feed (${result.error.code}: ${result.error.message}). This is our failure to look, not a statement of health.`,
-      ),
-    };
-  }
+    if (result.error !== undefined) {
+      return {
+        ...result,
+        data: unknownVendor(
+          feed.platform,
+          `We could not read ${who} (${result.error.code}: ${result.error.message}). This is our failure to look, not a statement of health.`,
+        ),
+      };
+    }
 
-  const all = readIncidents(result.data);
-  if (all === null) {
-    return {
-      ...result,
-      data: unknownVendor(feed.platform, `The Zendesk incident feed returned a shape we do not recognise. ${ABSENCE_NOTE}`),
-    };
+    const parsed = readIncidents(result.data);
+    if (parsed === null) {
+      return {
+        ...result,
+        data: unknownVendor(feed.platform, `${who} returned a shape we do not recognise. ${ABSENCE_NOTE}`),
+      };
+    }
+    // Deduped by incident id. Two tenants on the same pod — which ours are
+    // today — return the same rows, and counting them twice would report double
+    // the incidents the moment anything went wrong.
+    for (const incident of parsed) byId.set(incident.id, incident);
   }
+  const all = [...byId.values()];
 
   const mine =
     wanted === undefined
       ? all
       : all.filter((i) => i.serviceIds.some((n) => n.toLowerCase() === wanted.toLowerCase()));
   const open = mine.filter((i) => i.resolvedAt === undefined);
-  const scope = wanted === undefined ? 'Zendesk' : `Zendesk ${wanted}`;
+  const where = feed.tenants === undefined ? '' : ` (${feed.tenants.join(', ')})`;
+  const scope = (wanted === undefined ? 'Zendesk' : `Zendesk ${wanted}`) + where;
 
   const level = open.length === 0 ? 'unknown' : worstLevel(open.map((i) => i.level));
   const note =

@@ -20,6 +20,29 @@ export type VendorFeed = {
    *  MUST publish it — a component that disappears is `unknown`, never a
    *  quietly shorter list that still reads healthy. */
   component?: string;
+  /**
+   * Our tenant on this vendor, when the vendor scopes its feed by one.
+   *
+   * Zendesk is the reason this exists. `status.zendesk.com` answers globally by
+   * default — every incident on every pod worldwide — but
+   * `?subdomain=<ours>` resolves the account to the pod it lives on and returns
+   * only what affects it. Measured 2026-09-19: 17 global incidents become 10 on
+   * Pod 23 (East Coast US, N. Virginia, AWS), which is where both Crexendo
+   * subdomains sit. Seven of the seventeen were about infrastructure we are not
+   * on, and an operator who learns that our incidents are usually irrelevant
+   * has learned to ignore the tile.
+   *
+   * A LIST, because we have two — `crexendo` and `netsapiens`. Both sit on Pod
+   * 23 today, so one query would happen to cover both, and that is exactly the
+   * coincidence not to build on: the day either is migrated, a single-tenant
+   * feed stops covering the other one silently, and silently is the only way
+   * this product is allowed to fail at nothing.
+   *
+   * Not a credential and not sensitive: the subdomain is public, and Zendesk's
+   * own documentation says the status page "is visible to anyone who knows your
+   * Zendesk subdomain".
+   */
+  tenants?: string[];
 };
 
 /** The vendor half of a service tile, as the contract defines it. */
@@ -137,7 +160,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
   return feeds.map((entry, i) => {
     const where = `${path}: feeds[${i}]`;
     if (typeof entry !== 'object' || entry === null) throw new Error(`${where}: not an object`);
-    const { id, platform, url, component } = entry as Record<string, unknown>;
+    const { id, platform, url, component, tenants } = entry as Record<string, unknown>;
     if (typeof id !== 'string' || !(id in SERVICE_IDS)) {
       throw new Error(`${where}: id ${JSON.stringify(id)} is not a ServiceId`);
     }
@@ -150,6 +173,18 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
     if (component !== undefined && typeof component !== 'string') {
       throw new Error(`${where}: component must be a string when present`);
     }
+    if (tenants !== undefined) {
+      // Validated, because each is interpolated into a query string. A hostname
+      // label is all one can ever legitimately be.
+      if (!Array.isArray(tenants) || tenants.length === 0) {
+        throw new Error(`${where}: tenants must be a non-empty array when present`);
+      }
+      for (const t of tenants) {
+        if (typeof t !== 'string' || !/^[a-z0-9-]+$/i.test(t)) {
+          throw new Error(`${where}: tenant must be a hostname label, got ${JSON.stringify(t)}`);
+        }
+      }
+    }
     if (seen.has(id)) throw new Error(`${where}: duplicate id ${id}`);
     seen.add(id);
     return {
@@ -157,6 +192,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
       platform: platform as VendorPlatform,
       url,
       ...(component === undefined ? {} : { component }),
+      ...(tenants === undefined ? {} : { tenants: tenants as string[] }),
     };
   });
 }

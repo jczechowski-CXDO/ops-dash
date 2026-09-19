@@ -1187,3 +1187,47 @@ usually right. That is a cheaper signal than a third review and it costs nothing
 - **Nothing has ever run unattended.** Every claim about the long-lived process is reasoned
   from the code, not observed. The first M3 task should be to leave it running for a day
   and look at what it did.
+
+
+## Zendesk is pod-scoped, and I had the feed's limits half wrong (2026-09-19)
+
+John pushed back on "the feed publishes no health" with Zendesk's own documentation. He
+was right about the part that mattered and the correction is worth keeping, because I had
+stopped investigating one probe too early.
+
+**What I got wrong.** `?subdomain=<ours>` works. I had tried it, seen the `data` array
+look identical, and moved on — but the answer is in `meta.location`:
+
+```
+?subdomain=crexendo  ->  Pod 23: East Coast US (Northern Virginia) (AWS)
+no subdomain         ->  All locations
+```
+
+Scoped, the incident list drops from **17 to 10**. Seven of the seventeen were about pods
+we are not on. A tile whose incidents are usually irrelevant is a tile the operator stops
+reading — the same failure as a permanently-red tile, arrived at from the other direction.
+
+The lesson is narrow and reusable: **two API responses that differ only in metadata look
+identical if you diff the payload.** I compared the wrong part of the document.
+
+**What survived.** Service attributes are `deprecated, description, hasSubservices, name,
+position, slug` — with the subdomain applied, which is the obvious thing that might have
+changed it. There is still no status field, and no `status.json` / `summary.json` /
+`components.json` endpoint exists. Zendesk's status PAGE does render green bars, but it
+derives them from incident history: it is making exactly the inference this adapter
+declines to make. That is a real disagreement with the vendor's own convention, and it is
+amendment 4, so it stands — but it should be stated as a choice, not as a limitation of
+the feed.
+
+**Two tenants, not one.** `crexendo` and `netsapiens`. Both sit on Pod 23 today, so a
+single query would happen to cover both — and that coincidence is exactly what not to
+build on. `VendorFeed.tenants` is a list; the adapter queries each, merges deduped by
+incident id, and **fails the whole read if either tenant cannot be read**. If we cannot
+see netsapiens we cannot speak for Zendesk, however healthy crexendo looked.
+
+Four mutations, all caught: only the first tenant queried, scoping dropped, incidents
+concatenated rather than deduped, and a failing tenant skipped instead of aborting.
+
+The integration stub caught this change by itself, which is the design working: it 404s
+any URL it was not given, so the new pod-scoped URLs failed loudly rather than quietly
+reporting an empty Zendesk.

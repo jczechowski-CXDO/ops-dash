@@ -114,7 +114,13 @@ describe('platform dispatch', () => {
     const feed = loadVendorFeeds().find((f) => f.id === 'zendesk')!;
     const result = await pollVendor(feed, respond);
     expect(vendorOf(result).level).toBe('unknown');
-    expect(urls).toEqual(['https://status.zendesk.com/api/ssp/incidents.json']);
+    // One query per tenant, pod-scoped. Unscoped, this feed answers for every
+    // Zendesk pod on earth: measured 2026-09-19, 17 global incidents against
+    // the 10 affecting Pod 23, where both our accounts live today.
+    expect(urls).toEqual([
+      'https://status.zendesk.com/api/ssp/incidents.json?subdomain=crexendo',
+      'https://status.zendesk.com/api/ssp/incidents.json?subdomain=netsapiens',
+    ]);
   });
 
   it('answers for a platform with no adapter without making a request', async () => {

@@ -1,18 +1,19 @@
 {
   "$comment": [
-    "The vendor feed list. Adding a fifth Statuspage vendor is a line here and no code —",
+    "The vendor feed list. Adding a fifth Statuspage vendor is a line here and no code \u2014",
     "server/src/adapters/vendorstatus/index.test.ts proves it by loading a five-entry list.",
     "'platform' selects the adapter and is never inferred from 'id'.",
     "'url' must be https: this process fetches exactly what this file says and nothing else.",
     "'component' is optional; when present the feed MUST publish it, or the vendor reads",
     "unknown rather than quietly rolling up a shorter list.",
-    "Statuspage: use /api/v2/summary.json, never /api/v2/status.json — the latter is a",
+    "Statuspage: use /api/v2/summary.json, never /api/v2/status.json \u2014 the latter is a",
     "page-level rollup with no components, incidents or maintenance.",
     "Zendesk: the url is the SSP base; the adapter appends /incidents.json and, only when a",
     "component is configured, /services.json.",
     "proofpoint (statusio) and m365 (msgraph) are deliberately absent: their adapters are",
     "Milestone 3. index.ts answers for them with an explicit unsupported-platform error, so",
-    "adding them here before the adapter exists reads unknown rather than green."
+    "adding them here before the adapter exists reads unknown rather than green.",
+    "Zendesk: 'tenants' scopes the feed per account via ?subdomain=. We have two \u2014 crexendo and netsapiens \u2014 and BOTH are queried and merged, deduped by incident id. They share Pod 23 today, so one query would happen to cover both; that coincidence is exactly what not to build on."
   ],
   "feeds": [
     {
@@ -38,7 +39,11 @@
     {
       "id": "zendesk",
       "platform": "zendesk-ssp",
-      "url": "https://status.zendesk.com/api/ssp"
+      "url": "https://status.zendesk.com/api/ssp",
+      "tenants": [
+        "crexendo",
+        "netsapiens"
+      ]
     }
   ]
 }

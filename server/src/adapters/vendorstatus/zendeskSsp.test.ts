@@ -223,3 +223,90 @@ describe('platform comes from the config row', () => {
     expect(vendorOf(result).platform).toBe('zendesk-ssp');
   });
 });
+
+describe('pod scoping — the feed answers globally unless we say who we are', () => {
+  const capture = () => {
+    const urls: string[] = [];
+    const impl: FetchLike = async (url) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ data: [], included: [] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    };
+    return { urls, impl };
+  };
+
+  const feed = (over: Partial<VendorFeed> = {}): VendorFeed => ({
+    id: 'zendesk', platform: 'zendesk-ssp', url: 'https://status.zendesk.com/api/ssp', ...over,
+  });
+
+  it('queries every configured tenant, not just the first', async () => {
+    // We have two Zendesk accounts. Both sit on Pod 23 today, so a single query
+    // would happen to cover both — and that coincidence is exactly what not to
+    // build on: the day either is migrated, a one-tenant feed stops covering
+    // the other silently.
+    const c = capture();
+    await pollZendeskSsp(feed({ tenants: ['crexendo', 'netsapiens'] }), c.impl);
+    expect(c.urls).toEqual([
+      'https://status.zendesk.com/api/ssp/incidents.json?subdomain=crexendo',
+      'https://status.zendesk.com/api/ssp/incidents.json?subdomain=netsapiens',
+    ]);
+  });
+
+  it('omits the query entirely when no tenant is configured', async () => {
+    // Not `?subdomain=` with an empty value, which a feed may read as a literal
+    // subdomain named "".
+    const c = capture();
+    await pollZendeskSsp(feed(), c.impl);
+    expect(c.urls).toEqual(['https://status.zendesk.com/api/ssp/incidents.json']);
+  });
+
+  it('merges both tenants and dedupes by incident id', async () => {
+    // Two accounts on one pod return the SAME rows. Counting them twice would
+    // report double the incidents the moment anything went wrong — and the
+    // blast-radius numbers on the tile are what an operator triages by.
+    const shared = {
+      data: [{
+        id: '900', type: 'incident',
+        attributes: { name: 'Pod 23 latency', impact: 'minor', degradation: true, outage: false,
+          status: 'monitoring', startedAt: '2026-09-19T10:00:00Z', resolvedAt: null },
+      }],
+      included: [],
+    };
+    const impl: FetchLike = async () =>
+      new Response(JSON.stringify(shared), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    const result = await pollZendeskSsp(feed({ tenants: ['crexendo', 'netsapiens'] }), impl);
+    expect(result.data!.incidentsSince).toHaveLength(1);
+    expect(result.data!.level).toBe('degraded');
+  });
+
+  it('reads unknown if EITHER tenant cannot be read, however healthy the other looked', async () => {
+    // A partial read that renders clean is the precise failure this product
+    // exists to prevent. If we cannot see netsapiens we cannot speak for
+    // Zendesk, and the note has to say which one we lost.
+    let call = 0;
+    const impl: FetchLike = async () => {
+      call += 1;
+      return call === 1
+        ? new Response(JSON.stringify({ data: [], included: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response('', { status: 503 });
+    };
+    const result = await pollZendeskSsp(feed({ tenants: ['crexendo', 'netsapiens'] }), impl);
+    expect(result.data!.level).toBe('unknown');
+    expect(result.error?.code).toBe('http_503');
+    expect(result.data!.note).toContain('netsapiens');
+  });
+
+  it('names both tenants in the note, so the reader knows what was covered', async () => {
+    const c = capture();
+    const result = await pollZendeskSsp(feed({ tenants: ['crexendo', 'netsapiens'] }), c.impl);
+    expect(result.data!.note).toContain('crexendo, netsapiens');
+  });
+
+  it('url-encodes each tenant rather than interpolating it raw', async () => {
+    const c = capture();
+    await pollZendeskSsp(feed({ tenants: ['a-b'] }), c.impl);
+    expect(c.urls[0]).toContain('subdomain=a-b');
+  });
+});
