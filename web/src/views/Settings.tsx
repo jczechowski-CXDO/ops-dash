@@ -4,7 +4,7 @@ import { Card } from '../components/Card.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 import { Switch } from '../components/aurora/Switch.js';
-import { ageLabel } from '../theme/ageLabel.js';
+import { ago } from '../theme/ago.js';
 import { integrationFillColor, integrationOnFillColor } from '../theme/statusColor.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 
@@ -100,7 +100,7 @@ function IntegrationRow({ integration }: { integration: Integration }) {
         <div style={detailStyle}>{integration.detail}</div>
         <div style={detailStyle}>
           {lastSuccessAt
-            ? `Last success ${ageLabel(lastSuccessAt)} ago`
+            ? `Last success ${ago(lastSuccessAt)}`
             : 'Never connected · this feed has not authenticated once'}
         </div>
         {lastSuccessAt ? null : (

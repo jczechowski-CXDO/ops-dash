@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Alert } from './aurora/Alert.js';
 import { Skeleton } from './aurora/Skeleton.js';
-import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
+import { agePhrase } from '../theme/ago.js';
 import { srOnly } from '../theme/srOnly.js';
 
 /**
@@ -18,12 +18,6 @@ export type PanelState =
 
 function unreachable(state: never): never {
   throw new Error(`Panel: unhandled state ${JSON.stringify(state)}`);
-}
-
-/** '14 minutes old' / 'of unknown age' — never 'an unknown age old'. */
-function agePhrase(iso: string): string {
-  const age = ageLabel(iso);
-  return age === UNKNOWN_AGE ? 'of unknown age' : `${age} old`;
 }
 
 export function Panel({ state, children }: { state: PanelState; children: ReactNode }) {

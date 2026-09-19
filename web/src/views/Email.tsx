@@ -4,7 +4,8 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
 // Shape and formatters: see the note at the top of Entra.tsx.
-import { STAT_GRID, TableSection, VIEW_STACK, ago, signedDelta } from './Entra.js';
+import {STAT_GRID, TableSection, VIEW_STACK} from './Entra.js';
+import { ago, signedDelta } from '../theme/ago.js';
 
 /**
  * `BlockedMessage.reason` documents six values and then unions them with

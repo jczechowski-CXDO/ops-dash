@@ -6,7 +6,7 @@ import { Panel, type PanelState } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
-import { ageLabel } from '../theme/ageLabel.js';
+import { ago, signedDelta } from '../theme/ago.js';
 import { blastTextColor, severityLabel, severityTextColor } from '../theme/statusColor.js';
 
 /* ------------------------------------------------------------------ shared --
@@ -30,20 +30,6 @@ export const STAT_GRID: CSSProperties = {
   gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
   gap: 12,
 };
-
-/** '34 days ago'. `ageLabel` is deliberately non-directional — the caller
- *  composes the sentence — and every relative time on these three screens
- *  composes it the same way. */
-export function ago(iso: string): string {
-  return `${ageLabel(iso)} ago`;
-}
-
-/** '+1,102' / '-2' / '0'. A rise is signed, a fall carries its own minus, and
- *  zero is never '+0' — the prototype's own convention. */
-export function signedDelta(n: number): string {
-  const formatted = n.toLocaleString('en-US');
-  return n > 0 ? `+${formatted}` : formatted;
-}
 
 /** README § Tables: every table is the Aurora `Table` with `dense`, wrapped in a
  *  card with `overflow: hidden`, under a 15px/700 heading at gap 8.

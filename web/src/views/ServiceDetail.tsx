@@ -14,7 +14,7 @@ import { checkRunsFor, serviceById } from '../fixtures/index.js';
 // the report for the request to move it beside ageLabel in theme/ when a file
 // owner is available.
 import { clockOf } from '../fixtures/time.js';
-import { ageLabel } from '../theme/ageLabel.js';
+import { ago } from '../theme/ago.js';
 import { statusColor, statusTextColor } from '../theme/statusColor.js';
 
 /** README § 2: "a 9px status dot + 16px/700 state word". */
@@ -98,7 +98,7 @@ function vendorProvenance(vendor: ServiceStatus['vendor']): string {
     // adapter's prose and this line is the structural fact, so an operator sees
     // 'no poll on record' even if the prose is later rewritten.
     ? 'No successful poll on record.'
-    : `Last successful poll ${ageLabel(vendor.lastSuccessfulPoll)} ago.`;
+    : `Last successful poll ${ago(vendor.lastSuccessfulPoll)}.`;
 }
 
 /** Ours: the newest probe on the page, tying the half-card to the table below. */
@@ -106,7 +106,7 @@ function oursProvenance(runs: CheckRun[]): string {
   const newest = runs[0];
   return newest === undefined
     ? 'No probe has run yet.'
-    : `Last check run ${ageLabel(newest.at)} ago.`;
+    : `Last check run ${ago(newest.at)}.`;
 }
 
 const RESULT_WORD: Record<CheckRun['result'], string> = {
@@ -258,7 +258,7 @@ export default function ServiceDetail({
           valueColor={statusTextColor(service.ours.level)}
         />
         <StatCard label="Incidents (90d)" value={String(service.incidents90d)} note="opened and closed" />
-        <StatCard label="Last state change" value={`${ageLabel(service.lastStateChange)} ago`} />
+        <StatCard label="Last state change" value={ago(service.lastStateChange)} />
       </div>
 
       <Card padding="0" style={{ overflow: 'hidden' }}>

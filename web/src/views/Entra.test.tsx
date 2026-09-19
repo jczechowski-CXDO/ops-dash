@@ -5,7 +5,8 @@ import type { EntraSnapshot } from '@ops-dash/shared';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
-import Entra, { signedDelta } from './Entra.js';
+import Entra from './Entra.js';
+import { signedDelta } from '../theme/ago.js';
 
 /** The Wave 3 preamble helper, plus the two seams this task needs: a demo mode
  *  (the provider reads `?demo=`) and a constructed snapshot, so a relationship

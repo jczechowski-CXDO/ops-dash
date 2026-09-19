@@ -6,7 +6,8 @@ import { Table, type Column } from '../components/aurora/Table.js';
 // The screen shape, and the two formatters these three views share, are defined
 // once in Entra.tsx — see the note there. Imported rather than re-typed so the
 // three security screens are siblings, not three readings of one paragraph.
-import { STAT_GRID, TableSection, VIEW_STACK, ago } from './Entra.js';
+import {STAT_GRID, TableSection, VIEW_STACK} from './Entra.js';
+import { ago } from '../theme/ago.js';
 
 /** Whole-percent share, total-safe: a fleet of zero yields 0, not NaN in an
  *  aria-valuenow. */
