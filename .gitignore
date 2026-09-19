@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Local data store — SQLite file and its WAL companions
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+# Secrets. Credentials live in C:\secure\ and are referenced by env-var path;
+# nothing credential-shaped is ever committed here.
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Superseded design bundle. The extracted design_handoff_it_ops_dashboard/ is the
+# committed source of record; the archives are not tracked.
+*.zip

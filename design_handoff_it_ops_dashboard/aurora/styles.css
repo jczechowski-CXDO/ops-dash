@@ -1,0 +1,7 @@
+/* Aurora Design System — global stylesheet entry point.
+   Consumers link THIS file; everything below is shipped to them. */
+@import './tokens/fonts.css';
+@import './tokens/fig-tokens.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/base.css';

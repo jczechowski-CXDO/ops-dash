@@ -1,0 +1,52 @@
+/* Aurora spacing, radius, shadow & layout primitives.
+   Spacing follows an 8px base with intermediate 4/12 steps. */
+:root {
+  /* spacing scale */
+  --space-0: 0;
+  --space-0-5: 4px;
+  --space-1: 8px;
+  --space-1-5: 12px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-7: 56px;
+  --space-8: 64px;
+  --space-10: 80px;
+
+  /* radius scale */
+  --radius-none: 0px;
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* default component radius */
+  --radius-button: 8px;
+  --radius-card: 16px;
+  --radius-input: 8px;
+  --radius-chip: 8px;
+
+  /* elevation — soft, cool-grey shadows */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.10), 0 4px 10px rgba(0,0,0,0.05);
+  --shadow-xl: 0 24px 56px rgba(0,0,0,0.14), 0 8px 18px rgba(0,0,0,0.06);
+  --shadow-card: 0 1px 3px rgba(6,8,10,0.04), 0 6px 20px rgba(6,8,10,0.05);
+  --shadow-focus-primary: 0 0 0 3px rgba(0,128,190,0.22);
+
+  /* borders */
+  --border-width: 1px;
+  --border-color: var(--divider);
+
+  /* transitions */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* @kind other */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-base: 200ms; /* @kind other */
+  --dur-slow: 320ms; /* @kind other */
+}

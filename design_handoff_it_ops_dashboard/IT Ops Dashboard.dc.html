@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="aurora/tokens/fonts.css">
+<link rel="stylesheet" href="aurora/tokens/fig-tokens.css">
+<link rel="stylesheet" href="aurora/tokens/typography.css">
+<link rel="stylesheet" href="aurora/tokens/spacing.css">
+<link rel="stylesheet" href="aurora/tokens/base.css">
+<link rel="stylesheet" href="aurora/styles.css">
+<script src="aurora/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; }
+  a { color: var(--primary-main); text-decoration: none; }
+  a:hover { color: var(--primary-dark); text-decoration: underline; }
+  @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+</style>
+</helmet>
+
+<div class="{{ rootClass }}" style="display:flex;min-height:100vh;background:var(--background-default);color:var(--text-primary);font-family:var(--font-body, 'Urbanist', system-ui);">
+
+  <div style="width:232px;flex:0 0 232px;border-right:1px solid var(--divider);background:var(--background-paper);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--divider);">
+      <div style="width:28px;height:28px;border-radius:8px;background:var(--primary-main);display:flex;align-items:center;justify-content:center;">
+        <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Icon" name="monitoring" size="17" color="#fff" hint-size="17px,17px"></x-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:1px;min-width:0;">
+        <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:13.5px;letter-spacing:-0.01em;">Crexendo IT</div>
+        <div style="font-size:11px;color:var(--text-secondary);">Service operations</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:2px;padding:10px 10px;">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="7">
+        <div onClick="{{ n.onClick }}" style="display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:var(--font-ui,'Plus Jakarta Sans');font-size:13px;font-weight:{{ n.weight }};background:{{ n.bg }};color:{{ n.fg }};">
+          <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Icon" name="{{ n.icon }}" size="19" hint-size="19px,19px"></x-import>
+          <span>{{ n.label }}</span>
+          <sc-if value="{{ n.hasBadge }}" hint-placeholder-val="{{ false }}">
+            <span style="min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:{{ n.badgeBg }};color:#fff;font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;">{{ n.badge }}</span>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="margin-top:auto;padding:14px;border-top:1px solid var(--divider);display:flex;flex-direction:column;gap:8px;">
+      <div style="font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary);font-weight:700;">Demo state</div>
+      <div style="display:flex;background:var(--grey-grey-100,#eef2f4);border-radius:999px;padding:3px;gap:3px;">
+        <div onClick="{{ onQuiet }}" style="flex:1;text-align:center;padding:5px 0;border-radius:999px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:var(--font-ui,'Plus Jakarta Sans');background:{{ quietBg }};color:{{ quietFg }};">Quiet</div>
+        <div onClick="{{ onSev1 }}" style="flex:1;text-align:center;padding:5px 0;border-radius:999px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:var(--font-ui,'Plus Jakarta Sans');background:{{ sev1Bg }};color:{{ sev1Fg }};">Sev1</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+
+    <div style="display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--divider);background:var(--background-paper);position:sticky;top:0;z-index:5;">
+      <div style="min-width:0;flex:1;">
+        <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:19px;letter-spacing:-0.015em;">{{ pageTitle }}</div>
+        <div style="font-size:12.5px;color:var(--text-secondary);margin-top:1px;">{{ pageSub }}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--divider);border-radius:8px;white-space:nowrap;flex:0 0 auto;">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--success-main);animation:pulseDot 2s ease-in-out infinite;flex:0 0 auto;"></span>
+        <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">Auto-refresh · {{ refreshIn }}</span>
+      </div>
+      <div style="font-family:var(--font-mono, ui-monospace, 'SF Mono', monospace);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;">{{ clock }}</div>
+      <x-import component-from-global-scope="AuroraDesignSystem_5047ff.IconButton" onClick="{{ onToggleTheme }}" hint-size="36px,36px">
+        <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Icon" name="{{ themeIcon }}" size="20" hint-size="20px,20px"></x-import>
+      </x-import>
+    </div>
+
+    <div style="flex:1;padding:20px 24px 40px;display:flex;flex-direction:column;gap:16px;">
+
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+
+          <sc-if value="{{ isQuiet }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:10px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:11px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--text-secondary);margin-right:4px;">All systems operational</span>
+              <sc-for list="{{ services }}" as="s" hint-placeholder-count="10">
+                <div onClick="{{ s.onOpen }}" style="display:flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;background:var(--grey-grey-100,#eef2f4);cursor:pointer;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:{{ s.color }};"></span>
+                  <span style="font-size:11.5px;font-weight:600;font-family:var(--font-ui,'Plus Jakarta Sans');">{{ s.short }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isSev1 }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;">
+              <sc-for list="{{ services }}" as="s" hint-placeholder-count="10">
+                <div onClick="{{ s.onOpen }}" style="border:1px solid var(--divider);border-left:3px solid {{ s.color }};border-radius:10px;background:var(--background-paper);padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;">
+                  <div style="display:flex;align-items:center;gap:7px;">
+                    <span style="width:7px;height:7px;border-radius:50%;background:{{ s.color }};"></span>
+                    <span style="font-size:12.5px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');flex:1;min-width:0;">{{ s.short }}</span>
+                    <span style="font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums;">{{ s.latency }}</span>
+                  </div>
+                  <svg viewBox="0 0 100 26" preserveAspectRatio="none" style="width:100%;height:26px;">
+                    <polyline points="{{ s.spark }}" fill="none" stroke="{{ s.color }}" stroke-width="1.4" vector-effect="non-scaling-stroke"></polyline>
+                  </svg>
+                  <div style="display:flex;gap:10px;font-size:10.5px;color:var(--text-secondary);">
+                    <span>Vendor: {{ s.vendorLabel }}</span>
+                    <span style="margin-left:auto;">Ours: {{ s.ourLabel }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isSev1 }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:baseline;gap:10px;">
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Active incidents</div>
+                <div style="font-size:12.5px;color:var(--text-secondary);">{{ alertSummary }}</div>
+              </div>
+              <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:center;padding:11px 14px;border:1px solid var(--divider);border-left:3px solid {{ a.color }};border-radius:10px;background:var(--background-paper);opacity:{{ a.opacity }};">
+                  <div style="display:flex;align-items:center;justify-content:center;height:22px;border-radius:6px;background:{{ a.color }};color:#fff;font-size:11px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');">{{ a.sevLabel }}</div>
+                  <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                    <div onClick="{{ a.onOpen }}" style="font-size:13.5px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');cursor:pointer;">{{ a.title }}</div>
+                    <div style="font-size:11.5px;color:var(--text-secondary);">{{ a.meta }}</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="outlined" size="small" onClick="{{ a.onAck }}" hint-size="94px,30px">{{ a.ackLabel }}</x-import>
+                    <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="text" size="small" onClick="{{ a.onMute }}" hint-size="64px,30px">{{ a.muteLabel }}</x-import>
+                    <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="text" color="success" size="small" onClick="{{ a.onResolve }}" hint-size="72px,30px">Resolve</x-import>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isQuiet }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:28px 24px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Icon" name="task_alt" size="34" color="var(--success-main)" hint-size="34px,34px"></x-import>
+              <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:16px;">No active incidents</div>
+              <div style="font-size:13px;color:var(--text-secondary);text-align:center;max-width:460px;text-wrap:pretty;">Ten monitored services reporting healthy across vendor status and our own synthetic checks. Last incident closed 2 days ago.</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isQuiet }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Recent history</div>
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+                <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ historyColumns }}" rows="{{ historyRows }}" dense="{{ true }}" hint-size="100%,220px"></x-import>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isService }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:16px 18px;display:flex;flex-direction:column;gap:8px;">
+              <div style="font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary);font-weight:700;">Vendor status page</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="width:9px;height:9px;border-radius:50%;background:{{ svc.color }};"></span>
+                <span style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:16px;">{{ svc.vendorLabel }}</span>
+              </div>
+              <div style="font-size:12.5px;color:var(--text-secondary);text-wrap:pretty;">{{ svc.vendorNote }}</div>
+            </div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:16px 18px;display:flex;flex-direction:column;gap:8px;">
+              <div style="font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary);font-weight:700;">Our synthetic checks</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="width:9px;height:9px;border-radius:50%;background:{{ svc.ourColor }};"></span>
+                <span style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:16px;">{{ svc.ourLabel }}</span>
+              </div>
+              <div style="font-size:12.5px;color:var(--text-secondary);text-wrap:pretty;">{{ svc.ourNote }}</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:16px 18px;display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:baseline;gap:12px;">
+              <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:14px;">Response time · last 24h</div>
+              <div style="font-size:12.5px;color:var(--text-secondary);">p50 {{ svc.p50 }} · p95 {{ svc.p95 }}</div>
+            </div>
+            <svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;height:120px;">
+              <polyline points="{{ svc.spark }}" fill="none" stroke="{{ svc.color }}" stroke-width="1.4" vector-effect="non-scaling-stroke"></polyline>
+            </svg>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+            <sc-for list="{{ svcStats }}" as="k" hint-placeholder-count="4">
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:14px 16px;display:flex;flex-direction:column;gap:3px;">
+                <div style="font-size:11px;color:var(--text-secondary);font-weight:600;">{{ k.label }}</div>
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:21px;font-variant-numeric:tabular-nums;">{{ k.value }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Check history</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ checkColumns }}" rows="{{ checkRows }}" dense="{{ true }}" hint-size="100%,220px"></x-import>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isIncident }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="border:1px solid var(--divider);border-left:3px solid var(--error-main);border-radius:12px;background:var(--background-paper);padding:18px 20px;display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="padding:3px 9px;border-radius:6px;background:var(--error-main);color:#fff;font-size:11px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');">SEV 1</span>
+              <span style="font-family:var(--font-mono, ui-monospace, monospace);font-size:12px;color:var(--text-secondary);">INC-2291</span>
+              <span style="font-size:12px;color:var(--text-secondary);">Opened 09:12 · {{ incidentAge }} elapsed</span>
+            </div>
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:21px;letter-spacing:-0.015em;text-wrap:pretty;">Exchange Online mail delivery delays</div>
+            <div style="font-size:13.5px;color:var(--text-secondary);max-width:70ch;text-wrap:pretty;">Microsoft advisory EX1084221 reports delayed transport in North America. Our synthetic mailflow probe is failing from three of four regions, which matches the vendor claim.</div>
+            <div style="display:flex;gap:8px;margin-top:4px;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="contained" size="small" onClick="{{ onAckIncident }}" hint-size="120px,32px">{{ incidentAckLabel }}</x-import>
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="outlined" size="small" onClick="{{ onMuteIncident }}" hint-size="120px,32px">{{ incidentMuteLabel }}</x-import>
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Button" variant="outlined" color="success" size="small" onClick="{{ onResolveIncident }}" hint-size="120px,32px">{{ incidentResolveLabel }}</x-import>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;">
+            <sc-for list="{{ blastRadius }}" as="b" hint-placeholder-count="4">
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:14px 16px;display:flex;flex-direction:column;gap:3px;">
+                <div style="font-size:11px;color:var(--text-secondary);font-weight:600;">{{ b.label }}</div>
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:24px;font-variant-numeric:tabular-nums;color:{{ b.color }};">{{ b.value }}</div>
+                <div style="font-size:11px;color:var(--text-secondary);">{{ b.note }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Timeline</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:16px 20px;display:flex;flex-direction:column;">
+              <sc-for list="{{ timeline }}" as="t" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:60px 18px 1fr;gap:12px;align-items:start;padding-bottom:16px;">
+                  <div style="font-family:var(--font-mono, ui-monospace, monospace);font-size:12px;color:var(--text-secondary);padding-top:2px;">{{ t.time }}</div>
+                  <div style="display:flex;flex-direction:column;align-items:center;height:100%;">
+                    <span style="width:9px;height:9px;border-radius:50%;background:{{ t.color }};margin-top:5px;"></span>
+                    <span style="width:1px;flex:1;background:var(--divider);margin-top:4px;min-height:14px;"></span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                    <div style="font-size:13px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');">{{ t.title }}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);text-wrap:pretty;">{{ t.body }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEntra }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <sc-for list="{{ entraStats }}" as="k" hint-placeholder-count="4">
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:14px 16px;display:flex;flex-direction:column;gap:3px;">
+                <div style="font-size:11px;color:var(--text-secondary);font-weight:600;">{{ k.label }}</div>
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:22px;font-variant-numeric:tabular-nums;color:{{ k.color }};">{{ k.value }}</div>
+                <div style="font-size:11px;color:var(--text-secondary);">{{ k.note }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Signals · last 24 hours</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ entraColumns }}" rows="{{ entraRows }}" dense="{{ true }}" hint-size="100%,340px"></x-import>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Directory audit</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ auditColumns }}" rows="{{ auditRows }}" dense="{{ true }}" hint-size="100%,220px"></x-import>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEndpoints }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <sc-for list="{{ endpointStats }}" as="k" hint-placeholder-count="4">
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:14px 16px;display:flex;flex-direction:column;gap:6px;">
+                <div style="font-size:11px;color:var(--text-secondary);font-weight:600;">{{ k.label }}</div>
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:22px;font-variant-numeric:tabular-nums;color:{{ k.color }};">{{ k.value }}</div>
+                <x-import component-from-global-scope="AuroraDesignSystem_5047ff.LinearProgress" value="{{ k.pct }}" color="{{ k.bar }}" hint-size="100%,6px"></x-import>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Needs attention</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ endpointColumns }}" rows="{{ endpointRows }}" dense="{{ true }}" hint-size="100%,300px"></x-import>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEmail }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <sc-for list="{{ emailStats }}" as="k" hint-placeholder-count="4">
+              <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);padding:14px 16px;display:flex;flex-direction:column;gap:3px;">
+                <div style="font-size:11px;color:var(--text-secondary);font-weight:600;">{{ k.label }}</div>
+                <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:22px;font-variant-numeric:tabular-nums;color:{{ k.color }};">{{ k.value }}</div>
+                <div style="font-size:11px;color:var(--text-secondary);">{{ k.note }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Recently blocked</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Table" columns="{{ emailColumns }}" rows="{{ emailRows }}" dense="{{ true }}" hint-size="100%,300px"></x-import>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start;">
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Integrations</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <sc-for list="{{ integrations }}" as="i" hint-placeholder-count="6">
+                <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--divider);">
+                  <div style="min-width:0;display:flex;flex-direction:column;gap:1px;">
+                    <div style="font-size:13px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');">{{ i.name }}</div>
+                    <div style="font-size:11.5px;color:var(--text-secondary);">{{ i.detail }}</div>
+                  </div>
+                  <span style="padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;background:{{ i.bg }};color:{{ i.fg }};">{{ i.state }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="font-family:var(--font-ui,'Plus Jakarta Sans');font-weight:700;font-size:15px;">Alert rules</div>
+            <div style="border:1px solid var(--divider);border-radius:12px;background:var(--background-paper);overflow:hidden;">
+              <sc-for list="{{ rules }}" as="r" hint-placeholder-count="6">
+                <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--divider);">
+                  <div style="min-width:0;display:flex;flex-direction:column;gap:1px;">
+                    <div style="font-size:13px;font-weight:700;font-family:var(--font-ui,'Plus Jakarta Sans');">{{ r.name }}</div>
+                    <div style="font-size:11.5px;color:var(--text-secondary);">{{ r.detail }}</div>
+                  </div>
+                  <x-import component-from-global-scope="AuroraDesignSystem_5047ff.Switch" checked="{{ r.on }}" onChange="{{ r.onToggle }}" hint-size="44px,24px"></x-import>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const SERVICES = [
+  { id: 'm365', short: 'Microsoft 365', name: 'Microsoft 365 / Entra ID', seed: 3, base: 210 },
+  { id: 'epc', short: 'Endpoint Central', name: 'ManageEngine Endpoint Central', seed: 7, base: 340 },
+  { id: 'stellar', short: 'Stellar Cyber', name: 'Stellar Cyber XDR', seed: 11, base: 180 },
+  { id: 'proofpoint', short: 'Proofpoint', name: 'Proofpoint 365 Total Protection', seed: 13, base: 260 },
+  { id: 'aws', short: 'AWS', name: 'Amazon Web Services', seed: 17, base: 120 },
+  { id: 'azure', short: 'Azure', name: 'Microsoft Azure', seed: 19, base: 140 },
+  { id: 'okta', short: 'Okta', name: 'Okta Workforce Identity', seed: 23, base: 95 },
+  { id: 'cloudflare', short: 'Cloudflare', name: 'Cloudflare', seed: 29, base: 48 },
+  { id: 'crowdstrike', short: 'CrowdStrike', name: 'CrowdStrike Falcon', seed: 31, base: 155 },
+  { id: 'github', short: 'GitHub', name: 'GitHub', seed: 37, base: 175 }
+];
+
+const NAV = [
+  { id: 'overview', label: 'Overview', icon: 'space_dashboard' },
+  { id: 'service', label: 'Service detail', icon: 'dns' },
+  { id: 'incident', label: 'Incident', icon: 'report' },
+  { id: 'entra', label: 'Entra security', icon: 'shield' },
+  { id: 'endpoints', label: 'Endpoints', icon: 'computer' },
+  { id: 'email', label: 'Email security', icon: 'mail' },
+  { id: 'settings', label: 'Rules & integrations', icon: 'settings' }
+];
+
+class Component extends DCLogic {
+  state = {
+    page: 'overview', theme: 'light', mode: 'sev1', service: 'm365',
+    ack: {}, muted: {}, resolved: {}, tick: 0,
+    rules: { spray: true, risky: true, secrets: true, stale: false, legacy: true, vendor: true }
+  };
+
+  componentDidMount() {
+    this.timer = setInterval(() => this.setState(s => ({ tick: s.tick + 1 })), 1000);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  spark(seed, spike) {
+    let x = (seed * 7919 + 13) % 2147483647;
+    const pts = [];
+    for (let i = 0; i < 28; i++) {
+      x = (x * 48271) % 2147483647;
+      const v = x / 2147483647;
+      let y = 22 - v * 8;
+      if (spike && i > 17) y = 11 - v * 8 - (i - 17) * 0.35;
+      pts.push((i * (100 / 27)).toFixed(1) + ',' + Math.max(2, y).toFixed(1));
+    }
+    return pts.join(' ');
+  }
+
+  buildServices(sev1) {
+    const go = id => () => this.setState({ service: id, page: 'service' });
+    return SERVICES.map(s => {
+      const degraded = sev1 && s.id === 'm365';
+      const warn = sev1 && s.id === 'proofpoint';
+      const color = degraded ? 'var(--error-main)' : warn ? 'var(--warning-main)' : 'var(--success-main)';
+      return {
+        id: s.id, short: s.short, name: s.name, color,
+        vendorLabel: degraded ? 'Degraded' : warn ? 'Advisory' : 'Operational',
+        ourLabel: degraded ? 'Failing' : warn ? 'Slow' : 'Passing',
+        ourColor: degraded ? 'var(--error-main)' : warn ? 'var(--warning-main)' : 'var(--success-main)',
+        latency: (degraded ? s.base * 4 : s.base) + ' ms',
+        spark: this.spark(s.seed, degraded),
+        onOpen: go(s.id)
+      };
+    });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const sev1 = st.mode === 'sev1';
+    const services = this.buildServices(sev1);
+    const svcBase = SERVICES.find(s => s.id === st.service) || SERVICES[0];
+    const svc = services.find(s => s.id === st.service) || services[0];
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+
+    const alertsRaw = [
+      { id: 'INC-2291', sev: 1, title: 'Exchange Online mail delivery delays', meta: 'Microsoft 365 · opened 09:12 · 384 users affected · advisory EX1084221' },
+      { id: 'INC-2290', sev: 2, title: 'Failed sign-in spike — 1,204 attempts against 96 accounts', meta: 'Entra ID · opened 08:47 · source 45.83.x.x (RO, NL) · legacy auth endpoints' },
+      { id: 'INC-2288', sev: 2, title: '14 Endpoint Central agents stale for 21+ days', meta: 'Endpoint Central · opened yesterday 17:20 · 9 laptops, 5 desktops' },
+      { id: 'INC-2286', sev: 3, title: '2 app registration secrets expire in 9 days', meta: 'Entra ID · opened 2 days ago · CXDO-GraphExport, Stellar-Connector' }
+    ];
+    const sevColor = n => n === 1 ? 'var(--error-main)' : n === 2 ? 'var(--warning-main)' : 'var(--info-main)';
+    const alerts = alertsRaw.map(a => ({
+      id: a.id, title: a.title, sevLabel: 'SEV ' + a.sev, color: sevColor(a.sev),
+      meta: st.resolved[a.id] ? 'Resolved by John H. · ' + a.meta : st.ack[a.id] ? 'Acknowledged by John H. · ' + a.meta : a.meta,
+      opacity: st.ack[a.id] || st.resolved[a.id] || st.muted[a.id] ? 0.45 : 1,
+      ackLabel: st.ack[a.id] ? 'Acknowledged' : 'Acknowledge',
+      muteLabel: st.muted[a.id] ? 'Unmute' : 'Mute',
+      onAck: () => this.setState(s => ({ ack: { ...s.ack, [a.id]: !s.ack[a.id] } })),
+      onMute: () => this.setState(s => ({ muted: { ...s.muted, [a.id]: !s.muted[a.id] } })),
+      onResolve: () => this.setState(s => ({ resolved: { ...s.resolved, [a.id]: true }, ack: { ...s.ack, [a.id]: true } })),
+      onOpen: () => this.setState({ page: 'incident' })
+    })).filter(a => !st.resolved[a.id] || true);
+
+    const openCount = sev1 ? alertsRaw.filter(a => !st.resolved[a.id]).length : 0;
+    const navItems = NAV.map(n => {
+      const active = n.id === st.page;
+      const badge = n.id === 'overview' && openCount ? String(openCount) : n.id === 'incident' && sev1 && !st.resolved['INC-2291'] ? '1' : '';
+      return {
+        id: n.id, label: n.label, icon: n.icon,
+        bg: active ? 'var(--primary-lighter)' : 'transparent',
+        fg: active ? 'var(--primary-dark)' : 'var(--text-secondary)',
+        weight: active ? 700 : 600,
+        hasBadge: !!badge, badge,
+        badgeBg: n.id === 'incident' ? 'var(--error-main)' : 'var(--warning-main)',
+        onClick: () => this.setState({ page: n.id })
+      };
+    });
+
+    const titles = {
+      overview: ['Overview', sev1 ? openCount + ' open incidents across 10 monitored services' : 'All 10 monitored services healthy · 512 users, 612 endpoints'],
+      service: [svc.name, 'Vendor status and our synthetic checks, side by side'],
+      incident: ['INC-2291', 'Exchange Online mail delivery delays'],
+      entra: ['Entra security', 'Sign-in risk, identity hygiene and directory audit'],
+      endpoints: ['Endpoints & patch health', '612 managed endpoints · Endpoint Central'],
+      email: ['Email security', 'Proofpoint 365 Total Protection · last 24 hours'],
+      settings: ['Rules & integrations', 'What we watch and where it comes from']
+    };
+    const t = titles[st.page] || titles.overview;
+
+    const rule = (key, name, detail) => ({
+      key, name, detail, on: st.rules[key],
+      onToggle: () => this.setState(s => ({ rules: { ...s.rules, [key]: !s.rules[key] } }))
+    });
+
+    return {
+      rootClass: st.theme === 'dark' ? 'dark' : '',
+      themeIcon: st.theme === 'dark' ? 'light_mode' : 'nights_stay',
+      onToggleTheme: () => this.setState(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      clock: pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds()),
+      refreshIn: (30 - (st.tick % 30)) + 's',
+      navItems,
+      pageTitle: t[0], pageSub: t[1],
+      isOverview: st.page === 'overview', isService: st.page === 'service',
+      isIncident: st.page === 'incident', isEntra: st.page === 'entra',
+      isEndpoints: st.page === 'endpoints', isEmail: st.page === 'email',
+      isSettings: st.page === 'settings',
+      isSev1: sev1, isQuiet: !sev1,
+      onQuiet: () => this.setState({ mode: 'quiet' }),
+      onSev1: () => this.setState({ mode: 'sev1' }),
+      quietBg: sev1 ? 'transparent' : 'var(--background-paper)',
+      quietFg: sev1 ? 'var(--text-secondary)' : 'var(--text-primary)',
+      sev1Bg: sev1 ? 'var(--background-paper)' : 'transparent',
+      sev1Fg: sev1 ? 'var(--text-primary)' : 'var(--text-secondary)',
+      services,
+      alerts,
+      alertSummary: openCount + ' open · 1 Sev1 · 2 Sev2 · 1 Sev3',
+
+      historyColumns: [
+        { key: 'id', label: 'Incident' }, { key: 'title', label: 'Summary' },
+        { key: 'dur', label: 'Duration', align: 'right' },
+        { key: 'closed', label: 'Closed', align: 'right' }
+      ],
+      historyRows: [
+        { id: 'INC-2284', title: 'Okta admin console slow to load', svc: 'Okta', dur: '41m', closed: '2 days ago' },
+        { id: 'INC-2281', title: 'Stellar Cyber sensor stopped forwarding', svc: 'Stellar Cyber', dur: '2h 14m', closed: '4 days ago' },
+        { id: 'INC-2279', title: 'Teams call quality degradation', svc: 'Microsoft 365', dur: '1h 06m', closed: '6 days ago' },
+        { id: 'INC-2277', title: 'Patch deployment failed on 22 endpoints', svc: 'Endpoint Central', dur: '3h 48m', closed: '8 days ago' },
+        { id: 'INC-2275', title: 'Cloudflare WAF false positives on portal', svc: 'Cloudflare', dur: '27m', closed: '11 days ago' }
+      ],
+
+      svc: {
+        ...svc,
+        vendorNote: svc.vendorLabel === 'Degraded'
+          ? 'Advisory EX1084221 — "Users may experience delays receiving email." Last vendor update 12 minutes ago.'
+          : 'No advisories posted in the last 7 days. Feed polled every 60 seconds.',
+        ourNote: svc.ourLabel === 'Failing'
+          ? 'Mailflow probe failing from us-east, us-west and eu-west. Last success 09:08.'
+          : 'All probes green from four regions. Last run 41 seconds ago.',
+        p50: svcBase.base + ' ms',
+        p95: Math.round(svcBase.base * 1.8) + ' ms'
+      },
+      svcStats: [
+        { label: 'Uptime (30d)', value: svc.vendorLabel === 'Degraded' ? '99.21%' : '99.98%' },
+        { label: 'Checks passing', value: svc.ourLabel === 'Failing' ? '1 / 4' : '4 / 4' },
+        { label: 'Incidents (90d)', value: svc.id === 'm365' ? '4' : '1' },
+        { label: 'Last state change', value: svc.vendorLabel === 'Degraded' ? '09:12 today' : '11 days ago' }
+      ],
+      checkColumns: [
+        { key: 'time', label: 'Time' }, { key: 'check', label: 'Check' },
+        { key: 'region', label: 'Region' }, { key: 'result', label: 'Result' },
+        { key: 'ms', label: 'ms', align: 'right' }
+      ],
+      checkRows: [
+        { time: '09:41:02', check: 'Mailflow round trip', region: 'us-east', result: svc.ourLabel === 'Failing' ? 'Timeout' : 'Pass', ms: svc.latency },
+        { time: '09:40:31', check: 'Graph /me', region: 'us-west', result: 'Pass', ms: svcBase.base + ' ms' },
+        { time: '09:40:02', check: 'OIDC token', region: 'eu-west', result: 'Pass', ms: Math.round(svcBase.base * 1.2) + ' ms' },
+        { time: '09:39:31', check: 'Portal HTTP 200', region: 'us-east', result: 'Pass', ms: Math.round(svcBase.base * 0.7) + ' ms' },
+        { time: '09:39:02', check: 'Mailflow round trip', region: 'ap-south', result: 'Pass', ms: Math.round(svcBase.base * 1.4) + ' ms' }
+      ],
+
+      incidentAge: '1h ' + pad(23 + (st.tick % 37)) + 'm',
+      incidentAckLabel: st.ack['INC-2291'] ? 'Acknowledged by you' : 'Acknowledge',
+      incidentMuteLabel: st.muted['INC-2291'] ? 'Unmute service' : 'Mute service',
+      incidentResolveLabel: st.resolved['INC-2291'] ? 'Resolved' : 'Mark resolved',
+      onAckIncident: () => this.setState(s => ({ ack: { ...s.ack, 'INC-2291': !s.ack['INC-2291'] } })),
+      onMuteIncident: () => this.setState(s => ({ muted: { ...s.muted, 'INC-2291': !s.muted['INC-2291'] } })),
+      onResolveIncident: () => this.setState(s => ({ resolved: { ...s.resolved, 'INC-2291': true }, ack: { ...s.ack, 'INC-2291': true } })),
+      blastRadius: [
+        { label: 'Users affected', value: '384', note: 'of 512 licensed mailboxes', color: 'var(--error-main)' },
+        { label: 'Mail queue depth', value: '2,140', note: 'inbound messages held', color: 'var(--error-main)' },
+        { label: 'Median delay', value: '18m 40s', note: 'up from 4s baseline', color: 'var(--warning-main)' },
+        { label: 'Oldest message', value: '1h 12m', note: 'queued since 08:29', color: 'var(--warning-main)' }
+      ],
+      timeline: [
+        { time: '10:24', title: 'Queue drain started', body: 'Delay down to 18m 40s from a 31m peak. Monitoring.', color: 'var(--info-main)' },
+        { time: '09:58', title: 'Vendor confirmed', body: 'Microsoft posted EX1084221 and identified a transport infrastructure fault.', color: 'var(--warning-main)' },
+        { time: '09:31', title: 'Escalated to Sev1', body: 'Affected mailbox count crossed 300. Help desk notified, banner posted in Teams.', color: 'var(--error-main)' },
+        { time: '09:14', title: 'Synthetic probes failing', body: 'Mailflow round trip timed out from us-east, us-west and eu-west.', color: 'var(--error-main)' },
+        { time: '09:12', title: 'Incident opened', body: 'Auto-created from rule "Vendor status page degraded + our check failing".', color: 'var(--text-secondary)' }
+      ],
+
+      entraStats: [
+        { label: 'Risky sign-ins (24h)', value: '7', note: '3 confirmed compromised', color: 'var(--error-main)' },
+        { label: 'Failed sign-ins (24h)', value: '1,204', note: 'against 96 accounts', color: 'var(--warning-main)' },
+        { label: 'MFA coverage', value: '94.3%', note: '29 users unregistered', color: 'var(--warning-main)' },
+        { label: 'Privileged accounts', value: '11', note: '4 Global Administrators', color: 'var(--text-primary)' }
+      ],
+      entraColumns: [
+        { key: 'signal', label: 'Signal' }, { key: 'count', label: 'Count', align: 'right' },
+        { key: 'trend', label: '24h trend' }, { key: 'sev', label: 'Severity' },
+        { key: 'last', label: 'Last seen', align: 'right' }
+      ],
+      entraRows: [
+        { signal: 'Risky sign-ins', count: '7', trend: '+4', sev: 'Sev1', last: '09:52' },
+        { signal: 'Failed sign-in spike', count: '1,204', trend: '+1,102', sev: 'Sev2', last: '08:47' },
+        { signal: 'Legacy auth attempts', count: '318', trend: '+296', sev: 'Sev2', last: '08:51' },
+        { signal: 'MFA registration gaps', count: '29', trend: '-2', sev: 'Sev3', last: 'Today' },
+        { signal: 'Expiring secrets & certs', count: '2', trend: '0', sev: 'Sev3', last: '2 days ago' },
+        { signal: 'Privileged role changes', count: '1', trend: '+1', sev: 'Sev2', last: 'Yesterday 16:04' },
+        { signal: 'Guest / external access', count: '43', trend: '+3', sev: 'Info', last: 'Today' },
+        { signal: 'CA policy changes', count: '0', trend: '0', sev: 'Info', last: '9 days ago' }
+      ],
+      auditColumns: [
+        { key: 'time', label: 'Time' }, { key: 'actor', label: 'Actor' },
+        { key: 'action', label: 'Action' }, { key: 'target', label: 'Target', align: 'right' }
+      ],
+      auditRows: [
+        { time: 'Yesterday 16:04', actor: 'j.hart@crexendo.com', action: 'Add member to role', target: 'Helpdesk Administrator', result: 'Success' },
+        { time: 'Yesterday 14:22', actor: 'System', action: 'Disable user', target: 'contractor-ac41', result: 'Success' },
+        { time: 'Yesterday 11:07', actor: 'm.reyes@crexendo.com', action: 'Update app credentials', target: 'Stellar-Connector', result: 'Success' },
+        { time: '2 days ago 09:40', actor: 'j.hart@crexendo.com', action: 'Invite external user', target: 'auditor@kpmg-ext.com', result: 'Success' }
+      ],
+
+      endpointStats: [
+        { label: 'Patch compliance', value: '91.4%', pct: 91, bar: 'warning', color: 'var(--warning-main)' },
+        { label: 'Agents checked in (7d)', value: '598 / 612', pct: 98, bar: 'success', color: 'var(--success-main)' },
+        { label: 'BitLocker encrypted', value: '576 / 612', pct: 94, bar: 'primary', color: 'var(--text-primary)' },
+        { label: 'Critical patches missing', value: '38', pct: 38, bar: 'error', color: 'var(--error-main)' }
+      ],
+      endpointColumns: [
+        { key: 'name', label: 'Computer' }, { key: 'user', label: 'Assigned to' },
+        { key: 'issue', label: 'Issue' },
+        { key: 'seen', label: 'Last check-in', align: 'right' }
+      ],
+      endpointRows: [
+        { name: 'CXDO-LT-0412', user: 'a.nguyen', os: 'Windows 11 23H2', issue: 'Agent stale · 34 days', seen: '34 days ago' },
+        { name: 'CXDO-LT-0288', user: 'r.patel', os: 'Windows 11 23H2', issue: '6 critical patches missing', seen: '2 hours ago' },
+        { name: 'CXDO-DT-0117', user: 'shared / reception', os: 'Windows 10 22H2', issue: 'BitLocker not enabled', seen: '18 minutes ago' },
+        { name: 'CXDO-LT-0355', user: 'k.obrien', os: 'macOS 15.2', issue: 'Agent stale · 27 days', seen: '27 days ago' },
+        { name: 'CXDO-LT-0501', user: 'd.silva', os: 'Windows 11 24H2', issue: '4 critical patches missing', seen: '41 minutes ago' },
+        { name: 'CXDO-DT-0092', user: 'lab / QA', os: 'Windows 10 22H2', issue: 'EOL build · upgrade required', seen: '3 days ago' }
+      ],
+
+      emailStats: [
+        { label: 'Messages processed', value: '18,402', note: 'inbound, last 24h', color: 'var(--text-primary)' },
+        { label: 'Blocked', value: '3,911', note: '21.3% of inbound', color: 'var(--text-primary)' },
+        { label: 'Quarantined', value: '147', note: '12 pending review', color: 'var(--warning-main)' },
+        { label: 'Credential phishing', value: '38', note: '+9 vs yesterday', color: 'var(--error-main)' }
+      ],
+      emailColumns: [
+        { key: 'time', label: 'Time' }, { key: 'from', label: 'Sender' },
+        { key: 'subject', label: 'Subject' },
+        { key: 'reason', label: 'Reason', align: 'right' }
+      ],
+      emailRows: [
+        { time: '09:48', from: 'billing@invoice-secure.net', to: 'ap@crexendo.com', subject: 'Outstanding invoice #88214', reason: 'Credential phishing' },
+        { time: '09:31', from: 'no-reply@ms-verify.co', to: 'j.hart@crexendo.com', subject: 'Your password expires today', reason: 'Credential phishing' },
+        { time: '09:12', from: 'hr-update@crexendo-hr.com', to: '14 recipients', subject: 'Updated payroll direct deposit', reason: 'Impersonation' },
+        { time: '08:55', from: 'ceo@crexend0.com', to: 'finance@crexendo.com', subject: 'Quick favour — wire today', reason: 'Lookalike domain' },
+        { time: '08:40', from: 'docs@sharefile-cloud.ru', to: 'm.reyes@crexendo.com', subject: 'Contract for signature', reason: 'Malicious URL' }
+      ],
+
+      integrations: [
+        { name: 'Microsoft Graph', detail: 'App-only, certificate auth · CXDO-GraphExport', state: 'Connected', bg: 'var(--success-lighter)', fg: 'var(--success-dark)' },
+        { name: 'Endpoint Central Cloud', detail: 'Zoho OAuth self-client · read-only', state: 'Connected', bg: 'var(--success-lighter)', fg: 'var(--success-dark)' },
+        { name: 'Stellar Cyber XDR', detail: 'crexendo.stellarcyber.cloud · API token', state: 'Connected', bg: 'var(--success-lighter)', fg: 'var(--success-dark)' },
+        { name: 'Proofpoint 365 TP', detail: 'Hornetsecurity Control Panel API', state: 'Connected', bg: 'var(--success-lighter)', fg: 'var(--success-dark)' },
+        { name: 'Vendor status feeds', detail: 'AWS, Azure, Okta, Cloudflare, CrowdStrike, GitHub', state: 'Polling 60s', bg: 'var(--info-lighter)', fg: 'var(--info-dark)' },
+        { name: 'ServiceDesk Plus', detail: 'Ticket creation on Sev1 · token expired', state: 'Needs auth', bg: 'var(--warning-lighter)', fg: 'var(--warning-dark)' }
+      ],
+      rules: [
+        rule('vendor', 'Vendor degraded + our check failing', 'Opens a Sev1 automatically'),
+        rule('spray', 'Failed sign-in spike', 'More than 500 failures in 15 minutes'),
+        rule('risky', 'Risky sign-in confirmed compromised', 'Any single occurrence'),
+        rule('secrets', 'Secret or certificate expiring', 'Within 14 days'),
+        rule('stale', 'Agent stale', 'No check-in for 21 days'),
+        rule('legacy', 'Legacy auth attempt', 'Any successful legacy protocol sign-in')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
