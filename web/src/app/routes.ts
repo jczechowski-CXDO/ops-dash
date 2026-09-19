@@ -35,9 +35,22 @@ export type NavItem = {
 export const NAV: readonly NavItem[] = [
   { id: 'overview',  label: 'Overview',             icon: 'space_dashboard', path: '/',                   badge: 'openIncidents' },
   { id: 'service',   label: 'Service detail',       icon: 'dns',             path: '/services/m365' },
-  { id: 'incident',  label: 'Incident',             icon: 'report',          path: '/incidents/INC-2291', badge: 'openSev1s' },
+  // G3 HIGH-2: this hard-coded INC-2291, which does not exist in quiet — so the
+  // nav was one click from a red error over a healthy system. The href is now
+  // resolved per render from the bundle; see navHref().
+  { id: 'incident',  label: 'Incident',             icon: 'report',          path: '/incidents/:id',      badge: 'openSev1s' },
   { id: 'entra',     label: 'Entra security',       icon: 'shield',          path: '/entra' },
   { id: 'endpoints', label: 'Endpoints',            icon: 'computer',        path: '/endpoints' },
   { id: 'email',     label: 'Email security',       icon: 'mail',            path: '/email' },
   { id: 'settings',  label: 'Rules & integrations', icon: 'settings',        path: '/settings' },
 ];
+
+/** The nav's Incident entry points at whichever incident the list sorts first —
+ *  severity, then newest. With none open it points at the Overview, because a
+ *  nav item that leads to "there is nothing here" is a dead end, and in quiet
+ *  mode "nothing here" is the correct state of the world rather than an error. */
+export function navHref(item: { id: string; path: string }, incidents: { id: string }[]): string {
+  if (item.id !== 'incident') return item.path;
+  const first = incidents[0];
+  return first ? `/incidents/${first.id}` : '/';
+}

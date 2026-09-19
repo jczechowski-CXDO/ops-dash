@@ -58,7 +58,17 @@ export function pageMeta(
   if (pathname.startsWith(INCIDENT_PREFIX)) {
     const id = pathname.slice(INCIDENT_PREFIX.length);
     const inc = bundle.incidents.find((i) => i.id === id);
-    return { title: inc?.id ?? 'Incident', subtitle: inc?.title ?? 'Incident not found' };
+    if (inc) return { title: inc.id, subtitle: inc.title };
+    // G3 HIGH-2. The page below renders a calm empty state, so the header must
+    // not contradict it with "not found". The two absences are different news
+    // and the subtitle says which: in a world with no open incidents this is the
+    // good outcome, not a failure. Derived from the bundle, never from the id.
+    return {
+      title: 'Incident',
+      subtitle: bundle.incidents.length === 0
+        ? 'No incidents are open'
+        : 'That incident is not open',
+    };
   }
   switch (pathname) {
     case ROUTE.entra:

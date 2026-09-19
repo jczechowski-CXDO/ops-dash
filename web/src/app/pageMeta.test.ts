@@ -108,9 +108,12 @@ describe('pageMeta', () => {
       title: 'INC-2291',
       subtitle: fixtures.sev1.incidents.find((i) => i.id === 'INC-2291')!.title,
     });
+    // Amended at G3 HIGH-2: the subtitle no longer reads "Incident not found".
+    // The page beneath it renders a calm empty state, and a header that says
+    // "not found" over it is the same red-over-healthy defect one element up.
     expect(pageMeta('/incidents/INC-0000', fixtures.sev1)).toEqual({
       title: 'Incident',
-      subtitle: 'Incident not found',
+      subtitle: 'That incident is not open',
     });
   });
 
@@ -118,5 +121,33 @@ describe('pageMeta', () => {
     expect(pageMeta('/endpoints', fixtures.sev1).subtitle).toBe(
       `${fixtures.sev1.endpoints.stats.total} managed endpoints · Endpoint Central`,
     );
+  });
+});
+
+describe('the incident header never contradicts the page beneath it (G3 HIGH-2)', () => {
+  // The view renders a calm empty state for an incident that is not open. The
+  // header used to say "Incident not found" over it, which is the same defect
+  // one element up: red-flavoured copy over a healthy system.
+  it('never says "not found", in either world', () => {
+    for (const mode of ['quiet', 'sev1'] as const) {
+      const meta = pageMeta('/incidents/INC-9999', fixtures[mode]);
+      expect(meta.subtitle).not.toMatch(/not found/i);
+    }
+  });
+
+  it('distinguishes the two absences, derived from the bundle rather than the id', () => {
+    // Asserted as a relationship over both worlds: WHICH sentence appears is
+    // decided by whether any incident is open, so collapsing the branch fails
+    // even though one of the two strings would still render.
+    for (const mode of ['quiet', 'sev1'] as const) {
+      const bundle = fixtures[mode];
+      const { subtitle } = pageMeta('/incidents/INC-9999', bundle);
+      expect(subtitle === 'No incidents are open').toBe(bundle.incidents.length === 0);
+      expect(subtitle === 'That incident is not open').toBe(bundle.incidents.length > 0);
+    }
+  });
+
+  it('still names a real incident when there is one', () => {
+    expect(pageMeta('/incidents/INC-2292', fixtures.sev1).title).toBe('INC-2292');
   });
 });

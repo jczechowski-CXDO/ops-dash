@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router';
 import { Icon } from '../components/aurora/Icon.js';
 import { useDemoMode, DEMO_TOGGLE_VISIBLE } from './DemoModeProvider.js';
-import { NAV, type NavBadge } from './routes.js';
+import { NAV, navHref, type NavBadge } from './routes.js';
 import type { DemoMode } from '../fixtures/index.js';
 
 const MODES: readonly { mode: DemoMode; label: string }[] = [
@@ -77,7 +77,7 @@ export function Sidebar() {
           return (
             <NavLink
               key={item.id}
-              to={item.path}
+              to={navHref(item, bundle.incidents)}
               // Exact match. Unobservable with today's flat route table — react-router
               // special-cases '/' — but the day a nested route lands, its absence marks
               // Overview current on every page.
