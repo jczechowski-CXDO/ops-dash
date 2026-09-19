@@ -446,6 +446,21 @@ command that exited non-zero, so it never ran — the same failure `w3-overview`
 repeated by me in the same session while writing up the rule about it. The agents' own tests
 caught it, which is the system working, but the tree should have been clean.
 
+**The rule that covers the whole family: before trusting a negative result, prove the thing
+that produces it can produce a positive one.** That is one statement of G-2, of the
+presence-only contract assertions, of `not.toMatch(/#/)`, and of a contrast scan reporting zero.
+
+And the distinction that makes it non-obvious, from `ops-primitives`: **a canary tests the
+arithmetic; a control tests the subject.** The contrast suite's canary — asserting
+`--warning-main` fails as text while `--warning-dark` passes — would catch a broken resolver,
+and would **not** have caught my wrong control, because the control was pointed at the one
+family whose `-main` is genuinely readable. Both are needed, and they are not substitutes.
+
+**A positive control is a deliberate defect.** An uncommitted one is indistinguishable from a
+real regression to whoever looks next — `ops-primitives` found my `success` → `-main` revert
+still live in the tree and had to restore it. Revert in the same breath as measuring, and check
+`git status` afterwards.
+
 **A scan reporting zero needs a positive control.** After the fixes the sweep reported 0
 failures, which is exactly what a broken scanner reports. Reverting `Button`'s `success` text
 rung to `-main` reproduced 5 failures at 3.40 — the same value originally measured — which is
