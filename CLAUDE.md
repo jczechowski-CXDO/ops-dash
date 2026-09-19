@@ -16,6 +16,7 @@ self-hosted. Read-only upstream; the only writes are to our own store.
 | `npm run test:e2e` | Playwright — 152 visual baselines, interaction, the offline proof |
 | `npm run test:e2e:update` | regenerate baselines. **Look at them before committing** |
 | `npm run icons` | regenerate `web/src/components/aurora/icons.generated.ts` from the Aurora bundle |
+| `node --watch server/src/index.ts` | run the server: store + poller + adapters + engine + API, one process |
 | `npm run fonts` | re-vendor Plus Jakarta Sans (only if the font is replaced; one outbound call) |
 
 ## Layout
@@ -26,6 +27,14 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   data, `theme/` the token helpers, `lib/` the URL guard.
 - `web/e2e/` — Playwright. Baselines are **platform-sensitive**; these were generated
   on Linux and will not match Windows.
+- `server/` — the API and the detection chain. `http/fetchJson.ts` is the only way out
+  to the network; `adapters/vendorstatus/` reads the five vendor status feeds and
+  `adapters/synthetic/` runs the reachability probes; `store/` is `node:sqlite`;
+  `poller/` schedules; `engine/` holds the two correlation rules; `api/` serves them
+  read-only; `index.ts` composes all of it and is the only file that knows the shape of
+  the whole.
+- `server/src/__integration__/` — the chain end to end on the committed real payloads,
+  with only `fetch` stubbed. **This is where a seam defect shows up**; three did.
 - `design_handoff_it_ops_dashboard/` — the design spec of record. Read-only.
 - `docs/superpowers/` — the approved design, the per-milestone plans, the security review.
 - `docs/RESUME.md` — **read this first.** State, standing rulings, and the traps.
@@ -53,6 +62,21 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   seven services are permanently `unknown`, so **"ALL SYSTEMS OPERATIONAL" is unreachable
   in production** — that is correct, not a bug to fix.
 - **Everything upstream is read-only.** No mutating third-party call belongs in this repo.
+- **Every network call goes through `server/src/http/fetchJson.ts`.** It owns all four
+  failure rules — non-2xx, a 2xx carrying non-JSON, an empty body, and a throw — and it
+  never throws, because a transport failure is a fact to report and not an exception to
+  handle. `web/src/guards.test.ts` enforces this by grepping for bare `fetch`. There is
+  exactly one exemption, `adapters/synthetic/probe.ts`, and it is argued in a block
+  comment there: a reachability probe asks a different question and must not read a body.
+- **Nothing in `server/` throws to signal failure**, so nothing may treat a resolved
+  promise as success. A `Source.run` that resolves with an errored `SourceResult` has
+  failed. This was a shipped defect — the poller counted a source whose feed 503'd every
+  minute as polling fine, and `/api/health` served it green.
+- **A probe that cannot pass is worse than no probe.** It teaches the operator that red
+  means nothing. Three of the four original probe targets could never have passed: two
+  Zendesk pod roots behind a Cloudflare bot challenge, and a guessed Jira hostname that
+  does not exist. Before adding a probe, run it against the real thing and record what it
+  actually answered — `expectStatus` exists because one endpoint's healthy answer is a 401.
 - **Runs locally only.** Not deployed, not served to any network. Deployment is John's
   call and is the trigger for everything on the "Reopens at release" list in
   `docs/superpowers/security/2026-09-18-m1-review.md`.
@@ -78,8 +102,13 @@ passes, prove it can fail.
 ## Current state
 
 Milestone 1 (offline scaffold) is complete: 539 unit tests, 153 e2e tests, 152 visual
-baselines, thirteen repository guards, zero AA contrast failures across both themes.
+baselines, eighteen repository guards, zero AA contrast failures across both themes.
 
-Milestones 2-4 — the headline correlation rule, the remaining adapters, and live wiring —
-each get their own plan under `docs/superpowers/plans/`. **Milestone 2 needs Node 24**:
+Milestone 2 (detection) is complete: 910 unit tests. The chain reads five real vendor
+status feeds, runs three synthetic probes, correlates two rules, and serves the result
+read-only. It has been run against the live internet and detects a simulated outage end
+to end. Two of the seven services have no adapter until M3 and read `unknown` by design.
+
+Milestones 3-4 — the remaining adapters (statusio, msgraph) and live wiring plus auth —
+each get their own plan under `docs/superpowers/plans/`. **The server needs Node 24**:
 the store is `node:sqlite`, a built-in.

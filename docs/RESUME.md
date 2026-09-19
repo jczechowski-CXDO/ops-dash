@@ -883,3 +883,170 @@ platform failed"** correlation signal (amendment 1 stops four Statuspage vendors
 together, but raises no alarm that we have lost sight of all four at once), and the rule that
 **a 2xx carrying non-JSON is an error, not data** — one shared helper, proven necessary by
 `epc.py`'s `groups` endpoint returning an HTML login page under HTTP 200.
+
+---
+
+# Milestone 2 — detection. Complete (2026-09-19)
+
+910 unit tests, typecheck clean. The chain reads five real vendor status feeds, runs
+three synthetic probes, correlates two rules, stores the result and serves it read-only.
+Run against the live internet; detects a simulated outage end to end.
+
+## What M2 proved
+
+Not that the code compiles — that the product **detects something true**. The composed
+chain, hand-run against the real internet on 2026-09-19:
+
+```
+vendor:jira ok   vendor:helpjuice ok   vendor:claude ok   vendor:openai ok
+vendor:zendesk ok   probes ok
+
+proofpoint  unknown      statusio     ours=0/0  platform_unsupported
+jira        operational  statuspage   ours=0/0
+helpjuice   operational  statuspage   ours=1/1
+claude      operational  statuspage   ours=0/0
+openai      operational  statuspage   ours=0/0
+zendesk     unknown      zendesk-ssp  ours=2/2
+m365        unknown      msgraph      ours=0/0  platform_unsupported
+
+incidents: 0
+```
+
+Three of seven `unknown`, zero incidents, nothing green that we could not read. That is
+CLAUDE.md's "ALL SYSTEMS OPERATIONAL is unreachable in production" holding in production
+rather than in a fixture.
+
+## The finding that mattered most, and it was not in the code
+
+**Three of the four synthetic probes could never have passed**, and no amount of fixture
+testing could have shown it. Task 9 step 4 — the single hand-run against the real
+internet — is the only step in the milestone that can prove a URL, and it earned its
+place on the first attempt:
+
+| target | live | why |
+|---|---|---|
+| `crexendo.zendesk.com` | 403 | Cloudflare bot challenge, `cf-mitigated: challenge` |
+| `help.netsapiens.com` | 403 | same |
+| `crexendo.atlassian.net` | 404 | hostname was a guess; it is wrong |
+| `crexendo.helpjuice.com` | 200 | guess confirmed |
+
+None of those are a vendor being unwell. Two of seven tiles would have shipped
+permanently red, with half the `vendor` Sev1 condition armed from day one.
+
+Run the probe against the real thing **before** writing the test that pins it. And note
+what the fix required: `ProbeSpec.expectStatus`, because one endpoint's *healthy* answer
+is a 401 — `help.netsapiens.com`'s help centre is sign-in restricted, so
+`{"error":"Couldn't authenticate you"}` in 150ms is Zendesk's application tier working
+perfectly. `response.ok` is the wrong predicate for a real estate.
+
+**NEEDS JOHN: the real Jira Cloud hostname.** Jira has no probe until then — it keeps its
+vendor half, which is live and correct, and renders no check for ours, which is true.
+`runner.test.ts` has a test asserting its absence; delete that test when the hostname
+arrives.
+
+## A comment nobody had measured was load-bearing
+
+`probe.ts`'s block comment justified the whole `fetchJson` exemption with "Crexendo's
+Zendesk pod serves an HTML login page under HTTP 200." It serves a Cloudflare challenge
+under 403. The conclusion survived; the stated reason was invented. An exemption argued
+from an unmeasured fact is an exemption nobody has actually checked.
+
+## The poller counted a dead source as healthy (G2 BLOCKER 1)
+
+`Source.run` was `() => Promise<unknown>` and any resolved promise was a successful poll.
+But **nothing in this repo throws** — `fetchJson` and both adapters turn a broken feed
+into an errored `SourceResult`, deliberately. So the only failure the poller could see
+was the one that never happens.
+
+A source whose feed answered 503 every minute for an hour reported `lastOkAt` seconds
+old, `lastError` undefined, and on tick 1 `baseline: true` — a claim to know the starting
+state of something it had never once read. `/api/health` already served `allStatus()`, so
+this was a **served green for a dead source**.
+
+The generalisation, and it is the M2 version of M1's assertion rule: **when a layer
+reports failure in its return value, no caller above it may treat "it returned" as
+success.** Every guard we had written for "a failed fetch must never render as green" was
+pointed at the UI.
+
+`error` is the failure signal. `empty` and `degraded` are **not**: an empty feed told us
+something true (amendment 4), a degraded one told us most of it. Both are pinned by
+tests, because that distinction was previously an accident of which branch the code took.
+
+## The integration test never failed a feed
+
+Fourteen green end-to-end checks, and the first mutation run had **four survivors out of
+six**. Three traced to one gap: every test used healthy payloads, so the product's entire
+reason for existing was untested end to end while the suite reported success.
+
+This is the M1 lesson recurring in the file written to prove the milestone. The fix was
+seven tests that break a feed — a 503, a 2xx carrying HTML, last-good retention across a
+failing poll, a stale payload that must not satisfy the vendor half.
+
+## Three seam defects the integration test found, each owned half-each by two agents
+
+1. **`openIncidents()` cannot feed the correlation engine.** It returns
+   `resolved_at IS NULL`; the engine also needs recently-resolved incidents, because a
+   condition that clears and returns inside its window must re-open the same incident. It
+   cannot recognise a prior it was never handed. The engine's whole recurrence branch was
+   **unreachable in production while its unit tests passed.** Added
+   `store.incidentsSince(since)`.
+2. **`putIncident` never updated `severity`.** The engine escalates correctly; the store
+   kept the opening value; the API reads the store. An incident that opened Sev2 and
+   escalated to Sev1 was served as a Sev2 for as long as it lasted.
+3. A stale `operational` payload could satisfy the vendor half. The signal builder now
+   forces `unknown` whenever the newest attempt errored.
+
+**Neither agent was wrong.** Each built its half correctly against the contract it was
+given. The defects lived in the gap between two correct halves, which is precisely what
+no per-file review and no unit test can see, and why composition is its own task.
+
+## "Same id" can pass on wrong behaviour
+
+Both the engine agent (its mutation 9) and I (the integration recurrence test) hit this
+independently from opposite sides. Incident ids hash rule + service + window bucket, so a
+**brand-new** incident opened in the same 30-minute bucket derives the *same id* as the
+one it should have re-opened. "Same id, one row" passes just as happily on the broken
+behaviour.
+
+Only the carried `openedAt` distinguishes a re-opened incident from a fresh one wearing
+its name. Same family as the standing rule: the assertion reached the value by the code's
+own path.
+
+## A test failure that was the test's fault, not the product's
+
+The recurrence test first failed on `openedAt`. The cause was my setup: I planted the
+prior into a store that already held the row, and `putIncident` deliberately does not move
+`opened_at` on conflict. The assertion was measuring the test. Planted into a fresh store
+instead.
+
+Worth recording because the instinct on a red test is to suspect the code, and here the
+code was right twice over — the upsert's exclusion of `opened_at` is correct and load
+bearing (an incident's start time must never move, or the duration on the detail page
+shrinks every tick).
+
+## Open at the end of M2
+
+- **NEEDS JOHN: the Jira Cloud hostname.** See above.
+- The `fetchJson` exemption is still **file-scoped** — one marker comment licenses a whole
+  file. `probe.ts` is the only user and its need is real, but the exemption is wider than
+  the need.
+- `ack` and `muted` have no columns in `incidents`. They are M4. Incident ids are a hash
+  of the condition precisely so an ack has a stable row to land on when the column exists.
+- `check_runs` has no retention policy and grows at one row per probe per minute forever.
+- The API's `decodeSeverity` maps an unreadable value to `1`; the engine's `parseSeverity`
+  **throws** on one. Both chose "must not read as benign" and reached different answers.
+  Reconcile in M3 — they are not yet in conflict because the API never calls the engine.
+- `VendorFeed` still has no `since` anchor, so `incidentsSince` on a vendor feed means
+  "everything the feed publishes".
+
+## What M3 inherits
+
+A working chain and two missing adapters: `statusio` (proofpoint) and `msgraph` (m365).
+Both are listed in `SERVICE_PLATFORM` in `server/src/index.ts` and answer today with
+`platform_unsupported`, which the blackout rule deliberately excludes — see the argued
+comment in `engine/rules.ts`. **That exclusion self-repeals when the adapters land**, and
+it is latent rather than hypothetical: statusio has one service today so blackout's
+`>1` requirement hides it, but a second statusio vendor would make it a permanent Sev2.
+
+msgraph is also the first adapter that needs a credential. Nothing in M1 or M2 reads one,
+and no credential path has ever been transcribed into source. Keep it that way.
