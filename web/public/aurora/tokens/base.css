@@ -1,0 +1,25 @@
+/* Aurora base resets & document defaults. */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--type-body1-size);
+  line-height: var(--type-body1-lh);
+  color: var(--text-primary);
+  background: var(--background-default);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: var(--primary-main); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::selection { background: var(--primary-alpha-16, rgba(0,128,190,0.16)); }
+
+/* Thin, cool-grey scrollbars to match the admin surfaces. */
+* { scrollbar-width: thin; scrollbar-color: var(--grey-grey-300) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--grey-grey-300); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--grey-grey-400); }
