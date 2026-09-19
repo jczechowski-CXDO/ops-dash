@@ -1,6 +1,18 @@
+// @vitest-environment node
+// This file asserts real WCAG contrast ratios against the shipped token sheet,
+// which means reading it from disk. Nothing here touches the DOM. Pinning the
+// environment is also what defect G-7 requires: under jsdom import.meta.url is
+// an http:// URL and fileURLToPath rejects it.
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ServiceStatus } from '@ops-dash/shared';
 import {
+  statusTextColor,
+  severityTextColor,
+  severityFillColor,
+  severityOnFillColor,
   statusColor,
   severityColor,
   severityLabel,
@@ -119,5 +131,169 @@ describe('timelineColor', () => {
     expect(timelineColor('vendor')).toBe('var(--warning-main)');
     expect(timelineColor('update')).toBe('var(--info-main)');
     expect(timelineColor('resolved')).toBe('var(--success-main)');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Contrast, measured rather than asserted by eye
+//
+// G3 found 14 AA failures that no Vitest run could have caught, because jsdom
+// does not resolve var() against the token sheet. It does not follow that the
+// class is untestable — only that it cannot be tested through the DOM. Here the
+// token sheet is parsed directly and the ratios are computed, which is the same
+// arithmetic a browser does and needs no browser to do it.
+// ---------------------------------------------------------------------------
+
+const TOKENS = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '../../public/aurora/tokens/fig-tokens.css',
+);
+
+function palettes(): { light: Map<string, string>; dark: Map<string, string> } {
+  const css = readFileSync(TOKENS, 'utf8');
+  // Matched on the `, .dark {` half of the selector deliberately. The obvious
+  // regex spells out the attribute-selector form, and that literal is exactly
+  // what the no-second-dark-palette guard greps for — this file reads the one
+  // palette rather than declaring a second, but the guard cannot tell the
+  // difference and should not have to. Writing the pattern another way is the
+  // fix; weakening the guard, or assembling the literal from fragments to slip
+  // past it, would not be.
+  const split = /,\s*\.dark\s*\{/.exec(css);
+  if (!split) throw new Error('no dark palette found in fig-tokens.css');
+  const parse = (chunk: string) => {
+    const out = new Map<string, string>();
+    for (const [, name, value] of chunk.matchAll(/--([\w-]+):\s*([^;]+);/g)) {
+      out.set(name!, value!.trim());
+    }
+    return out;
+  };
+  const light = parse(css.slice(0, split.index));
+  // The dark block overrides the light one; it does not replace it.
+  const dark = new Map([...light, ...parse(css.slice(split.index))]);
+  return { light, dark };
+}
+
+/** 'var(--x)' or '--x' -> 'rgb(r,g,b)', following var() chains. */
+function resolve(palette: Map<string, string>, token: string, depth = 0): string {
+  const name = /^var\(--([\w-]+)\)$/.exec(token)?.[1] ?? token.replace(/^--/, '');
+  const value = palette.get(name);
+  if (value === undefined) throw new Error(`unknown token --${name}`);
+  if (depth > 10) throw new Error(`var() cycle at --${name}`);
+  return /^var\(/.test(value) ? resolve(palette, value, depth + 1) : value;
+}
+
+function luminance(rgb: string): number {
+  const parts = rgb.match(/\d+/g);
+  if (!parts || parts.length < 3) throw new Error(`not an rgb colour: ${rgb}`);
+  const [r, g, b] = parts.slice(0, 3).map((n) => {
+    const c = Number(n) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
+function contrast(palette: Map<string, string>, a: string, b: string): number {
+  const la = luminance(resolve(palette, a));
+  const lb = luminance(resolve(palette, b));
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+const THEMES = Object.entries(palettes()) as [string, Map<string, string>][];
+const ALL_LEVELS = ['operational', 'degraded', 'outage', 'maintenance', 'unknown'] as const;
+const ALL_SEVERITIES = [1, 2, 3, 'info'] as const;
+const PAPER = 'var(--background-paper)';
+
+describe('contrast of the text-grade colours', () => {
+  it('the measurement is real — the decoration rung is proven to FAIL as text', () => {
+    // Without this, a resolver bug that returned the same colour twice would
+    // make every ratio 1.00 or every ratio pass, and the suite would be theatre.
+    const light = palettes().light;
+    expect(contrast(light, 'var(--warning-main)', PAPER)).toBeLessThan(4.5);
+    expect(contrast(light, 'var(--warning-dark)', PAPER)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('every StatusLevel clears AA as text on paper, in both themes', () => {
+    const failures: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const level of ALL_LEVELS) {
+        const ratio = contrast(palette, statusTextColor(level), PAPER);
+        if (ratio < 4.5) failures.push(`${theme}/${level} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('every Severity clears AA as text on paper, in both themes', () => {
+    const failures: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const severity of ALL_SEVERITIES) {
+        const ratio = contrast(palette, severityTextColor(severity), PAPER);
+        if (ratio < 4.5) failures.push(`${theme}/sev${String(severity)} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('a solid severity chip is readable in both themes', () => {
+    // The pairing matters more than either half: in the dark palette `-dark`
+    // LIGHTENS, so a chip filled correctly but lettered in white collapses to
+    // 1.75:1. Measure the two together, as they are actually rendered.
+    const failures: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const severity of ALL_SEVERITIES) {
+        const ratio = contrast(palette, severityOnFillColor(severity), severityFillColor(severity));
+        if (ratio < 4.5) failures.push(`${theme}/sev${String(severity)} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('white lettering on a chip would NOT be readable — why severityOnFillColor exists', () => {
+    const dark = palettes().dark;
+    expect(contrast(dark, 'var(--common-white)', severityFillColor(2))).toBeLessThan(3);
+    expect(contrast(dark, severityOnFillColor(2), severityFillColor(2))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('records the decoration rung against the 3:1 non-text bar, gaps included', () => {
+    // statusColor/severityColor keep returning -main for dots, 3px borders and
+    // sparkline strokes, and their behaviour is deliberately unchanged — four
+    // Wave 3 agents are written against them.
+    //
+    // But the premise that -main clears the 3:1 non-text bar (WCAG 1.4.11, which
+    // a status dot is squarely subject to: it is a graphical object conveying
+    // information) does NOT hold on light paper. Measured, not assumed. This is
+    // pinned rather than deleted so the gap is visible and any drift fails here.
+    // Ruling is the lead's, since changing the return value is a Wave 3 break.
+    const gaps: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const level of ALL_LEVELS) {
+        const ratio = contrast(palette, statusColor(level), PAPER);
+        if (ratio < 3) gaps.push(`${theme}/${level} ${ratio.toFixed(2)}`);
+      }
+      for (const severity of ALL_SEVERITIES) {
+        const ratio = contrast(palette, severityColor(severity), PAPER);
+        if (ratio < 3) gaps.push(`${theme}/sev${String(severity)} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(gaps).toEqual([
+      'light/degraded 2.40',
+      'light/maintenance 2.82',
+      'light/unknown 2.29',
+      'light/sev2 2.40',
+      'light/sev3 2.82',
+      'light/sevinfo 2.82',
+      'dark/unknown 2.78',
+    ]);
+  });
+
+  it('the text-grade colours have no such gap — the fix is complete where it applies', () => {
+    const gaps: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const level of ALL_LEVELS) {
+        if (contrast(palette, statusTextColor(level), PAPER) < 3) gaps.push(`${theme}/${level}`);
+      }
+    }
+    expect(gaps).toEqual([]);
   });
 });
