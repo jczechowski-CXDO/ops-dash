@@ -15,7 +15,7 @@ import { checkRunsFor, serviceById } from '../fixtures/index.js';
 // owner is available.
 import { clockOf } from '../fixtures/time.js';
 import { ageLabel } from '../theme/ageLabel.js';
-import { statusColor } from '../theme/statusColor.js';
+import { statusColor, statusTextColor } from '../theme/statusColor.js';
 
 /** README § 2: "a 9px status dot + 16px/700 state word". */
 function StatusDot({ level, testId }: { level: StatusLevel; testId: string }) {
@@ -117,7 +117,9 @@ const RESULT_WORD: Record<CheckRun['result'], string> = {
 
 /** A probe result is not a StatusLevel, but it must not invent its own palette:
  *  a passing probe is the operational green and a failed one the outage red,
- *  both by way of the one mapping. */
+ *  both by way of the one mapping. The cell renders the result as a WORD, so it
+ *  takes the text rung (G3 HIGH-1) — 'Pass' on --success-main measured 3.40:1
+ *  against a 4.5:1 bar. */
 const RESULT_LEVEL: Record<CheckRun['result'], StatusLevel> = {
   pass: 'operational',
   fail: 'outage',
@@ -134,7 +136,7 @@ const CHECK_COLUMNS: Column<CheckRun>[] = [
     render: (v) => {
       const result = v as CheckRun['result'];
       return (
-        <span style={{ color: statusColor(RESULT_LEVEL[result]), fontWeight: 600 }}>
+        <span style={{ color: statusTextColor(RESULT_LEVEL[result]), fontWeight: 600 }}>
           {RESULT_WORD[result]}
         </span>
       );
@@ -252,7 +254,8 @@ export default function ServiceDetail({
           label="Checks passing"
           value={`${service.ours.passing} / ${service.ours.total}`}
           note="synthetic probes"
-          valueColor={statusColor(service.ours.level)}
+          // A stat value is text, not decoration: text rung (G3 HIGH-1).
+          valueColor={statusTextColor(service.ours.level)}
         />
         <StatCard label="Incidents (90d)" value={String(service.incidents90d)} note="opened and closed" />
         <StatCard label="Last state change" value={`${ageLabel(service.lastStateChange)} ago`} />

@@ -157,6 +157,28 @@ describe('ServiceDetail', () => {
     }
   });
 
+  // G3 HIGH-1. The decoration rung and the text rung differ exactly where it
+  // matters: the DOT beside 'Passing' may be --success-main (3:1 bar), the WORD
+  // 'Pass' in the table may not (3.40:1 against a 4.5:1 bar). Asserted as the
+  // contrast between the two, so collapsing them back to one rung fails.
+  it('paints result words at text grade while dots stay decoration grade', () => {
+    at('m365');
+    expect(screen.getByTestId('ours-dot')).toHaveStyle({ background: 'var(--error-main)' });
+    const cells = within(screen.getByRole('table')).getAllByRole('row').slice(1)
+      .map((row) => within(row).getAllByRole('cell')[3]!.firstElementChild!);
+    expect(cells.some((c) => c.textContent === 'Timeout')).toBe(true);
+    expect(cells.some((c) => c.textContent === 'Pass')).toBe(true);
+    for (const cell of cells) {
+      const expected = cell.textContent === 'Pass' ? 'var(--success-dark)' : 'var(--error-dark)';
+      expect(cell, `${cell.textContent} must use the text rung`).toHaveStyle({ color: expected });
+    }
+  });
+
+  it('paints the checks-passing stat at text grade', () => {
+    at('m365');
+    expect(screen.getByText('1 / 4')).toHaveStyle({ color: 'var(--error-dark)' });
+  });
+
   it('shows a state, not a blank page, for an unknown service id', () => {
     at('nope');
     expect(screen.getByText(/not a monitored service/i)).toBeInTheDocument();

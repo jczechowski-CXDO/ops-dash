@@ -11,7 +11,13 @@ import { incidentById, serviceById } from '../fixtures/index.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
 import { clockOf, span } from '../fixtures/time.js';
-import { severityColor, severityLabel, timelineColor } from '../theme/statusColor.js';
+import {
+  severityColor,
+  severityFillColor,
+  severityLabel,
+  severityOnFillColor,
+  timelineColor,
+} from '../theme/statusColor.js';
 
 function unreachable(value: never, what: string): never {
   throw new Error(`${what}: unhandled value ${JSON.stringify(value)}`);
@@ -26,8 +32,14 @@ function unreachable(value: never, what: string): never {
 function blastColor(level: BlastMetric['level']): string {
   switch (level) {
     case 'normal':  return 'var(--text-primary)';
-    case 'warning': return 'var(--warning-main)';
-    case 'error':   return 'var(--error-main)';
+    // The TEXT rung (G3 HIGH-1): these are 24px/700 numbers, the largest words
+    // on the page, and --warning-main is 2.40:1 on light paper — below even the
+    // 3:1 large-text bar. No picker in theme/statusColor.ts covers
+    // `BlastMetric.level`, which is its own three-member union; see the report
+    // for the request to hoist a `blastTextColor` there beside the others,
+    // rather than leaving a fourth union's palette owned by a view.
+    case 'warning': return 'var(--warning-dark)';
+    case 'error':   return 'var(--error-dark)';
     default:        return unreachable(level, 'blastColor');
   }
 }
@@ -37,8 +49,12 @@ function SeverityChip({ incident }: { incident: Incident }) {
   return (
     <span
       style={{
-        background: severityColor(incident.severity),
-        color: '#fff' /* prototype literal */,
+        // G3 HIGH-1: fill and on-fill rungs, not -main and a literal white.
+        // White on --warning-main is 2.40:1, and in the DARK palette -dark
+        // lightens, so a hard-coded white collapses to 1.75:1 there. Both
+        // tokens are theme-aware; the chip is readable in both.
+        background: severityFillColor(incident.severity),
+        color: severityOnFillColor(incident.severity),
         borderRadius: 6,
         padding: '3px 9px',
         fontFamily: 'var(--font-ui)',
@@ -76,7 +92,8 @@ function AffectedService({ serviceId }: { serviceId: string }) {
     <Link
       data-testid="affected-service-link"
       to={`/services/${service.id}`}
-      style={{ fontSize: 12.5, color: 'var(--primary-main)', textDecoration: 'none', fontWeight: 600 }}
+      // Link text, so the readable rung — --primary-main is decoration grade.
+      style={{ fontSize: 12.5, color: 'var(--primary-dark)', textDecoration: 'none', fontWeight: 600 }}
     >
       {service.name}
     </Link>

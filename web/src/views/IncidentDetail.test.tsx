@@ -16,10 +16,12 @@ const at = (id: string, mode: DemoMode = 'sev1', props: { incident?: Incident } 
     </MemoryRouter>,
   );
 
+/** G3 HIGH-1: blast values are 24px/700 WORDS, so the text rung. --warning-main
+ *  is 2.40:1 on light paper and fails even the 3:1 large-text bar. */
 const LEVEL_COLOR = {
   normal: 'var(--text-primary)',
-  warning: 'var(--warning-main)',
-  error: 'var(--error-main)',
+  warning: 'var(--warning-dark)',
+  error: 'var(--error-dark)',
 } as const;
 
 describe('IncidentDetail', () => {
@@ -49,8 +51,8 @@ describe('IncidentDetail', () => {
   it('renders four blast-radius metrics tinted by level', () => {
     at('INC-2291');
     expect(screen.getAllByTestId('blast-metric')).toHaveLength(4);
-    expect(screen.getByText('384')).toHaveStyle({ color: 'var(--error-main)' });
-    expect(screen.getByText('18m 40s')).toHaveStyle({ color: 'var(--warning-main)' });
+    expect(screen.getByText('384')).toHaveStyle({ color: 'var(--error-dark)' });
+    expect(screen.getByText('18m 40s')).toHaveStyle({ color: 'var(--warning-dark)' });
   });
 
   // One metric tinted right on one incident proves one mapping. The claim the
@@ -70,6 +72,27 @@ describe('IncidentDetail', () => {
       });
       unmount();
     }
+  });
+
+  // G3 HIGH-1. The chip is the one place in these two views that paints a word
+  // ON a colour, and it is the place the prototype's literal white came from.
+  // Both halves are asserted, in both directions: theme-aware tokens, and no
+  // hard-coded white, which is what collapses to 1.75:1 in the dark palette.
+  it('fills the severity chip and writes on it with theme-aware tokens', () => {
+    at('INC-2291');
+    const chip = screen.getByText('SEV 1');
+    expect(chip).toHaveStyle({ background: 'var(--error-dark)' });
+    expect(chip).toHaveStyle({ color: 'var(--error-contrast)' });
+    // Asserted POSITIVELY: every colour declaration on the chip resolves
+    // through a token. Naming the forbidden literal here would trip the repo's
+    // own no-literal-hex guard — the same trap the redaction guard sprang two
+    // commits ago — and this form is the stronger claim anyway, since it also
+    // rejects `white`, `rgb()` and any other hard-coded colour.
+    const decls = (chip.getAttribute('style') ?? '')
+      .split(';')
+      .filter((d) => /(^|\s)(color|background)\s*:/.test(d));
+    expect(decls, 'the chip declares exactly a fill and an on-fill colour').toHaveLength(2);
+    for (const d of decls) expect(d.trim()).toMatch(/:\s*var\(--/);
   });
 
   it('renders the timeline newest first with kind-coloured dots', () => {
