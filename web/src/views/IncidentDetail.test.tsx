@@ -4,7 +4,10 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { Incident } from '@ops-dash/shared';
+import { ageLabel } from '../theme/ageLabel.js';
+import { clockOf } from '../fixtures/time.js';
 import {
+  blastTextColor,
   severityColor,
   severityFillColor,
   severityLabel,
@@ -23,12 +26,31 @@ const at = (id: string, mode: DemoMode = 'sev1', props: { incident?: Incident } 
   );
 
 /** G3 HIGH-1: blast values are 24px/700 WORDS, so the text rung. --warning-main
- *  is 2.40:1 on light paper and fails even the 3:1 large-text bar. */
+ *  is 2.40:1 on light paper and fails even the 3:1 large-text bar.
+ *
+ *  Spelled out rather than computed from `blastTextColor`, on purpose. These
+ *  literals are what the Playwright baselines will photograph, so they pin the
+ *  PIXELS; the test immediately below pins them to the published mapping. Two
+ *  assertions, because they are two different claims — "the view uses the one
+ *  mapping" and "that mapping still resolves to the colours we baselined". A
+ *  single computed expectation would satisfy the first and silently follow the
+ *  helper through any future change of the second. */
 const LEVEL_COLOR = {
   normal: 'var(--text-primary)',
   warning: 'var(--warning-dark)',
   error: 'var(--error-dark)',
 } as const;
+
+describe('IncidentDetail — the blast mapping is the published one', () => {
+  // G3 HIGH-4. The local copy this view carried was identical to
+  // `blastTextColor` on all three levels, so adopting it moved no pixels; this
+  // is that comparison, kept in the tree rather than done once and reported.
+  it('agrees with blastTextColor on every level', () => {
+    for (const level of ['normal', 'warning', 'error'] as const) {
+      expect(blastTextColor(level), level).toBe(LEVEL_COLOR[level]);
+    }
+  });
+});
 
 describe('IncidentDetail', () => {
   it('renders the hero with severity, id, title and summary', () => {
@@ -163,6 +185,74 @@ describe('IncidentDetail', () => {
       }
       unmount();
     }
+  });
+
+  // M-4. `ack.at` was carried by the contract and thrown away: the hero credited
+  // an actor with no time, while the mute on the row beside it said exactly when
+  // it expires. Both halves now say when, and the seeded state matters more than
+  // the timestamp — INC-2286 ARRIVES acknowledged, and a hero offering
+  // "Acknowledge" on a record the Overview shows as acknowledged is two screens
+  // disagreeing about one incident.
+  it('credits an acknowledgement that arrived on the record, with its time', () => {
+    const inc = fixtures.sev1.incidents.find((i) => i.ack)!;
+    at(inc.id);
+    const credits = screen.getByTestId('incident-credits');
+    expect(credits).toHaveTextContent(inc.ack!.by);
+    expect(credits).toHaveTextContent(ageLabel(inc.ack!.at));
+    // Credited to its actor, not to 'you', and not still on offer.
+    expect(screen.getByRole('button', { name: 'Acknowledged' })).toBeDisabled();
+  });
+
+  it('credits a mute that arrived on the record, with its expiry', () => {
+    const inc = fixtures.sev1.incidents.find((i) => i.muted)!;
+    at(inc.id);
+    expect(screen.getByTestId('incident-credits')).toHaveTextContent(
+      `Muted by ${inc.muted!.by} until ${clockOf(inc.muted!.until!)}`,
+    );
+    expect(screen.getByRole('button', { name: 'Unmute service' })).toBeInTheDocument();
+  });
+
+  // The relationship, over every incident: a credit line appears exactly when
+  // the record carries one of the two states, and when an ack is credited it
+  // always carries its time. Asserting only INC-2286 would pass against a hero
+  // that hard-coded m.reyes.
+  it('shows credits for exactly the incidents that carry them', () => {
+    for (const inc of fixtures.sev1.incidents) {
+      const { unmount } = at(inc.id);
+      const credits = screen.queryByTestId('incident-credits');
+      const expected = inc.ack !== undefined || inc.muted !== undefined;
+      expect(credits !== null, `${inc.id}`).toBe(expected);
+      if (inc.ack) {
+        expect(credits, `${inc.id}: an ack with no time`).toHaveTextContent(ageLabel(inc.ack.at));
+      }
+      unmount();
+    }
+  });
+
+  // Caught by mutation: hard-coding `m.reyes@example.com` as the ack actor
+  // passed every test above, because exactly one fixture incident carries an
+  // ack and exactly one carries a mute, so "reads the record" and "prints the
+  // only actor there is" are the same function on this data. Same defect as
+  // HIGH-3, one contract field over. The seam supplies the second actor the
+  // fixtures do not have — and the indefinite mute, which `until: string | null`
+  // permits and no fixture exercises.
+  it('credits whoever is on the record, not whoever is in the fixtures', () => {
+    const base = fixtures.sev1.incidents.find((i) => i.severity === 1)!;
+    at(base.id, 'sev1', {
+      incident: {
+        ...base,
+        ack: { by: 'a.patel@example.com', at: new Date(Date.now() - 3 * 60 * 60_000).toISOString() },
+        muted: { by: 'd.okafor@example.com', until: null },
+      },
+    });
+
+    const credits = screen.getByTestId('incident-credits');
+    expect(credits).toHaveTextContent('Acknowledged by a.patel@example.com · 3 hours ago');
+    // An indefinite mute says so by saying nothing about an expiry, rather than
+    // rendering 'until null'.
+    expect(credits).toHaveTextContent('Muted by d.okafor@example.com');
+    expect(credits).not.toHaveTextContent(/until/);
+    expect(credits).not.toHaveTextContent('m.reyes@example.com');
   });
 
   it('shows a state, not a blank page, for an id that is not open', () => {

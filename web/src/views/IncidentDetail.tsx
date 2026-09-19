@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
-import type { BlastMetric, Incident, TimelineEntry } from '@ops-dash/shared';
+import type { Incident, TimelineEntry } from '@ops-dash/shared';
 import { Card } from '../components/Card.js';
 import { Panel } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
@@ -11,38 +11,20 @@ import { incidentById, serviceById } from '../fixtures/index.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
 import { clockOf, span } from '../fixtures/time.js';
+import { ageLabel } from '../theme/ageLabel.js';
 import {
+  blastTextColor,
   severityColor,
   severityFillColor,
   severityLabel,
   severityOnFillColor,
   timelineColor,
 } from '../theme/statusColor.js';
-
-function unreachable(value: never, what: string): never {
-  throw new Error(`${what}: unhandled value ${JSON.stringify(value)}`);
-}
-
-/**
- * `BlastMetric.level` is its own three-member union — not a `StatusLevel`, not a
- * `Severity` — so it gets its own exhaustive mapping rather than being coerced
- * into one of those and tinted by accident. Adding a member to the contract
- * fails `tsc` here instead of rendering an untinted number.
- */
-function blastColor(level: BlastMetric['level']): string {
-  switch (level) {
-    case 'normal':  return 'var(--text-primary)';
-    // The TEXT rung (G3 HIGH-1): these are 24px/700 numbers, the largest words
-    // on the page, and --warning-main is 2.40:1 on light paper — below even the
-    // 3:1 large-text bar. No picker in theme/statusColor.ts covers
-    // `BlastMetric.level`, which is its own three-member union; see the report
-    // for the request to hoist a `blastTextColor` there beside the others,
-    // rather than leaving a fourth union's palette owned by a view.
-    case 'warning': return 'var(--warning-dark)';
-    case 'error':   return 'var(--error-dark)';
-    default:        return unreachable(level, 'blastColor');
-  }
-}
+// M-4: one definition of "who silenced this and until when", shared with the
+// Overview row rather than retyped here. It is exported from a sibling VIEW,
+// which is the wrong home for it — see the report: it belongs beside ageLabel
+// in theme/, and this import is the one line that changes when it moves.
+import { muteCredit } from './Overview.js';
 
 /** README § 3: solid severity chip, radius 6, padding 3px 9px, white 11px/700. */
 function SeverityChip({ incident }: { incident: Incident }) {
@@ -146,11 +128,16 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
   const { mode, bundle } = useDemoMode();
   const incident = injected ?? incidentById(mode, id ?? '');
 
-  // Local, view-only state. Milestone 4 persists these; until then flipping a
-  // label is the whole behaviour, and it is deliberately not written anywhere.
-  const [acked, setAcked] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [resolved, setResolved] = useState(false);
+  // M-4. Seeded FROM THE CONTRACT, not from false: INC-2286 arrives already
+  // acknowledged and INC-2288 already muted, and a hero that offers
+  // "Acknowledge" on an incident the Overview row shows as acknowledged is two
+  // screens disagreeing about the same record. `ackedHere` is separate from
+  // `acked` because the credit differs: an ack that happened in this session is
+  // "by you", one that arrived on the record belongs to whoever did it.
+  // Milestone 4 persists these; until then the flip is the whole behaviour.
+  const [ackedHere, setAckedHere] = useState(false);
+  const [mutedHere, setMutedHere] = useState(false);
+  const [resolvedHere, setResolvedHere] = useState(false);
 
   if (!incident) {
     // G3 HIGH-2. The Sidebar links straight here, so in the quiet world this is
@@ -178,6 +165,24 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
 
   const elapsedMinutes = Math.max(0, Math.round((Date.now() - new Date(incident.openedAt).getTime()) / 60_000));
 
+  const acked = ackedHere || incident.ack !== undefined;
+  const muted = mutedHere !== (incident.muted !== undefined);
+  const resolved = resolvedHere || incident.resolvedAt !== undefined;
+
+  /**
+   * M-4. `ack.at` was carried by the contract and dropped on the floor, so the
+   * hero credited an actor with no time while the mute beside it said exactly
+   * when it expires. Both now say when — in the form each kind of time needs:
+   * an ack is a past event, so it takes `ageLabel`'s elapsed magnitude, and a
+   * mute is a deadline, so it keeps `clockOf`'s wall clock. Using one form for
+   * both would print "Acknowledged at 10:58" for something two days old.
+   */
+  const credits: string[] = [];
+  if (incident.ack) credits.push(`Acknowledged by ${incident.ack.by} · ${ageLabel(incident.ack.at)} ago`);
+  else if (ackedHere) credits.push('Acknowledged by you');
+  if (incident.muted) credits.push(muteCredit(incident.muted, 'you'));
+  else if (mutedHere) credits.push(muteCredit(undefined, 'you'));
+
   return (
     <div data-testid="view-incident" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* README § 3: hero card, 3px severity left border, padding 18px 20px. */}
@@ -202,14 +207,22 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
             {incident.summary}
           </p>
 
+          {credits.length > 0 ? (
+            <div data-testid="incident-credits" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {credits.join(' · ')}
+            </div>
+          ) : null}
+
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="contained" onClick={() => setAcked(true)}>
-              {acked ? 'Acknowledged by you' : 'Acknowledge'}
+            <Button variant="contained" disabled={acked} onClick={() => setAckedHere(true)}>
+              {/* 'by you' only when it WAS you. An ack that arrived on the
+                  record is credited to its actor on the line above. */}
+              {ackedHere ? 'Acknowledged by you' : acked ? 'Acknowledged' : 'Acknowledge'}
             </Button>
-            <Button variant="outlined" color="neutral" onClick={() => setMuted((m) => !m)}>
+            <Button variant="outlined" color="neutral" onClick={() => setMutedHere((m) => !m)}>
               {muted ? 'Unmute service' : 'Mute service'}
             </Button>
-            <Button variant="outlined" color="success" onClick={() => setResolved(true)}>
+            <Button variant="outlined" color="success" disabled={resolved} onClick={() => setResolvedHere(true)}>
               {resolved ? 'Resolved' : 'Mark resolved'}
             </Button>
           </div>
@@ -226,7 +239,7 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
               value={metric.value}
               note={metric.note}
               valueSize={24}
-              valueColor={blastColor(metric.level)}
+              valueColor={blastTextColor(metric.level)}
             />
           </div>
         ))}
