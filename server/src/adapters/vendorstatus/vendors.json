@@ -1,0 +1,44 @@
+{
+  "$comment": [
+    "The vendor feed list. Adding a fifth Statuspage vendor is a line here and no code —",
+    "server/src/adapters/vendorstatus/index.test.ts proves it by loading a five-entry list.",
+    "'platform' selects the adapter and is never inferred from 'id'.",
+    "'url' must be https: this process fetches exactly what this file says and nothing else.",
+    "'component' is optional; when present the feed MUST publish it, or the vendor reads",
+    "unknown rather than quietly rolling up a shorter list.",
+    "Statuspage: use /api/v2/summary.json, never /api/v2/status.json — the latter is a",
+    "page-level rollup with no components, incidents or maintenance.",
+    "Zendesk: the url is the SSP base; the adapter appends /incidents.json and, only when a",
+    "component is configured, /services.json.",
+    "proofpoint (statusio) and m365 (msgraph) are deliberately absent: their adapters are",
+    "Milestone 3. index.ts answers for them with an explicit unsupported-platform error, so",
+    "adding them here before the adapter exists reads unknown rather than green."
+  ],
+  "feeds": [
+    {
+      "id": "jira",
+      "platform": "statuspage",
+      "url": "https://jira-software.status.atlassian.com/api/v2/summary.json"
+    },
+    {
+      "id": "helpjuice",
+      "platform": "statuspage",
+      "url": "https://status.helpjuice.com/api/v2/summary.json"
+    },
+    {
+      "id": "claude",
+      "platform": "statuspage",
+      "url": "https://status.claude.com/api/v2/summary.json"
+    },
+    {
+      "id": "openai",
+      "platform": "statuspage",
+      "url": "https://status.openai.com/api/v2/summary.json"
+    },
+    {
+      "id": "zendesk",
+      "platform": "zendesk-ssp",
+      "url": "https://status.zendesk.com/api/ssp"
+    }
+  ]
+}
