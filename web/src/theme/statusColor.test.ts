@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import type { ServiceStatus } from '@ops-dash/shared';
 import {
   blastTextColor,
+  integrationFillColor,
+  integrationOnFillColor,
   statusTextColor,
   severityTextColor,
   severityFillColor,
@@ -124,6 +126,38 @@ describe('severity helpers', () => {
   });
 });
 
+describe('integration badge colours', () => {
+  it('maps each state to its own family', () => {
+    expect(integrationOnFillColor('connected')).toBe('var(--success-darker)');
+    expect(integrationOnFillColor('polling')).toBe('var(--info-darker)');
+    expect(integrationOnFillColor('needs_auth')).toBe('var(--warning-darker)');
+    expect(integrationOnFillColor('error')).toBe('var(--error-darker)');
+    expect(integrationFillColor('connected')).toBe('var(--success-lighter)');
+    expect(integrationFillColor('polling')).toBe('var(--info-lighter)');
+    expect(integrationFillColor('needs_auth')).toBe('var(--warning-lighter)');
+    expect(integrationFillColor('error')).toBe('var(--error-lighter)');
+  });
+
+  it('only "connected" is allowed to read as green', () => {
+    // An integration that is merely polling, or needs re-auth, is not a working
+    // integration. Colouring either one green is the same wrong-green as a
+    // service tile going green on an unknown vendor feed — readable, and wrong.
+    for (const state of ['polling', 'needs_auth', 'error'] as const) {
+      expect(integrationFillColor(state)).not.toBe(integrationFillColor('connected'));
+      expect(integrationOnFillColor(state)).not.toBe(integrationOnFillColor('connected'));
+    }
+  });
+
+  it('gives all four states visually distinct badges', () => {
+    // A readability test passes for every family, so it cannot see two states
+    // sharing one colour. Four states, four distinct pairs.
+    const pairs = ALL_INTEGRATION_STATES.map(
+      (s) => `${integrationFillColor(s)}|${integrationOnFillColor(s)}`,
+    );
+    expect(new Set(pairs).size).toBe(ALL_INTEGRATION_STATES.length);
+  });
+});
+
 describe('blastTextColor', () => {
   it('maps the two status levels to the text-grade rung', () => {
     expect(blastTextColor('warning')).toBe('var(--warning-dark)');
@@ -224,6 +258,7 @@ const ALL_LEVELS = ['operational', 'degraded', 'outage', 'maintenance', 'unknown
 const ALL_SEVERITIES = [1, 2, 3, 'info'] as const;
 const PAPER = 'var(--background-paper)';
 const ALL_BLAST_LEVELS = ['normal', 'warning', 'error'] as const;
+const ALL_INTEGRATION_STATES = ['connected', 'polling', 'needs_auth', 'error'] as const;
 
 describe('contrast of the text-grade colours', () => {
   it('the measurement is real — the decoration rung is proven to FAIL as text', () => {
@@ -265,6 +300,27 @@ describe('contrast of the text-grade colours', () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it('every integration badge is readable in both themes', () => {
+    const failures: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const state of ALL_INTEGRATION_STATES) {
+        const ratio = contrast(palette, integrationOnFillColor(state), integrationFillColor(state));
+        if (ratio < 4.5) failures.push(`${theme}/${state} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('pins WHY the badge takes -darker and not -dark', () => {
+    // w3-settings measured --warning-dark on --warning-lighter at 4.09:1 in
+    // Chromium. If that pair ever starts passing, the constraint that forced all
+    // four states onto one rung has moved and the decision deserves revisiting —
+    // so the reason is pinned, not just the outcome.
+    const light = palettes().light;
+    expect(contrast(light, 'var(--warning-dark)', 'var(--warning-lighter)')).toBeLessThan(4.5);
+    expect(contrast(light, 'var(--warning-darker)', 'var(--warning-lighter)')).toBeGreaterThanOrEqual(4.5);
   });
 
   it('a solid severity chip is readable in both themes', () => {

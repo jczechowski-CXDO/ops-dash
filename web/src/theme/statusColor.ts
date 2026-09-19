@@ -1,5 +1,6 @@
 import type {
   BlastMetric,
+  Integration,
   ServiceStatus,
   Severity,
   StatusLevel,
@@ -71,6 +72,16 @@ function blastFamily(level: BlastMetric['level']): Family | 'neutral' {
   }
 }
 
+function integrationFamily(state: Integration['state']): Family {
+  switch (state) {
+    case 'connected':  return 'success';
+    case 'polling':    return 'info';
+    case 'needs_auth': return 'warning';
+    case 'error':      return 'error';
+    default:           return unreachable(state, 'integrationFamily');
+  }
+}
+
 function severityFamily(severity: Severity): Family {
   switch (severity) {
     case 1:      return 'error';
@@ -117,6 +128,30 @@ export function statusTextColor(level: StatusLevel): string {
 export function blastTextColor(level: BlastMetric['level']): string {
   const family = blastFamily(level);
   return family === 'neutral' ? 'var(--text-primary)' : `var(--${family}-dark)`;
+}
+
+/**
+ * Soft badge for an integration state — background, paired with
+ * integrationOnFillColor.
+ *
+ * NOTE THE RUNGS. This badge is -lighter/-darker, NOT the -dark/-contrast pair
+ * severityFillColor uses. The role names match because the job matches; the
+ * recipe does not, because this is a soft tinted badge and that is a solid chip.
+ *
+ * All four states take -darker together, and that is deliberate. At the 11px/700
+ * README section 7 mandates, --warning-dark on --warning-lighter is 4.09:1 and
+ * fails; --info-dark was 4.65:1, passing by 0.15. A mixed rung would leave the
+ * next state added with no rule to follow, so the four move together. Measured
+ * in Chromium against the production build and pinned by the contrast suite:
+ * 10.54 / 9.57 / 8.91 / 11.79 light, 6.87 / 6.78 / 6.75 / 6.68 dark.
+ */
+export function integrationFillColor(state: Integration['state']): string {
+  return `var(--${integrationFamily(state)}-lighter)`;
+}
+
+/** The words on an integration badge. */
+export function integrationOnFillColor(state: Integration['state']): string {
+  return `var(--${integrationFamily(state)}-darker)`;
 }
 
 export function severityColor(severity: Severity): string {
