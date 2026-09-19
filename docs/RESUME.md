@@ -1033,11 +1033,45 @@ shrinks every tick).
 - `ack` and `muted` have no columns in `incidents`. They are M4. Incident ids are a hash
   of the condition precisely so an ack has a stable row to land on when the column exists.
 - `check_runs` has no retention policy and grows at one row per probe per minute forever.
-- The API's `decodeSeverity` maps an unreadable value to `1`; the engine's `parseSeverity`
-  **throws** on one. Both chose "must not read as benign" and reached different answers.
-  Reconcile in M3 — they are not yet in conflict because the API never calls the engine.
+- ~~The API and the engine disagree about an unreadable severity.~~ **Settled.** The rule is
+  **throw on the write path, degrade loudly on the read path**, and it is not a compromise —
+  each layer is right for its own reason. A guess on the write path gets *persisted*, and a
+  silently downgraded Sev1 becomes a stored fact that outlives the bug. A throw on the read
+  path propagates out of the route and turns one unreadable row into a 500 with no incident
+  list at all: nine good incidents blanked by one bad one, which is the flattening
+  `/api/incidents` exists to prevent, arriving by a different door.
+
+  What makes the pair safe rather than merely different is that the fallback is **visible** —
+  `ApiIncident.severityRaw` is populated only on a fallback decode, so the client renders a
+  Sev1 row with a "severity unreadable" badge instead of an ordinary Sev1.
+
+  Worth recording how this was decided: the API agent and the engine agent reached it
+  independently, from opposite sides, having each been told only about the other's answer.
+  Two agents converging on a layer rule after disagreeing on the mechanism is the strongest
+  signal this project has produced that a rule is right rather than merely chosen.
 - `VendorFeed` still has no `since` anchor, so `incidentsSince` on a vendor feed means
   "everything the feed publishes".
+- `evaluate`'s `enabled` map is supplied by the caller and nothing reads the `rule_state`
+  table into it, so both rules are effectively always on. A wiring gap, not an engine one.
+- **NEEDS JOHN — a contract question, not a code one.** `DATA_CONTRACTS.md` §7's prose
+  promises a **Sev2 for a single vendor `unknown` + our check failing**, and no M2 rule
+  emits one; the engine's tests assert zero incidents for that state. This is either an M3
+  rule or a prose correction. Deliberately not decided at the close of a milestone —
+  inventing a third rule to make the prose true would be the wrong way round.
+
+## Ruled at the close of M2, so nobody relitigates them
+
+- **`WINDOW_MS` is 30 minutes.** Chosen by the engine agent, ratified by the lead, pinned by
+  no test — it is a parameter on `correlate` and M3 may revisit it with real data.
+- **A platform that has never been read DOES raise a blackout**, even though an unbuilt
+  adapter does not. The distinction is by `error.code`, not by inference from the level, and
+  the deciding argument is that suppressing it would make "blind since startup" the one case
+  that raises nothing.
+- **Flap is absorbed by the window, not by a damper.** The poller fix produces more of it: a
+  feed 503ing intermittently moves a platform in and out of blackout every tick. A recurrence
+  inside 30 minutes re-opens the same incident with a "Condition recurred" timeline entry
+  rather than raising a fresh Sev2 each minute. Beyond 30 minutes apart it is two incidents,
+  which is correct — that is a different outage.
 
 ## What M3 inherits
 
