@@ -68,6 +68,16 @@ export const VENDOR_CONFIRMED_MINUTES_AGO = SEV1_OPENED_MINUTES_AGO - 46;
  *  the m365 tile note and by INC-2291's oldest queued message. */
 export const MAILFLOW_LAST_SUCCESS_MINUTES_AGO = SEV1_OPENED_MINUTES_AGO + 4;
 
+/** Proofpoint carries the headline vendor correlation (G-13). Its Status.io feed
+ *  is genuinely readable, so 'vendor degraded + our check failing' is a rule that
+ *  can actually fire here — which is what makes it, and not m365, the honest
+ *  home for the demo. INC-2292 opens at this anchor. */
+export const PROOFPOINT_OPENED_MINUTES_AGO = 34;
+
+/** When Hornetsecurity posted hs-8841. Shared by the tile note and the 'vendor'
+ *  entry on INC-2292's timeline, so the two cannot quote different times. */
+export const PROOFPOINT_VENDOR_UPDATE_MINUTES_AGO = 20;
+
 const healthy = (b: Base): ServiceStatus => {
   const series = spark(b.seed, b.base, false);
   return {
@@ -189,7 +199,7 @@ const m365Sev1 = (): ServiceStatus => {
 
 /** Proofpoint's Sev1 series: the last ten samples ramp up, and the most recent
  *  sample is forced 15% above everything before it. That is what makes the tile
- *  note "above p95 from us-east" true rather than decorative — `latencyMs` is
+ *  note "above p95" true rather than decorative — `latencyMs` is
  *  the most recent probe, and it has to exceed the p95 derived from the same
  *  series. `history.ts` reads the same number for the newest check run, so the
  *  curve, the stat and the table all quote one measurement. */
@@ -208,27 +218,45 @@ function proofpointSev1Series(): number[] {
 export const PROOFPOINT_SEV1_LATEST_MS: number =
   proofpointSev1Series()[27] ?? 0;
 
-/** The vendor has posted an advisory and our probes are slow but passing — the
- *  common case where the two halves are both true and neither is an outage. */
+/** The headline correlation, moved here from m365 by John's ruling (G-13).
+ *
+ *  Both halves are independently sourced and both are bad: Hornetsecurity's
+ *  Status.io feed reports degraded processing, and our own gateway probes are
+ *  failing from two of four regions. That is the pair the 'vendor degraded +
+ *  our check failing' rule needs, and — unlike m365 — every input is something
+ *  a live poll can actually read, so the demo is reproducible rather than
+ *  staged. The vendor half carries a real `incidentsSince` entry and a real
+ *  `lastSuccessfulPoll`, which is what a readable feed looks like next to
+ *  m365's blind one. */
 const proofpointSev1 = (): ServiceStatus => ({
   ...healthy(serviceBase('proofpoint')),
   vendor: {
     level: 'degraded',
-    label: 'Advisory',
-    note: 'Status.io reports elevated processing latency in United States - Atlanta. Last vendor update 34 minutes ago.',
-    incidentsSince: [],
+    label: 'Degraded',
+    note: `Status.io reports elevated processing latency in United States - Atlanta. Last vendor update ${PROOFPOINT_VENDOR_UPDATE_MINUTES_AGO} minutes ago.`,
+    advisoryId: 'hs-8841',
+    incidentsSince: [
+      {
+        id: 'hs-8841',
+        title: 'Elevated processing latency — United States - Atlanta',
+        level: 'degraded',
+        startedAt: minutesAgo(PROOFPOINT_OPENED_MINUTES_AGO),
+      },
+    ],
     lastSuccessfulPoll: secondsAgo(41),
   },
   ours: {
-    level: 'degraded',
-    label: 'Slow',
-    note: 'Mailflow round trip above p95 from us-east. Last success 2 minutes ago.',
-    passing: 3,
+    level: 'outage',
+    label: 'Failing',
+    note: 'Mail through the gateway failing from us-east and eu-west. us-west and ap-south are still delivering, but above p95.',
+    passing: 2,
     total: 4,
   },
   ...derive(proofpointSev1Series()),
   spark: proofpointSev1Series(),
-  lastStateChange: minutesAgo(34),
+  uptime30d: 0.9957,
+  incidents90d: 2,
+  lastStateChange: minutesAgo(PROOFPOINT_OPENED_MINUTES_AGO),
 });
 
 /** Amendment 2's scheduled-maintenance window, which nothing else in the

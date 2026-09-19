@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { CheckRun } from '@ops-dash/shared';
+import type { CheckRun, Incident } from '@ops-dash/shared';
 import { fixtures, serviceById, incidentById, checkRunsFor } from './index.js';
 
 const ORDER = ['m365', 'proofpoint', 'jira', 'zendesk', 'helpjuice', 'claude', 'openai'];
@@ -58,8 +58,16 @@ describe('quiet mode', () => {
 describe('sev1 mode', () => {
   const s = fixtures.sev1;
 
-  it('opens four incidents, one per severity band the prototype shows', () => {
-    expect(s.incidents.map((i) => i.severity)).toEqual([1, 2, 2, 3]);
+  // Five, not the plan's four (G-13). The vendor correlation moved to Proofpoint
+  // because its Status.io feed is readable, and m365 keeps the Exchange story on
+  // our own probe evidence — two distinct detection stories, both Sev1 under
+  // John's ruling. Compressing them into one incident to preserve the number
+  // four would have hidden exactly the distinction the ruling is about.
+  it('opens five incidents across the severity bands', () => {
+    expect(s.incidents.map((i) => i.severity)).toEqual([1, 1, 2, 2, 3]);
+    expect(s.incidents.map((i) => i.id)).toEqual([
+      'INC-2292', 'INC-2291', 'INC-2290', 'INC-2288', 'INC-2286',
+    ]);
   });
 
   // Inverted from the plan's original (HIGH-4). The plan had m365 degraded on
@@ -85,10 +93,30 @@ describe('sev1 mode', () => {
     expect(consent?.lastSuccessAt).toBeUndefined();
   });
 
-  it('puts proofpoint on a vendor advisory with our probes merely slow', () => {
+  // Inverted from the plan's "our probes merely slow" (G-13). Proofpoint now
+  // carries the headline correlation, and a Sev1 whose own half is 'slow' would
+  // be a severity the impact does not support. Both halves are bad, from two
+  // independent sources, which is the whole point of the rule.
+  it('degrades proofpoint on both halves, which is what makes the headline rule fire', () => {
     const pfpt = serviceById('sev1', 'proofpoint');
     expect(pfpt?.vendor.level).toBe('degraded');
-    expect(pfpt?.ours.level).toBe('degraded');
+    expect(pfpt?.ours.level).toBe('outage');
+    expect(pfpt?.ours.passing).toBe(2);
+    expect(pfpt?.ours.total).toBe(4);
+  });
+
+  it('opens the headline Sev1 from a rule that could actually fire', () => {
+    const inc = incidentById('sev1', 'INC-2292');
+    const pfpt = serviceById('sev1', 'proofpoint');
+    expect(inc?.severity).toBe(1);
+    expect(inc?.serviceId).toBe('proofpoint');
+    expect(inc?.ruleKey).toBe('vendor');
+    // The rule's preconditions, both readable by a live poll: this is the
+    // difference between a demo that is reproducible and one that is staged.
+    expect(pfpt?.vendor.level).toBe('degraded');
+    expect(pfpt?.vendor.lastSuccessfulPoll).toBeDefined();
+    expect(pfpt?.vendor.incidentsSince.map((v) => v.id)).toEqual(['hs-8841']);
+    expect(inc?.timeline.find((t) => t.kind === 'opened')?.body).toMatch(/auto-created/i);
   });
 
   it('shows at least one unknown service so the neutral state is exercised', () => {
@@ -168,9 +196,9 @@ describe('every incident points at something that exists', () => {
     expect(unresolved).toEqual([]);
   });
 
-  it('routes the three tile-backed incidents at m365 and the fourth at Endpoint Central', () => {
+  it('routes each incident at the service it actually belongs to', () => {
     expect(fixtures.sev1.incidents.map((i) => i.serviceId)).toEqual([
-      'm365', 'm365', 'endpointcentral', 'm365',
+      'proofpoint', 'm365', 'm365', 'endpointcentral', 'm365',
     ]);
   });
 });
@@ -212,9 +240,9 @@ describe('the counts the two worlds are specified with', () => {
     }
   });
 
-  it('quiet has no open incidents and sev1 has four', () => {
+  it('quiet has no open incidents and sev1 has five', () => {
     expect(fixtures.quiet.incidents).toHaveLength(0);
-    expect(fixtures.sev1.incidents).toHaveLength(4);
+    expect(fixtures.sev1.incidents).toHaveLength(5);
   });
 });
 
@@ -295,13 +323,27 @@ describe('the numbers on the response-time card agree with the curve', () => {
     }
   });
 
-  it('makes "above p95 from us-east" true of proofpoint rather than decorative', () => {
-    const pfpt = serviceById('sev1', 'proofpoint');
-    expect(pfpt?.ours.note).toContain('above p95');
-    expect(pfpt!.latencyMs).toBeGreaterThan(pfpt!.p95Ms);
-    const newest = checkRunsFor('sev1', 'proofpoint')[0];
-    expect(newest?.region).toBe('us-east');
-    expect(newest?.latencyMs).toBe(pfpt?.latencyMs);
+  it('makes "above p95" true of proofpoint rather than decorative', () => {
+    const pfpt = serviceById('sev1', 'proofpoint')!;
+    const runs = checkRunsFor('sev1', 'proofpoint');
+    expect(pfpt.ours.note).toContain('above p95');
+    expect(pfpt.latencyMs).toBeGreaterThan(pfpt.p95Ms);
+    // The two regions the note says are still delivering must both be above
+    // p95, and the slowest of them is the number the tile shows as latencyMs.
+    const surviving = runs.filter((r) => r.result === 'pass' && r.check.startsWith('Mail'));
+    expect(surviving.map((r) => r.region).sort()).toEqual(['ap-south', 'us-west']);
+    for (const r of surviving) expect(r.latencyMs).toBeGreaterThan(pfpt.p95Ms);
+    expect(runs.some((r) => r.latencyMs === pfpt.latencyMs)).toBe(true);
+    // And the failing regions are named, not merely counted.
+    expect(runs.filter((r) => r.result !== 'pass').map((r) => r.region)).toEqual(['us-east', 'eu-west']);
+    for (const region of ['us-east', 'eu-west']) expect(pfpt.ours.note).toContain(region);
+  });
+
+  it('anchors proofpoint\'s "last vendor update" to its own timeline entry', () => {
+    const entry = incidentById('sev1', 'INC-2292')?.timeline.find((t) => t.kind === 'vendor');
+    const minutes = Math.round((Date.now() - Date.parse(entry?.at ?? '')) / 60_000);
+    expect(serviceById('sev1', 'proofpoint')?.vendor.note)
+      .toContain(`Last vendor update ${minutes} minutes ago`);
   });
 });
 
@@ -340,6 +382,66 @@ describe('the copy quotes the timestamps it sits beside', () => {
   });
 });
 
+/** Every piece of prose an incident renders. */
+const incidentProse = (i: Incident): string =>
+  [
+    i.summary,
+    ...i.metaParts,
+    ...i.blastRadius.flatMap((b) => [b.label, b.value, b.note]),
+    ...i.timeline.flatMap((t) => [t.title, t.body, t.kind]),
+  ].join(' | ');
+
+describe('no incident may cite vendor evidence for a service we cannot see', () => {
+  // The general form of G-13, and the reason it is worth a test rather than a
+  // fix: the specific instance was m365 quoting advisory EX1084221 while its
+  // vendor feed had never once authenticated. At Milestone 2, when adapters
+  // start writing real data, an `unknown` vendor level paired with vendor-
+  // sourced incident prose is the same bug arriving from a different direction.
+  const VENDOR_EVIDENCE = [
+    /\badvisory\s+[a-z]{2,}-?\d{3,}/i,  // 'advisory EX1084221', 'advisory hs-8841'
+    /\bvendor\s+(confirmed|reports?|says|posted|update)/i,
+    /\bstatus\s*(page|\.io)\b/i,
+    /\bposted\s+[a-z]{2,}-?\d{3,}/i,
+  ];
+
+  it.each(['quiet', 'sev1'] as const)('%s keeps blind services free of vendor claims', (mode) => {
+    const blind = new Set(
+      fixtures[mode].services.filter((s) => s.vendor.level === 'unknown').map((s) => s.id as string),
+    );
+    expect(blind.size).toBeGreaterThan(0);
+    for (const inc of fixtures[mode].incidents) {
+      if (!blind.has(inc.serviceId)) continue;
+      const prose = incidentProse(inc);
+      for (const pattern of VENDOR_EVIDENCE) {
+        expect({ id: inc.id, cites: pattern.exec(prose)?.[0] ?? null }).toEqual({
+          id: inc.id,
+          cites: null,
+        });
+      }
+      // 'vendor' is a timeline kind that means "the vendor told us something".
+      expect(inc.timeline.some((t) => t.kind === 'vendor')).toBe(false);
+    }
+  });
+
+  it.each(['quiet', 'sev1'] as const)('%s only fires the vendor rule where the vendor half is readable', (mode) => {
+    for (const inc of fixtures[mode].incidents) {
+      const opened = inc.timeline.find((t) => t.kind === 'opened');
+      if (inc.ruleKey !== 'vendor' || !/auto-created/i.test(opened?.body ?? '')) continue;
+      const svc = fixtures[mode].services.find((x) => x.id === inc.serviceId);
+      // Amendment 1: `unknown` never satisfies the vendor side of the rule.
+      expect(svc?.vendor.level).not.toBe('unknown');
+      expect(['degraded', 'outage']).toContain(svc?.vendor.level);
+      expect(svc?.vendor.lastSuccessfulPoll).toBeDefined();
+    }
+  });
+
+  it('states on the incident itself why the blind service could not auto-open', () => {
+    const opened = incidentById('sev1', 'INC-2291')?.timeline.find((t) => t.kind === 'opened');
+    expect(opened?.body).toMatch(/could not fire/i);
+    expect(opened?.body).toMatch(/consent is pending/i);
+  });
+});
+
 describe('a disabled rule cannot have produced an incident', () => {
   it('reconciles INC-2288 with the Agent stale rule being off', () => {
     const stale = fixtures.sev1.rules.find((r) => r.key === 'stale');
@@ -369,18 +471,19 @@ describe('the sev1 world does not contradict itself', () => {
     expect(serviceById('sev1', 'm365')?.lastStateChange).toBe(inc.openedAt);
   });
 
-  it('keeps the advisory where it actually came from', () => {
-    // EX1084221 reached us out of band — a person read it in the admin centre —
-    // so it belongs to the incident, not to a vendor half fed by an adapter
-    // that has never run. Putting it on the tile would claim a feed we do not
-    // have. The incident keeps it, which is what IncidentDetail renders.
+  it('carries no vendor-sourced evidence at all on the blind service', () => {
+    // EX1084221 is gone from the fixtures entirely. It was only ever readable
+    // by a human in the admin centre, and an incident that quotes an advisory
+    // id implies a feed behind it. The absence is now the story: the timeline
+    // says we looked and found nothing, which is different from forgetting to.
     const m365 = serviceById('sev1', 'm365')!;
     const inc = incidentById('sev1', 'INC-2291')!;
     expect(m365.vendor.advisoryId).toBeUndefined();
     expect(m365.vendor.incidentsSince).toEqual([]);
-    expect(inc.summary).toContain('EX1084221');
-    expect(inc.metaParts).toContain('advisory EX1084221');
-    expect(inc.timeline.find((t) => t.kind === 'vendor')?.body).toContain('EX1084221');
+    expect(JSON.stringify(fixtures)).not.toContain('EX1084221');
+    expect(inc.metaParts).toContain('no vendor signal');
+    expect(inc.timeline.some((t) => t.kind === 'vendor')).toBe(false);
+    expect(inc.timeline.map((t) => t.title)).toContain('No vendor statement available');
   });
 
   it('does not let the Sev1 rest on a vendor half we cannot see', () => {
@@ -453,8 +556,8 @@ describe('the sev1 world does not contradict itself', () => {
   });
 
   it('badges the sidebar with exactly the open incident count', () => {
-    expect(s.incidents.filter((i) => i.resolvedAt === undefined)).toHaveLength(4);
-    expect(s.incidents.filter((i) => i.severity === 1)).toHaveLength(1);
+    expect(s.incidents.filter((i) => i.resolvedAt === undefined)).toHaveLength(5);
+    expect(s.incidents.filter((i) => i.severity === 1)).toHaveLength(2);
   });
 });
 

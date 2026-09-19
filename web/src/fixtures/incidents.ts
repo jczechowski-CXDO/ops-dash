@@ -2,8 +2,9 @@ import type { Incident } from '@ops-dash/shared';
 import { clock, clockOf, dayAgoAt, minutesAgo, span } from './time.js';
 import {
   MAILFLOW_LAST_SUCCESS_MINUTES_AGO as LAST_SUCCESS,
+  PROOFPOINT_OPENED_MINUTES_AGO as PP0,
+  PROOFPOINT_VENDOR_UPDATE_MINUTES_AGO as PP_VENDOR,
   SEV1_OPENED_MINUTES_AGO as T0,
-  VENDOR_CONFIRMED_MINUTES_AGO as VENDOR_CONFIRMED,
 } from './services.js';
 
 /** INC-2288 opened by hand at yesterday 17:20. The instant and the copy that
@@ -18,6 +19,53 @@ const EPC_OPENED = dayAgoAt(1, 17, 20);
  *  `fixtures.test.ts` enumerates the legitimate non-tile sources, because nothing
  *  in the type system does. */
 export const sev1Incidents: Incident[] = [
+  /** The headline correlation, and the only incident in this milestone that a
+   *  rule actually opened by itself. Hornetsecurity's Status.io feed is
+   *  readable, so both halves of the 'vendor degraded + our check failing' rule
+   *  have real inputs — which is why John moved the demo here from m365. */
+  {
+    id: 'INC-2292',
+    severity: 1,
+    title: 'Proofpoint filtering degraded — inbound mail delayed at the gateway',
+    serviceId: 'proofpoint',
+    openedAt: minutesAgo(PP0),
+    summary:
+      'Hornetsecurity reports elevated processing latency in United States - Atlanta, and our own mail-flow probes through the gateway are failing from us-east and eu-west. Both halves agree, independently, which is what opened this automatically.',
+    metaParts: ['Proofpoint', `opened ${clock(PP0)}`, '12 of 14 inbound domains', 'advisory hs-8841'],
+    ruleKey: 'vendor',
+    blastRadius: [
+      { label: 'Mail held at gateway', value: '1,860', note: 'inbound messages queued', level: 'error' },
+      { label: 'Domains affected', value: '12', note: 'of 14 inbound domains', level: 'error' },
+      { label: 'Median delivery delay', value: '9m 12s', note: 'up from 6s baseline', level: 'warning' },
+      { label: 'Regions failing', value: '2 of 4', note: 'us-east and eu-west', level: 'warning' },
+    ],
+    timeline: [
+      {
+        at: minutesAgo(6),
+        kind: 'update',
+        title: 'Gateway queue easing',
+        body: 'Queue down to 1,860 from a 2,400 peak. us-west and ap-south still delivering above p95.',
+      },
+      {
+        at: minutesAgo(PP_VENDOR),
+        kind: 'vendor',
+        title: 'Vendor confirmed',
+        body: 'Hornetsecurity posted hs-8841: elevated processing latency in United States - Atlanta.',
+      },
+      {
+        at: minutesAgo(PP0 - 2),
+        kind: 'detected',
+        title: 'Gateway probes failing',
+        body: 'Mail-flow round trip through the gateway timed out from us-east and eu-west.',
+      },
+      {
+        at: minutesAgo(PP0),
+        kind: 'opened',
+        title: 'Incident opened',
+        body: 'Auto-created from rule "Vendor status page degraded + our check failing". Both halves were independently sourced and both were bad.',
+      },
+    ],
+  },
   {
     id: 'INC-2291',
     severity: 1,
@@ -25,8 +73,8 @@ export const sev1Incidents: Incident[] = [
     serviceId: 'm365',
     openedAt: minutesAgo(T0),
     summary:
-      'Microsoft advisory EX1084221, read by hand from the admin centre, reports delayed transport in North America. Our synthetic mailflow probe is failing from three of four regions, which matches it. We have no automated vendor signal for M365 while Service Health consent is pending, so this correlation rests on our own probes and a human reading the advisory.',
-    metaParts: ['Microsoft 365', `opened ${clock(T0)}`, '384 users affected', 'advisory EX1084221'],
+      'Our synthetic mailflow probes are failing from three of four regions and 384 mailboxes are seeing delivery delays. We have nothing from Microsoft to corroborate it: there is no per-workload status feed for commercial M365 and our Service Health consent is still pending, so the vendor half of this page is blind. We are acting on our own evidence, which is the only evidence we have.',
+    metaParts: ['Microsoft 365', `opened ${clock(T0)}`, '384 users affected', 'no vendor signal'],
     ruleKey: 'vendor',
     blastRadius: [
       { label: 'Users affected', value: '384', note: 'of 512 licensed mailboxes', level: 'error' },
@@ -45,10 +93,13 @@ export const sev1Incidents: Incident[] = [
         body: 'Delay down to 18m 40s from a 31m peak. Monitoring.',
       },
       {
-        at: minutesAgo(VENDOR_CONFIRMED),
-        kind: 'vendor',
-        title: 'Vendor confirmed, by hand',
-        body: 'Advisory EX1084221 read in the Microsoft 365 admin centre: a transport infrastructure fault. Not visible to us automatically — Service Health consent is still pending.',
+        // Deliberately NOT kind 'vendor': there is no vendor statement here.
+        // The absence is the entry, and an operator should be able to see that
+        // we looked rather than that we forgot.
+        at: minutesAgo(T0 - 46),
+        kind: 'update',
+        title: 'No vendor statement available',
+        body: 'Nothing to corroborate this from Microsoft. There is no per-workload status feed for commercial M365 and our Service Health consent is still pending, so the vendor half stays unknown.',
       },
       {
         at: minutesAgo(T0 - 19),

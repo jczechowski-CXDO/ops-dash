@@ -85,14 +85,20 @@ const m365Sev1Runs: CheckRun[] = [
   { at: secondsAgo(161), check: 'Graph /me', region: 'us-west', result: 'pass', latencyMs: 210 },
 ];
 
-/** Proofpoint is slow, not failing: every probe passes, but the newest us-east
- *  round trip is above p95, which is what `ours.level: 'degraded'` with
- *  `passing: 3` of 4 means — one of the four is outside its objective. The
- *  latency is the same number the tile shows as `latencyMs`, read from
- *  services.ts, so the table and the stat quote one measurement. */
-const proofpointSev1Runs: CheckRun[] = passing(serviceBase('proofpoint')).map((run, i) =>
-  i === 0 ? { ...run, latencyMs: PROOFPOINT_SEV1_LATEST_MS } : run,
-);
+/** Proofpoint under the headline correlation: two of four regions failing by
+ *  name, matching `ours.passing: 2` of 4 and the regions its note calls out,
+ *  and the two that still deliver are slow — the slowest is the same number the
+ *  tile shows as `latencyMs`, imported from services.ts so the table and the
+ *  stat quote one measurement rather than two that drift. */
+const proofpointSev1Runs: CheckRun[] = [
+  { at: secondsAgo(41), check: 'Mailflow round trip', region: 'us-east', result: 'timeout', latencyMs: null },
+  { at: secondsAgo(72), check: 'Mailflow round trip', region: 'eu-west', result: 'timeout', latencyMs: null },
+  { at: secondsAgo(101), check: 'Mailflow round trip', region: 'us-west', result: 'pass', latencyMs: PROOFPOINT_SEV1_LATEST_MS },
+  { at: secondsAgo(132), check: 'Control Panel API', region: 'us-east', result: 'pass', latencyMs: 282 },
+  // Above proofpoint's p95 of 638, because the tile note says both surviving
+  // regions are delivering above p95 and a 511 here would have contradicted it.
+  { at: secondsAgo(161), check: 'Mailflow round trip', region: 'ap-south', result: 'pass', latencyMs: 692 },
+];
 
 export const sev1CheckRuns: Record<ServiceId, CheckRun[]> = {
   ...everythingPassing(),
