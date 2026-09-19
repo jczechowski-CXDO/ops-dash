@@ -90,3 +90,16 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 
 Report back: what you did, every command you ran, the **actual** output, any plan
 defect you hit, and anything you needed but did not own.
+
+## Mutation-check anything whose name makes a claim
+
+This project has produced six tests that reported success without exercising what their
+name described — type assertions that never ran, presence-only checks blind to type and
+optionality, a probe where `[never] extends [true]` accepted everything, a jsdom contrast
+ratio that could not resolve `var()`, a Vitest run that never typechecked `web`, and a
+lead-suggested assertion that passed with the feature it named deleted.
+
+Before you commit a test whose name makes a claim, **break the thing the name protects and
+watch it go red.** Thirty seconds. If nothing fails, the test is decoration and you have
+learned something more useful than a green run. Say in your report which mutations you
+tried and what failed.

@@ -145,6 +145,30 @@ procedure its read-only tools cannot perform — it now states that it verifies 
 reports while the lead performs the edit, so a change to a frozen file always passes
 through a second pair of hands.
 
+
+## The one practice this project has earned the hard way
+
+**A passing test is not evidence until someone has watched it fail.**
+
+Six times in two waves, this build produced a test that reported success without
+exercising the thing its name claimed: `expectTypeOf` assertions that never ran outside
+typecheck mode (G-2); presence-only contract checks that passed while a required array of
+objects became an optional array of strings; a reviewer's own probe where
+`[never] extends [true]` accepted everything; a contrast-ratio assertion under jsdom,
+which cannot resolve `var()` against the token sheet; a Vitest run printing
+`Type Errors  no errors` over a `web` file with two real type errors; and a lead-suggested
+"at least one incident auto-created by an enabled rule" that passed with the entire
+headline correlation deleted.
+
+The common shape: **an assertion whose NAME describes a stronger property than its BODY
+checks.** They are cheapest to catch by breaking the thing the name claims to protect and
+seeing whether anything goes red. It costs about thirty seconds.
+
+So: when you write a test whose name makes a claim, mutate the code it names and watch it
+fail before you commit. When you review one, do the same rather than reading it. This is
+mandatory at G3, where four agents land view tests in parallel and nobody can see anyone
+else's work.
+
 ## The trap that has now caught us three times
 
 **`Type Errors  no errors` in a Vitest run is a claim about `shared` only.** Typecheck mode is
