@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Crexendo IT · Service operations</title>
     <link rel="stylesheet" href="/aurora/styles.css" />
+    <style>
+      /* The one animation the shell needs, defined where the prototype defines
+         it. Nothing under web/src may hold a stylesheet (G0 accepted finding 3),
+         and an inline style attribute cannot declare keyframes. */
+      @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>
