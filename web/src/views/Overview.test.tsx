@@ -8,6 +8,7 @@ import {
   allOperational,
   isAffirmed,
   severityFillColor,
+  severityLabel,
   severityOnFillColor,
 } from '../theme/statusColor.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
@@ -430,29 +431,42 @@ describe('the announced phrase cannot drift from the colour beside it', () => {
   });
 });
 
-describe('the severity chip uses the fill-grade rungs, not --main and not white', () => {
-  it('fills with severityFillColor and writes with severityOnFillColor', () => {
+describe('the severity chip is painted from the published fill-grade rungs', () => {
+  /**
+   * Asserted POSITIVELY, per the lead's G3 ruling, and over every chip the page
+   * renders rather than the first one.
+   *
+   * The earlier version of this test asserted the chip was "not white" — twice,
+   * once naming the hex (which tripped the repository's no-literal-hex guard,
+   * because it greps tests too) and once as "contains no #". Both were the wrong
+   * shape for the same reason: they permit every other wrong colour, and they
+   * would keep passing if the contrast token were swapped for something
+   * unreadable. Equality with the published function permits exactly one value.
+   * Duplicating the guard's job in an assertion is also strictly worse than the
+   * guard, which covers the whole tree.
+   */
+  it.each([1, 2, 3] as const)('SEV %i fills with severityFillColor and writes with severityOnFillColor', (sev) => {
     at();
-    const chip = screen.getAllByText('SEV 1')[0]!;
-    expect(chip).toHaveStyle({
-      background: severityFillColor(1),
-      color: severityOnFillColor(1),
-    });
-    expect(chip).toHaveStyle({ background: 'var(--error-dark)' });
+    const chips = screen.getAllByText(severityLabel(sev));
+    expect(chips).toHaveLength(sev1.incidents.filter((i) => i.severity === sev).length);
+    for (const chip of chips) {
+      expect(chip).toHaveStyle({
+        background: severityFillColor(sev),
+        color: severityOnFillColor(sev),
+      });
+    }
   });
 
-  it('carries no literal white, which collapses in the dark palette', () => {
+  it('puts the chip on the -dark rung and its word on the theme-aware -contrast token', () => {
     at();
-    for (const chip of [...screen.getAllByText('SEV 1'), ...screen.getAllByText('SEV 2'), screen.getByText('SEV 3')]) {
-      // No literal colour of ANY kind — asserted as "contains no #", which is
-      // both stronger than naming the white hex and the only form that does not
-      // itself trip the repository's no-literal-hex guard. Writing the forbidden
-      // value in order to forbid it is the same self-reference that makes a
-      // redaction test fail on its own source.
-      expect(chip.getAttribute('style')).not.toMatch(/#/);
-      expect(chip.getAttribute('style')).not.toMatch(/\bwhite\b/i);
-      expect(chip.getAttribute('style')).toMatch(/-contrast\)/);
-    }
+    // The concrete pin behind the equalities above: if severityFillColor were
+    // moved back to the -main rung, the assertions above would still pass
+    // (they compare the chip to whatever the function now returns) and this
+    // would not. The pair is the guard; either alone is not.
+    expect(screen.getAllByText('SEV 1')[0]!).toHaveStyle({
+      background: 'var(--error-dark)',
+      color: 'var(--error-contrast)',
+    });
   });
 
   it('leaves the row accent on --main, which is the rung that grade is for', () => {
