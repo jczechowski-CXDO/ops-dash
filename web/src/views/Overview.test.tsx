@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import type { ServiceStatus } from '@ops-dash/shared';
@@ -691,5 +692,120 @@ describe('a muted row says when the silence expires', () => {
     const after = screen.getAllByTestId('alert-row')[0]!;
     expect(after).toHaveTextContent('Muted by John H.');
     expect(after).not.toHaveTextContent('Muted by John H. until');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The dark palette, resolved against the real token sheet
+// ---------------------------------------------------------------------------
+
+/**
+ * jsdom cannot resolve `var()` against the token stylesheet — a contrast
+ * assertion made through getComputedStyle here is one of the wrong-greens this
+ * project has already produced. So the sheet is parsed and resolved directly,
+ * and the token NAMES are read off the rendered element rather than retyped, so
+ * this tracks the component instead of agreeing with a copy of it.
+ */
+function tokenSheet(): { light: Map<string, string>; dark: Map<string, string> } {
+  const path = ['web/public/aurora/tokens/fig-tokens.css', 'public/aurora/tokens/fig-tokens.css'].find(existsSync);
+  // Loudly, rather than skipping: a silent miss here would make every
+  // assertion below vacuous.
+  if (!path) throw new Error('token sheet not found from ' + process.cwd());
+  const css = readFileSync(path, 'utf8');
+
+  const body = (selector: string) => {
+    const at = css.indexOf(selector);
+    if (at < 0) throw new Error(`token sheet has no ${selector} block`);
+    const open = css.indexOf('{', at) + 1;
+    return css.slice(open, css.indexOf('\n}', open));
+  };
+  const decls = (text: string) => {
+    const out = new Map<string, string>();
+    for (const m of text.matchAll(/(--[\w-]+):\s*([^;]+);/g)) out.set(m[1]!, m[2]!.trim());
+    return out;
+  };
+  const light = decls(body(':root {'));
+  // Located by the `.dark` half of the selector on purpose: the other half of
+  // that selector is the string the repository's no-second-dark-palette guard
+  // greps for, and a test may not contain the pattern it depends on.
+  const dark = new Map([...light, ...decls(body('.dark {'))]);
+  return { light, dark };
+}
+
+const SHEET = tokenSheet();
+
+function resolve(theme: 'light' | 'dark', token: string, depth = 0): string {
+  const value = SHEET[theme].get(token);
+  if (value === undefined) throw new Error(`no ${token} in the ${theme} palette`);
+  const alias = /^var\((--[\w-]+)\)$/.exec(value);
+  return alias && depth < 10 ? resolve(theme, alias[1]!, depth + 1) : value;
+}
+
+function rgb(value: string): [number, number, number] {
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(value);
+  if (!m) throw new Error(`not an rgb() colour: ${value}`);
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function contrast(a: string, b: string): number {
+  const lum = (c: [number, number, number]) =>
+    c.map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    }).reduce((acc, v, i) => acc + v * [0.2126, 0.7152, 0.0722][i]!, 0);
+  const [x, y] = [lum(rgb(a)), lum(rgb(b))].sort((p, q) => q - p) as [number, number];
+  return (x + 0.05) / (y + 0.05);
+}
+
+/** The token name a style string references: 'var(--x)' -> '--x'. */
+const tokenOf = (style: string | null | undefined): string => {
+  const m = /var\((--[\w-]+)\)/.exec(style ?? '');
+  if (!m) throw new Error(`not a token reference: ${style}`);
+  return m[1]!;
+};
+
+describe('the strip pill survives the dark palette', () => {
+  const pillTokens = () => {
+    at('quiet');
+    const pill = screen.getAllByTestId('service-pill')[0]!;
+    return { surface: tokenOf(pill.style.background), label: tokenOf(pill.style.color) };
+  };
+
+  it('the resolver reproduces the BLOCKER it was written for', () => {
+    // Positive control. Without this the assertions below could pass because the
+    // resolver is broken rather than because the pill is fixed: the old pairing
+    // must come out at 1.00:1 in the dark palette, which is what the reviewer saw.
+    expect(contrast(resolve('dark', '--grey-grey-100'), resolve('dark', '--text-primary'))).toBeCloseTo(1, 2);
+    // ... and was perfectly readable in light, which is why it survived review.
+    expect(contrast(resolve('light', '--grey-grey-100'), resolve('light', '--text-primary'))).toBeGreaterThan(4.5);
+  });
+
+  it('paints the pill on a surface that inverts with the theme', () => {
+    const { surface } = pillTokens();
+    // The property that separates a ROLE from a ramp VALUE, asserted without
+    // naming either: a role resolves to different colours per palette; a raw
+    // ramp token resolves to the same colour in both, which is the whole defect.
+    expect(resolve('light', surface)).not.toBe(resolve('dark', surface));
+  });
+
+  it.each(['light', 'dark'] as const)('%s: the service name is readable on the pill', (theme) => {
+    const { surface, label } = pillTokens();
+    expect(contrast(resolve(theme, surface), resolve(theme, label))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keeps the pill visible as a pill against the card behind it', () => {
+    const { surface } = pillTokens();
+    // Not a WCAG threshold — the capsule carries no information, the text and the
+    // srOnly status do. It is pinned so the silhouette cannot silently vanish:
+    // light is 1.13:1 today and dark must not be flatter than that.
+    expect(contrast(resolve('dark', surface), resolve('dark', '--background-paper')))
+      .toBeGreaterThanOrEqual(contrast(resolve('light', surface), resolve('light', '--background-paper')));
+  });
+
+  it('keeps README:64 pixel-exact in the light palette', () => {
+    const { surface } = pillTokens();
+    // The README specifies the ramp token by name. This rung IS that colour in
+    // light, so the spec is honoured and no light baseline moves.
+    expect(resolve('light', surface)).toBe(resolve('light', '--grey-grey-100'));
   });
 });

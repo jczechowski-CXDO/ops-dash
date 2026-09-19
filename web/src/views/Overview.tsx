@@ -234,7 +234,25 @@ export function StatusStrip({ services }: { services: ServiceStatus[] }) {
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            background: 'var(--grey-grey-100)',
+            // BLOCKER, G3 re-verification. This was `var(--grey-grey-100)`, a
+            // RAMP token — a fixed value in Aurora's grey scale with no dark
+            // override — while the text inherits `--text-primary`, which in the
+            // dark palette resolves to that same rgb(235,242,245). 1.00:1: seven
+            // blank capsules carrying only a coloured dot, which put the dot back
+            // to being the sole visible carrier of status and inverted the very
+            // ruling the srOnly text above discharges.
+            //
+            // `--background-cardelevation2` is a ROLE: a surface that resolves
+            // per theme. That is the distinction — a ramp token as a background
+            // is a light-mode assumption written where the theme cannot reach it.
+            //
+            // This rung specifically, rather than a darker one: in the light
+            // palette `--background-cardelevation2` IS `var(--grey-grey-100)`,
+            // so README:64's stated pill colour is preserved pixel-for-pixel and
+            // no light baseline moves, while dark gives 14.39:1 for the label.
+            // The capsule silhouette against the card is 1.23:1 in dark versus
+            // 1.13:1 in light today, so the pill reads as a pill in both.
+            background: 'var(--background-cardelevation2)',
             borderRadius: 999,
             padding: '4px 9px',
             textDecoration: 'none',
