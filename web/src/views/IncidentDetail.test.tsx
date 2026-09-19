@@ -295,21 +295,45 @@ describe('IncidentDetail', () => {
   // permits and no fixture exercises.
   it('credits whoever is on the record, not whoever is in the fixtures', () => {
     const base = fixtures.sev1.incidents.find((i) => i.severity === 1)!;
+    const injectedAck = 'a.patel@example.com';
+    const injectedMute = 'd.okafor@example.com';
+
+    // The precondition, without which this test can go vacuous the day a fixture
+    // is edited: the constructed actors must not be actors the fixtures already
+    // contain. If ops-fixtures ever renamed INC-2286's acker to a.patel, a hero
+    // hard-coding the fixture value would print the expected string and this
+    // test would wave it through — the discriminating power would be gone and
+    // nothing would say so. Derived from the fixture set, never from a literal.
+    const fixtureActors = fixtures.sev1.incidents.flatMap((i) =>
+      [i.ack?.by, i.muted?.by].filter((by): by is string => by !== undefined),
+    );
+    expect(fixtureActors, 'nothing to discriminate against').not.toHaveLength(0);
+    expect(fixtureActors, 'the constructed ack actor must not exist in the fixtures')
+      .not.toContain(injectedAck);
+    expect(fixtureActors, 'the constructed mute actor must not exist in the fixtures')
+      .not.toContain(injectedMute);
+
     at(base.id, 'sev1', {
       incident: {
         ...base,
-        ack: { by: 'a.patel@example.com', at: new Date(Date.now() - 3 * 60 * 60_000).toISOString() },
-        muted: { by: 'd.okafor@example.com', until: null },
+        ack: { by: injectedAck, at: new Date(Date.now() - 3 * 60 * 60_000).toISOString() },
+        muted: { by: injectedMute, until: null },
       },
     });
 
     const credits = screen.getByTestId('incident-credits');
-    expect(credits).toHaveTextContent('Acknowledged by a.patel@example.com · 3 hours ago');
+    expect(credits).toHaveTextContent(`Acknowledged by ${injectedAck} · 3 hours ago`);
     // An indefinite mute says so by saying nothing about an expiry, rather than
     // rendering 'until null'.
-    expect(credits).toHaveTextContent('Muted by d.okafor@example.com');
+    expect(credits).toHaveTextContent(`Muted by ${injectedMute}`);
     expect(credits).not.toHaveTextContent(/until/);
-    expect(credits).not.toHaveTextContent('m.reyes@example.com');
+    // Derived, not the literal 'm.reyes@example.com' this line used to carry:
+    // the point is that NO fixture actor can appear on a hero rendering someone
+    // else's record, whoever the fixtures happen to name this week.
+    for (const actor of fixtureActors) {
+      expect(credits, `${actor} came from the fixtures, not from this record`)
+        .not.toHaveTextContent(actor);
+    }
   });
 
   it('shows a state, not a blank page, for an id that is not open', () => {
