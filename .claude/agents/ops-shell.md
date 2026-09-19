@@ -103,3 +103,9 @@ Before you commit a test whose name makes a claim, **break the thing the name pr
 watch it go red.** Thirty seconds. If nothing fails, the test is decoration and you have
 learned something more useful than a green run. Say in your report which mutations you
 tried and what failed.
+
+**The same rule covers scripted edits.** A regex rewrite across files reports success on a
+wrong match. During Wave 1 a hoist intended to move one constant silently took `PanelState`,
+`unreachable`, `agePhrase` and an entire severity table with it — caught by reading
+`git diff`, not by a test and not by the script's own assertion, which passed on the wrong
+match. **Read the diff of every scripted multi-file edit before you stage it.**

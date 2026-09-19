@@ -94,3 +94,16 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 
 Report back: what you did, every command you ran, the **actual** output, any plan
 defect you hit, and anything you needed but did not own.
+
+## Mutation-check anything whose name makes a claim
+
+This project has produced six tests that reported success without exercising what their name
+described. Before you commit a test whose name makes a claim, **break the thing the name
+protects and watch it go red.** If nothing fails, the test is decoration.
+
+
+**The same rule covers scripted edits.** A regex rewrite across files reports success on a
+wrong match. During Wave 1 a hoist intended to move one constant silently took `PanelState`,
+`unreachable`, `agePhrase` and an entire severity table with it — caught by reading
+`git diff`, not by a test and not by the script's own assertion, which passed on the wrong
+match. **Read the diff of every scripted multi-file edit before you stage it.**
