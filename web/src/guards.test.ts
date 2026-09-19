@@ -38,6 +38,9 @@ const src = () =>
   walk(join(WEB, 'src'), ['.ts', '.tsx']).filter((f) => f !== SELF);
 const read = (p: string) => readFileSync(p, 'utf8');
 const rel = (p: string) => p.slice(REPO.length + 1).replace(/\\/g, '/');
+/** Prose mentioning a thing is not code doing it — several guards depend on this. */
+const stripComments = (text: string) =>
+  text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
 
 describe('every colour is a token', () => {
   it('no literal hex in web/src', () => {
@@ -283,9 +286,6 @@ describe('no optional contract field is carried by a fixture and read by nothing
     return [...new Set(names)];
   }
 
-  const stripComments = (text: string) =>
-    text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
-
   /** Every property name present (and not undefined) anywhere in the fixtures. */
   function namesCarriedByFixtures(node: unknown, acc = new Set<string>()): Set<string> {
     if (Array.isArray(node)) {
@@ -334,5 +334,60 @@ describe('no optional contract field is carried by a fixture and read by nothing
       expect(optionalContractFields()).toContain(name);
       expect(reason.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe('no background token is blind to the theme', () => {
+  // The G3 BLOCKER: `background: 'var(--grey-grey-100)'` on the Overview strip
+  // pill. That is a raw ramp VALUE with no dark override, so it stayed
+  // rgb(235,242,245) in both palettes — while `--text-primary` resolves to the
+  // same rgb(235,242,245) in dark. 1.00:1, seven invisible service names, and
+  // it would have been frozen into quiet-dark-overview.png.
+  //
+  // The general form, from view-overview: **a role resolves to different colours
+  // per palette; a ramp value resolves to the same colour in both.** So rather
+  // than blocklisting `--grey-grey-*` by name, this asks the question that
+  // actually matters of every token used as a background — does it change with
+  // the theme? A new ramp token, or a semantic one someone forgets to override,
+  // fails without anybody having to predict it.
+
+  /** Token names redefined inside fig-tokens.css's dark block. */
+  function themeAwareTokens(): Set<string> {
+    const css = readFileSync(join(WEB, 'public/aurora/tokens/fig-tokens.css'), 'utf8');
+    // Located by the `.dark` half of the selector on purpose: the other half is
+    // the literal the no-second-dark-palette guard greps for.
+    const start = css.indexOf(', .dark');
+    const block = css.slice(start, css.indexOf('\n}', start));
+    return new Set([...block.matchAll(/^\s*(--[\w-]+):/gm)].map((m) => m[1]!));
+  }
+
+  it('every token used as a bare background is redefined in the dark palette', () => {
+    const aware = themeAwareTokens();
+    const offenders: string[] = [];
+
+    for (const file of src()) {
+      stripComments(read(file))
+        .split('\n')
+        .forEach((line, i) => {
+          // Bare `var(--x)` only. `var(--semantic, var(--ramp))` is fine: the
+          // fallback fires only if the semantic token is missing, and all of
+          // ours exist.
+          const m = /\bbackground(?:Color)?:\s*'var\((--[\w-]+)\)'/.exec(line);
+          if (m && !aware.has(m[1]!)) {
+            offenders.push(`${rel(file)}:${i + 1}  ${m[1]} has no dark override`);
+          }
+        });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('the dark block was actually found — this guard cannot pass vacuously', () => {
+    // If the selector ever changes, themeAwareTokens() returns an empty set and
+    // every background becomes an offender — loud. But the inverse, a parse that
+    // silently matches everything, would make the guard green forever. Pin both.
+    const aware = themeAwareTokens();
+    expect(aware.size).toBeGreaterThan(50);
+    expect(aware.has('--text-primary')).toBe(true);        // a role: overridden
+    expect(aware.has('--grey-grey-100')).toBe(false);      // a ramp value: not
   });
 });
