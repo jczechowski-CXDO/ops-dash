@@ -59,9 +59,12 @@ Linux notes:
 
 ## Pick up here
 
-**Wave 2 — Task 6, `ops-shell` solo.** Shell, routing, theme, view stubs. Then gate G2.
+**Wave 3½ — Task 10A, `ops-e2e` solo.** Playwright: 28 visual baselines, the interaction tests
+and the real offline proof. Read "Task 10A environment notes" and "How to set the theme when
+measuring or screenshotting" below **before starting** — six facts are already established and
+rediscovering them costs hours. Then gate G3½, then Wave 4.
 
-Superseded, for the record: **Wave 1 — Tasks 4 and 5, two agents in parallel.** `ops-primitives` builds the eight
+Superseded, for the record: Wave 2 (Task 6, shell) and Wave 1 (Tasks 4 and 5). `ops-primitives` builds the eight
 primitives, the five shared dashboard components and `theme/statusColor.ts`; `ops-fixtures`
 builds the prototype-derived fixture modules. Disjoint ownership; dispatch both together, then
 run gate G1.
@@ -396,6 +399,59 @@ independent implementations could, and did — that was the pre-G1 `ageLabel` si
 why publishing it was the fix that mattered. The hoist is tidying, not a defect repair. Anyone
 reading "fourth instance of the duplication pattern" without this paragraph will reasonably go
 looking for something broken on screen and find nothing.
+
+## Gate G3 — closed with accepted findings (2026-09-19)
+
+Wave 3 is complete: seven views, four agents in parallel, 48 commits on `wave-2`. **478 tests,
+typecheck 0, build 0.** Contrast: **0 AA failures** across 1,696 text nodes, 7 routes × 2 themes
+× 2 worlds, theme application asserted on every load, with a positive control.
+
+**The gate's own question — did four blind agents diverge? — answered no on every axis the plan
+named.** Zero re-implemented `Card`/`StatCard`/`Panel`/`SectionHeading`; stat-grid `minmax`
+values differ only where the README differs; every padding traces to a README line; all eight
+empty states funnel through `PanelState`; `SectionHeading` at all sixteen heading sites. The
+agent owning three sibling screens shared one `VIEW_STACK`/`STAT_GRID`/`TableSection` and
+*reported* that they wanted a home in `theme/`.
+
+**The expensive findings were not divergence.** They were:
+
+- **A BLOCKER nobody could have found in light mode.** `background: 'var(--grey-grey-100)'` on
+  the strip pill — a raw ramp token with no dark override, while `--text-primary` resolves to
+  that same value in dark. **1.00:1**, seven invisible service names, in one of the 28 baselines.
+  And it *inverted* the earlier ruling that produced it: we had added `srOnly` text so the dot
+  would not be the sole carrier, and a sighted user was left with a blank capsule.
+- **68 AA contrast failures**, 42 of them in three views that never adopted the published
+  helpers because their sites bypass them with raw token literals. A new seam shape: not a
+  duplicated helper, but a published one that callers route *around*.
+- **The spec was wrong twice.** README § 7 names a pill pairing that cannot clear AA at the size
+  the same line mandates; amended at source. And `unknown` rendering `--text-disabled` is right
+  for decoration and fails as text in both themes.
+
+**Accepted at G3, not fixed:**
+
+| Finding | Owner | Due |
+|---|---|---|
+| `advisoryId`, `vendor.maintenance`, `scheduledFor`, `scheduledUntil` carried by fixtures and read by nothing — recorded in `OPEN_LOOPS` | view-service | before G4 |
+| `threshold` deliberately unread — it is the machine form of what `AlertRule.detail` states in prose; load-bearing at M2 | — | decision |
+| `Integration.error` has no fixture row, so its badge layout is never looked at | ops-fixtures | Wave 4 |
+| Sidebar demo toggle is dev-only and never baselined | lead | — |
+
+**Three standing guards arrived during remediation**, and the reviewer broke two of them:
+
+- **open-loop guard** — a fixture field nothing reads. Found four on its first run. Was
+  name-keyed, so an object *key* counted as a read; tightened to property access, which
+  immediately surfaced a fifth.
+- **theme-blindness guard** — no background token may lack a dark override. Matched only
+  single-quoted values; the reviewer reintroduced the BLOCKER with double quotes and all
+  fourteen guards passed.
+- **per-view call-site guards** — the painted colour must be a readable rung. These are what
+  caught a reverted `statusTextColor` and my own uncommitted positive control.
+
+**Judgement calls recorded:** the views are *finished, not merely passing* — layout and copy
+were already done and dark-mode colour grading was the only gap. And the plan's 3-4×
+under-prediction of test counts is **a floor, not a defect**: the overage is mutation tests,
+constructed-combination seams and drift batteries, none plannable in advance. Read the counts as
+"at least N", and treat **a task landing *at* its prediction as the one to re-read**.
 
 ## A readability assertion is orthogonal to a semantic one
 
