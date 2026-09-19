@@ -256,16 +256,39 @@ separate reasons:
 3. **It survives the remedy changing.** Swap the token later and the negative assertion still
    passes over a broken screen.
 
-**Assert what the value must be, not what it must not be.** And note the trap one level on,
-which `w3-service` and `w3-overview` both found independently: **equality against the published
-helper is not sufficient either**, because both sides then call the same function and the test
-passes if the view and the test are wrong together. Pin it with one concrete expected value
-beside the equality, or with an inequality against the rung it must *not* be. The pair is the
-guard; either alone is not.
+**Assert what the value must be, not what it must not be.** Note that generalising the negative
+does not help: `not.toMatch(/#/)` is the same error one level up, because it still defines
+correctness as the absence of a bad thing — it passes for `rgb(255,255,255)`, for
+`var(--nonexistent)`, and for no style at all. Four occurrences across three agents says the
+phrasing is the attractor, not the agents.
+
+And the trap one level on, which `w3-service` and `w3-overview` found **independently**:
+equality against the published helper is not sufficient either, because both sides then call the
+same function and the test passes if the view and the test are wrong together.
+
+**The rule that survives all four cases is narrower: an assertion may not reach the value under
+test by the same path the code did.** Either pin a literal, or compare two independently-
+reachable definitions. A negative assertion is safe only as a *companion* to a positive one.
 
 The general form, and the reason every one of these was the code being the wrong shape rather
 than the guard having a blind spot: **when a guard fires on a test file, the test is usually
 asserting the wrong thing.**
+
+## Report an equivalent mutant as equivalent
+
+A mutation that survives is not automatically a test gap. `Card` emitting
+`data-testid={testId}` directly instead of via a conditional spread survives, and **no assertion
+can kill it** — React omits an attribute whose value is `undefined`, so the two forms are
+genuinely indistinguishable in the DOM. Verified with a probe rather than assumed.
+
+The right response is to record it as *survived-and-equivalent*, not to add an assertion that
+appears to kill it while actually testing something adjacent. That would be a vacuous test
+manufactured to satisfy a practice designed to catch vacuous tests.
+
+What made it worth reporting: the same mutation on `StatCard` is **not** equivalent — it is a
+compile error under `exactOptionalPropertyTypes`, because forwarding to a typed component prop
+carries an obligation that setting a DOM attribute does not. So the conditional spread is
+load-bearing in one file and stylistic in the other, and the files say which.
 
 ## Never compute an expectation with the function under test
 
