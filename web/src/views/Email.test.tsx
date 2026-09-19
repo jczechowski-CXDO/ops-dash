@@ -84,7 +84,21 @@ describe('Email', () => {
     at();
     expect(screen.getByRole('cell', { name: 'Outstanding invoice #88214' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'billing@invoice-secure.net' })).toBeInTheDocument();
-    expect(screen.queryByText(/@crexendo\.com/)).not.toBeInTheDocument();
+
+    // Positive form (lead's ruling): the Sender column is exactly the
+    // snapshot's senders — the prototype's synthetic hostile domains, which are
+    // deliberately real-looking and deliberately not ours.
+    const senders = bodyRows('Recently blocked').map(
+      (r) => within(r).getAllByRole('cell')[1]?.textContent ?? '',
+    );
+    expect(senders).toEqual(fixtures.sev1.email.recentBlocked.map((m) => m.from));
+
+    // README § 6 cuts the recipient column for width, so no recipient address
+    // reaches the screen at all — the strongest redaction claim available here,
+    // and a claim about this view rather than a re-run of the global guard.
+    for (const m of fixtures.sev1.email.recentBlocked) {
+      expect(screen.queryByText(m.to)).not.toBeInTheDocument();
+    }
   });
 
   it('renders an undocumented reason rather than dropping or mis-tinting it', () => {

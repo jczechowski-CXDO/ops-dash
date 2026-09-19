@@ -128,7 +128,20 @@ describe('Entra', () => {
     at();
     expect(screen.getByRole('columnheader', { name: 'Actor' })).toBeInTheDocument();
     expect(screen.getAllByText('j.hart@example.com').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/@crexendo\.com/)).not.toBeInTheDocument();
+
+    // Positive, not negative (lead's ruling): every actor this screen paints is
+    // either 'System' or a documentation-domain address, and the column is the
+    // snapshot's actors in order. Naming a forbidden domain here would both
+    // duplicate the global redaction guard and trip it.
+    const rows = bodyRows('Directory audit');
+    const actors = rows.map((r) => within(r).getAllByRole('cell')[1]?.textContent ?? '');
+    expect(actors).toEqual(fixtures.sev1.entra.audit.map((a) => a.actor));
+    expect(actors.filter((a) => a !== 'System' && !a.endsWith('@example.com'))).toEqual([]);
+
+    // Targets are a mix of role names and external addresses; any that is
+    // address-shaped is a documentation domain too.
+    const targets = rows.map((r) => within(r).getAllByRole('cell')[3]?.textContent ?? '');
+    expect(targets.filter((t) => t.includes('@') && !/@example\.(com|net)$/.test(t))).toEqual([]);
   });
 
   it('says so when a directory change failed rather than rendering it as routine', () => {
