@@ -24,6 +24,7 @@ import type { HistoryRow } from '../fixtures/index.js';
 // IncidentDetail for "Opened {HH:MM}". A mute expiry is a wall-clock instant of
 // the same kind, so it takes the same idiom rather than a third one.
 import { clockOf } from '../fixtures/time.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 
 /**
  * The actor credited for an action taken HERE, by clicking, as in the prototype.
@@ -136,6 +137,38 @@ export function stripOverline(services: ServiceStatus[]): string {
 export function alertSummary(open: Incident[]): string {
   const sev = (s: 1 | 2 | 3) => open.filter((i) => i.severity === s).length;
   return `${open.length} open · ${sev(1)} Sev1 · ${sev(2)} Sev2 · ${sev(3)} Sev3`;
+}
+
+/**
+ * Who acknowledged this alert, and when they did.
+ *
+ * M-4, the fourth field in this family after `ack.by`, `muted.by` and
+ * `muted.until`: `ack.at` was carried, guarded by `ops-fixtures` to postdate
+ * `openedAt`, and discarded at render, leaving two credits from the same
+ * contract on one line where only one said when.
+ *
+ * AGE, not a clock time, and the asymmetry with `muteCredit` is deliberate. A
+ * mute expiry is a near-future instant, so "until 14:30" is unambiguous. An
+ * acknowledgement is a past occurrence of any age — this fixture's is two days
+ * old — and "at 14:30" on a two-day-old ack reads as today. `${ageLabel} ago` is
+ * also the idiom Entra, Settings and ServiceDetail already use for a past
+ * instant, so this is the row matching its neighbours rather than a fourth
+ * spelling.
+ *
+ * UNKNOWN_AGE drops the time rather than printing it. The published contract for
+ * `ageLabel` is that an unparseable timestamp returns a value which is
+ * deliberately NOT a plausible age, and callers branch on it; "acknowledged an
+ * unknown age ago" would be a bad timestamp rendered as prose. The credit itself
+ * is still true, so it stands alone.
+ *
+ * A local click passes `undefined` and carries no time, exactly as a local mute
+ * carries no expiry: the action has no recorded instant until Milestone 4.
+ */
+export function ackCredit(ack: Incident['ack'], actor: string, now?: number): string {
+  const by = ack?.by ?? actor;
+  if (!ack?.at) return `Acknowledged by ${by}`;
+  const age = ageLabel(ack.at, now);
+  return age === UNKNOWN_AGE ? `Acknowledged by ${by}` : `Acknowledged by ${by} ${age} ago`;
 }
 
 /**
@@ -372,7 +405,7 @@ function AlertRow({
    */
   const credits: string[] = [];
   if (state.resolved) credits.push(`Resolved by ${ACTOR}`);
-  else if (state.ack) credits.push(`Acknowledged by ${incident.ack?.by ?? ACTOR}`);
+  else if (state.ack) credits.push(ackCredit(incident.ack, ACTOR));
   if (state.muted) credits.push(muteCredit(incident.muted, ACTOR));
   const meta = [...credits, ...incident.metaParts];
 

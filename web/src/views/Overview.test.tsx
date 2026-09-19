@@ -15,8 +15,10 @@ import {
 } from '../theme/statusColor.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
 import { clockOf } from '../fixtures/time.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 import Overview, {
   StatusStrip,
+  ackCredit,
   alertSummary,
   listState,
   muteCredit,
@@ -807,5 +809,84 @@ describe('the strip pill survives the dark palette', () => {
     // The README specifies the ramp token by name. This rung IS that colour in
     // light, so the spec is honoured and no light baseline moves.
     expect(resolve('light', surface)).toBe(resolve('light', '--grey-grey-100'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-4: the acknowledgement says when, as the mute does
+// ---------------------------------------------------------------------------
+
+describe('an acknowledged row says when it was acknowledged', () => {
+  const acked = sev1.incidents.find((i) => i.ack)!;
+  const rowOf = (id: string) =>
+    screen.getAllByTestId('alert-row')[sev1.incidents.findIndex((i) => i.id === id)]!;
+
+  it('the fixture carries an ack instant at all', () => {
+    expect(acked.ack!.at).toBeTruthy();
+    // ops-fixtures guards that it postdates the incident; this is the weaker
+    // claim the VIEW depends on — that it is a real, past instant to render.
+    expect(Date.parse(acked.ack!.at)).toBeLessThanOrEqual(Date.now());
+    expect(Number.isNaN(Date.parse(acked.ack!.at))) .toBe(false);
+  });
+
+  it('renders the age on the row, in the idiom the other views use', () => {
+    at();
+    expect(rowOf(acked.id)).toHaveTextContent(
+      `Acknowledged by ${acked.ack!.by} ${ageLabel(acked.ack!.at)} ago`,
+    );
+  });
+
+  it('states an age rather than a clock time, which would read as today', () => {
+    at();
+    // The fixture's ack is two days old. `at 14:30` on that is the defect this
+    // format avoids, and it is why ack and mute are spelled differently.
+    const row = rowOf(acked.id);
+    expect(row).toHaveTextContent(/Acknowledged by \S+ \d+ days ago/);
+    expect(row).not.toHaveTextContent(/Acknowledged by \S+ at \d\d:\d\d/);
+  });
+
+  it('names the actor and the age the data gives, over several ages', () => {
+    const now = Date.UTC(2026, 8, 19, 12, 0, 0);
+    const cases: [number, string][] = [
+      [20 * 60_000, 'Acknowledged by m.reyes@example.com 20 minutes ago'],
+      [3 * 3_600_000, 'Acknowledged by m.reyes@example.com 3 hours ago'],
+      [2 * 86_400_000, 'Acknowledged by m.reyes@example.com 2 days ago'],
+      [10_000, 'Acknowledged by m.reyes@example.com less than a minute ago'],
+    ];
+    for (const [delta, expected] of cases) {
+      const ack = { by: 'm.reyes@example.com', at: new Date(now - delta).toISOString() };
+      expect(ackCredit(ack, 'John H.', now)).toBe(expected);
+    }
+  });
+
+  it('drops the time rather than rendering a bad timestamp as prose', () => {
+    // UNKNOWN_AGE is deliberately not a plausible age; composing it would give
+    // "acknowledged an unknown age ago", which reads as data rather than as a
+    // fault. The credit is still true, so it stands alone.
+    const credit = ackCredit({ by: 'm.reyes@example.com', at: 'not-a-timestamp' }, 'John H.');
+    expect(credit).toBe('Acknowledged by m.reyes@example.com');
+    expect(credit).not.toContain(UNKNOWN_AGE);
+  });
+
+  it('carries no time for an acknowledgement taken here', () => {
+    at();
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    expect(sev1.incidents[0]!.ack).toBeUndefined();
+    fireEvent.click(within(row).getByRole('button', { name: 'Acknowledge' }));
+    const after = screen.getAllByTestId('alert-row')[0]!;
+    // Pinned against the ' · ' separator that follows the credit, so ANY time
+    // wedged in between fails. The earlier form of this assertion used
+    // /Acknowledged by John H\.\s+\S+ ago/, which a multi-word age such as
+    // 'less than a minute ago' does not match — a mutant that invented a click
+    // time survived it.
+    expect(after).toHaveTextContent(`Acknowledged by John H. · ${sev1.incidents[0]!.metaParts[0]}`);
+  });
+
+  it('gives both credits on one row a when, from the same contract', () => {
+    at();
+    // The finding in one assertion: two credits, both saying when.
+    const muted = sev1.incidents.find((i) => i.muted)!;
+    expect(rowOf(acked.id)).toHaveTextContent(`${ageLabel(acked.ack!.at)} ago`);
+    expect(rowOf(muted.id)).toHaveTextContent(`until ${clockOf(muted.muted!.until!)}`);
   });
 });
