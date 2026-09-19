@@ -57,11 +57,42 @@ export function timelineColor(kind: TimelineEntry['kind']): string {
 }
 
 /**
+ * Is this ONE service affirmatively healthy?
+ *
+ * The single definition of affirmed health. Exported because "is this service
+ * healthy" is useful to more than one caller: the Overview banner wants the
+ * verdict over the list, the header subtitle wants the count. Both must mean the
+ * same thing or one screen contradicts the other.
+ *
+ * BOTH HALVES, deliberately. The vendor's own feed and our synthetic probes must
+ * each say 'operational'. A vendor status page is a claim about their fleet, not
+ * a measurement of our path to it; a green feed with our probes failing is
+ * exactly the case the synthetic checks exist to catch. Today m365 is
+ * vendor-'unknown' with our probes failing in sev1 and passing in quiet, so a
+ * vendor-only definition would already disagree with this one in a live fixture.
+ *
+ * ONLY 'operational' AFFIRMS. Amendment 1: 'maintenance' is announced work, not
+ * an incident but equally not an assertion of health; 'unknown' is the absence of
+ * information and is the reason the amendment exists. 'degraded' and 'outage'
+ * speak for themselves. Widening this predicate by one member is the whole bug.
+ */
+export function isAffirmed(service: ServiceStatus): boolean {
+  return service.vendor.level === 'operational' && service.ours.level === 'operational';
+}
+
+/**
  * Amendment 1, rule 1: the Overview strip asserts health only when every service
- * is affirmatively operational on both halves. 'unknown' and 'maintenance' do not
- * count. Without this, one Statuspage-wide failure paints Jira, Helpjuice, Claude
- * and OpenAI green at once — four vendors, one upstream, one correlated lie.
+ * is affirmatively operational on both halves. Without this, one Statuspage-wide
+ * failure paints Jira, Helpjuice, Claude and OpenAI green at once — four vendors,
+ * one upstream, one correlated lie.
+ *
+ * An EMPTY list is not health. `[].every()` is vacuously true, which would let a
+ * failed or empty fixture load render ALL SYSTEMS OPERATIONAL over nothing at
+ * all. The contract already rules on this shape for `SourceResult.empty`:
+ * "NOT an assertion of health. Never infer 'operational' from it." Same rule
+ * here — health is asserted only over evidence that exists.
  */
 export function allOperational(services: ServiceStatus[]): boolean {
-  return services.every((s) => s.vendor.level === 'operational' && s.ours.level === 'operational');
+  if (services.length === 0) return false;
+  return services.every(isAffirmed);
 }
