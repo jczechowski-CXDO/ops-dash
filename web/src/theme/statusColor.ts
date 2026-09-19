@@ -1,4 +1,10 @@
-import type { ServiceStatus, Severity, StatusLevel, TimelineEntry } from '@ops-dash/shared';
+import type {
+  BlastMetric,
+  ServiceStatus,
+  Severity,
+  StatusLevel,
+  TimelineEntry,
+} from '@ops-dash/shared';
 
 /**
  * Every mapping below is an exhaustive switch whose default branch assigns the
@@ -53,6 +59,18 @@ function statusFamily(level: StatusLevel): Family | 'neutral' {
   }
 }
 
+function blastFamily(level: BlastMetric['level']): Family | 'neutral' {
+  switch (level) {
+    case 'warning': return 'warning';
+    case 'error':   return 'error';
+    // 'normal' is not a status. A blast metric at normal is just a measurement —
+    // '512 licensed mailboxes' — and colouring it would invent an assertion the
+    // contract does not make.
+    case 'normal':  return 'neutral';
+    default:        return unreachable(level, 'blastFamily');
+  }
+}
+
 function severityFamily(severity: Severity): Family {
   switch (severity) {
     case 1:      return 'error';
@@ -83,6 +101,22 @@ export function statusColor(level: StatusLevel): string {
 export function statusTextColor(level: StatusLevel): string {
   const family = statusFamily(level);
   return family === 'neutral' ? 'var(--text-secondary)' : `var(--${family}-dark)`;
+}
+
+/**
+ * BlastMetric.level as readable text — the fourth union, and the last one a view
+ * was mapping for itself.
+ *
+ * 'normal' resolves to --text-primary, NOT --text-secondary. A normal blast
+ * metric is a headline number on an incident hero, the same weight as any other
+ * value; de-emphasising it would imply the figure matters less, which is the
+ * opposite of true for '384 users affected'. Measured at 16.28:1 light and
+ * 17.72:1 dark on paper, and pinned by the contrast suite below rather than
+ * assumed — assuming a rung is what produced all 14 of the G3 failures.
+ */
+export function blastTextColor(level: BlastMetric['level']): string {
+  const family = blastFamily(level);
+  return family === 'neutral' ? 'var(--text-primary)' : `var(--${family}-dark)`;
 }
 
 export function severityColor(severity: Severity): string {

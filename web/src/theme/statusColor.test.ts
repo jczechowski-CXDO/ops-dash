@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ServiceStatus } from '@ops-dash/shared';
 import {
+  blastTextColor,
   statusTextColor,
   severityTextColor,
   severityFillColor,
@@ -123,6 +124,25 @@ describe('severity helpers', () => {
   });
 });
 
+describe('blastTextColor', () => {
+  it('maps the two status levels to the text-grade rung', () => {
+    expect(blastTextColor('warning')).toBe('var(--warning-dark)');
+    expect(blastTextColor('error')).toBe('var(--error-dark)');
+  });
+
+  it('leaves a normal metric as ordinary primary text, not a de-emphasised one', () => {
+    // '384 users affected' at level normal is a headline figure, not a footnote.
+    expect(blastTextColor('normal')).toBe('var(--text-primary)');
+    expect(blastTextColor('normal')).not.toBe('var(--text-secondary)');
+  });
+
+  it('never colours a normal metric as though it carried a status', () => {
+    for (const other of ['warning', 'error'] as const) {
+      expect(blastTextColor('normal')).not.toBe(blastTextColor(other));
+    }
+  });
+});
+
 describe('timelineColor', () => {
   it('maps each kind to the dot colour from DATA_CONTRACTS section 2', () => {
     expect(timelineColor('opened')).toBe('var(--text-secondary)');
@@ -203,6 +223,7 @@ const THEMES = Object.entries(palettes()) as [string, Map<string, string>][];
 const ALL_LEVELS = ['operational', 'degraded', 'outage', 'maintenance', 'unknown'] as const;
 const ALL_SEVERITIES = [1, 2, 3, 'info'] as const;
 const PAPER = 'var(--background-paper)';
+const ALL_BLAST_LEVELS = ['normal', 'warning', 'error'] as const;
 
 describe('contrast of the text-grade colours', () => {
   it('the measurement is real — the decoration rung is proven to FAIL as text', () => {
@@ -230,6 +251,17 @@ describe('contrast of the text-grade colours', () => {
       for (const severity of ALL_SEVERITIES) {
         const ratio = contrast(palette, severityTextColor(severity), PAPER);
         if (ratio < 4.5) failures.push(`${theme}/sev${String(severity)} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('every BlastMetric level clears AA as text on paper, in both themes', () => {
+    const failures: string[] = [];
+    for (const [theme, palette] of THEMES) {
+      for (const level of ALL_BLAST_LEVELS) {
+        const ratio = contrast(palette, blastTextColor(level), PAPER);
+        if (ratio < 4.5) failures.push(`${theme}/${level} ${ratio.toFixed(2)}`);
       }
     }
     expect(failures).toEqual([]);
