@@ -29,7 +29,7 @@ import type {
 describe('contracts — envelope', () => {
   it('SourceResult is exactly the documented envelope, with empty optional (amendment 4)', () => {
     expectTypeOf<SourceResult<number>>().toEqualTypeOf<{
-      data: number;
+      data?: number;
       fetchedAt: string;
       degraded: boolean;
       empty?: boolean;

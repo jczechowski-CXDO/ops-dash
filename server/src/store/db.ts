@@ -23,12 +23,25 @@ export function openStore(path = 'ops-dash.sqlite') {
 
   // Prepared once and reused. The poller runs these every 60 seconds forever.
   const stmt = {
-    putSnapshot: db.prepare(
-      `INSERT INTO snapshots (source, payload, fetched_at, ok) VALUES (?, ?, ?, ?)
+    // A good poll replaces the payload AND clears the error. A failed one
+    // touches only last_attempt_at and last_error, leaving the good payload
+    // exactly where it was — COALESCE is what makes the fallback work.
+    putGood: db.prepare(
+      `INSERT INTO snapshots (source, payload, fetched_at, last_attempt_at, last_error)
+       VALUES (?, ?, ?, ?, NULL)
        ON CONFLICT(source) DO UPDATE SET payload = excluded.payload,
-         fetched_at = excluded.fetched_at, ok = excluded.ok`,
+         fetched_at = excluded.fetched_at, last_attempt_at = excluded.last_attempt_at,
+         last_error = NULL`,
     ),
-    getSnapshot: db.prepare(`SELECT payload, fetched_at, ok FROM snapshots WHERE source = ?`),
+    putFailed: db.prepare(
+      `INSERT INTO snapshots (source, payload, fetched_at, last_attempt_at, last_error)
+       VALUES (?, NULL, NULL, ?, ?)
+       ON CONFLICT(source) DO UPDATE SET last_attempt_at = excluded.last_attempt_at,
+         last_error = excluded.last_error`,
+    ),
+    getSnapshot: db.prepare(
+      `SELECT payload, fetched_at, last_attempt_at, last_error FROM snapshots WHERE source = ?`,
+    ),
     addRun: db.prepare(
       `INSERT INTO check_runs (service_id, at, check_name, region, result, latency_ms)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -71,12 +84,33 @@ export function openStore(path = 'ops-dash.sqlite') {
     close: () => db.close(),
 
     putSnapshot(source: string, result: SourceResult<unknown>) {
-      stmt.putSnapshot.run(source, JSON.stringify(result), result.fetchedAt, result.error ? 0 : 1);
+      if (result.error) {
+        stmt.putFailed.run(source, result.fetchedAt, JSON.stringify(result.error));
+      } else {
+        stmt.putGood.run(source, JSON.stringify(result), result.fetchedAt, result.fetchedAt);
+      }
     },
-    /** The whole envelope back, so the API can mirror it outward unchanged. */
+
+    /**
+     * The last good payload, carrying the last failure if there was one.
+     *
+     * This is the shape DATA_CONTRACTS describes for a stale panel: previous
+     * data, visibly stale, with the reason attached — never zeros dressed as
+     * fresh, and never an empty panel because one poll failed. `degraded` is
+     * true exactly when the newest attempt did not succeed.
+     */
     getSnapshot(source: string): SourceResult<unknown> | undefined {
-      const row = stmt.getSnapshot.get(source) as { payload: string } | undefined;
-      return row ? (JSON.parse(row.payload) as SourceResult<unknown>) : undefined;
+      const row = stmt.getSnapshot.get(source) as
+        | { payload: string | null; fetched_at: string | null; last_attempt_at: string; last_error: string | null }
+        | undefined;
+      if (!row) return undefined;
+      const error = row.last_error ? (JSON.parse(row.last_error) as SourceResult<unknown>['error']) : undefined;
+      if (!row.payload) {
+        // Never succeeded. Not the same as stale, and must not read as data.
+        return { fetchedAt: row.last_attempt_at, degraded: true, ...(error ? { error } : {}) };
+      }
+      const good = JSON.parse(row.payload) as SourceResult<unknown>;
+      return error ? { ...good, degraded: true, error } : good;
     },
 
     addRun(run: CheckRun) {

@@ -13,7 +13,8 @@ Common envelope, returned by every adapter:
 
 ```ts
 type SourceResult<T> = {
-  data: T;
+  data?: T;                 // amendment 9 — ABSENT when `error` is set. A failed fetch has no
+                            // payload, and the M1 shape made every adapter's error path a cast.
   fetchedAt: string;      // ISO 8601
   degraded: boolean;      // partial result (some pages/regions failed)
   empty?: boolean;        // fetch completed, returned no records — NOT an assertion of health
@@ -440,6 +441,7 @@ casually is not one.
 | 6 | `CheckRun` gains `serviceId` | A check run in the store with no way back to its service. The M1 fixtures keyed a `Record` and got away with it; a persisted row cannot |
 | 7 | The non-JSON-2xx rule is stated, with `error.code: 'non_json_2xx'` | An expired EPC token returning an HTML sign-in page under HTTP 200 being parsed as a successful poll of zero records |
 | 8 | The `blackout` rule joins section 7's table | The gap amendment 1 left: it stops the false green and raises no alarm about the blindness that replaced it |
+| 9 | `SourceResult.data` becomes optional | `data` was required, so every adapter's error path had to cast past the contract — and code typed on `SourceResult` could write `result.data.components` on an errored result with no type error. Surfaced the first time a real adapter had to return a failure; M1 never noticed because a fixture never fails |
 
 Amendment 3 note: CrowdStrike is a plausible eighth tile later — the credential and a
 `pull_falcon.py` already exist — but it is not one of the seven verified feeds, so it is not in

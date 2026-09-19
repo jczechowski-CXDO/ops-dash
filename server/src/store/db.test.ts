@@ -37,6 +37,54 @@ describe('the store survives a restart', () => {
     expect(b.runsFor('jira')).toHaveLength(1);
   });
 
+  it('a failed poll leaves the last good data in place, marked stale', () => {
+    // BLOCKER 2 at G0. The first version of this table kept one payload per
+    // source and upserted on every poll, so a failed poll OVERWROTE the good
+    // data it was supposed to fall back to — and the `ok` column's comment
+    // described a last-good history that could not exist with one row.
+    //
+    // The contract says a failed source renders its previous data with a stale
+    // badge, never zeros dressed as fresh and never an empty panel.
+    const s = open(':memory:');
+    s.putSnapshot('v:jira', {
+      data: { level: 'operational' }, fetchedAt: '2026-09-19T10:00:00.000Z', degraded: false,
+    });
+    s.putSnapshot('v:jira', {
+      fetchedAt: '2026-09-19T10:01:00.000Z', degraded: false,
+      error: { code: 'http_503', message: 'Service Unavailable' },
+    });
+
+    const out = s.getSnapshot('v:jira')!;
+    expect(out.data, 'the good data must survive the failure').toEqual({ level: 'operational' });
+    expect(out.fetchedAt, 'and must date from when it was good').toBe('2026-09-19T10:00:00.000Z');
+    expect(out.degraded, 'while saying plainly that it is stale').toBe(true);
+    expect(out.error?.code).toBe('http_503');
+  });
+
+  it('a source that has NEVER succeeded is not the same as a stale one', () => {
+    // Absent is not stale. A feed that has never returned has no previous data
+    // to show, and inventing one would be the wrong-green this product exists
+    // to prevent — the m365 consent case exactly.
+    const s = open(':memory:');
+    s.putSnapshot('v:m365', {
+      fetchedAt: '2026-09-19T10:00:00.000Z', degraded: false,
+      error: { code: 'http_403', message: 'consent pending' },
+    });
+    const out = s.getSnapshot('v:m365')!;
+    expect(out.data).toBeUndefined();
+    expect(out.degraded).toBe(true);
+    expect(out.error?.code).toBe('http_403');
+  });
+
+  it('a good poll after a failure clears the error rather than leaving it stuck', () => {
+    const s = open(':memory:');
+    s.putSnapshot('v:jira', { fetchedAt: '1', degraded: false, error: { code: 'http_503', message: 'x' } });
+    s.putSnapshot('v:jira', { data: { level: 'operational' }, fetchedAt: '2', degraded: false });
+    const out = s.getSnapshot('v:jira')!;
+    expect(out.error, 'a recovered source must stop reporting the old failure').toBeUndefined();
+    expect(out.degraded).toBe(false);
+  });
+
   it('mirrors the whole SourceResult envelope, error included', () => {
     // If the store flattens an errored source it throws away the only thing
     // separating "nothing is wrong" from "we could not look" — the failure this
@@ -45,7 +93,7 @@ describe('the store survives a restart', () => {
     s.putSnapshot('vendor:zendesk', {
       fetchedAt: '2026-09-19T10:00:00.000Z', degraded: false,
       error: { code: 'non_json_2xx', message: '200 carried 412 bytes that are not JSON' },
-    } as never);
+    });
     expect(s.getSnapshot('vendor:zendesk')?.error?.code).toBe('non_json_2xx');
   });
 });

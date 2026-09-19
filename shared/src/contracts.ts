@@ -5,7 +5,12 @@
 
 /** Common envelope, returned by every adapter. */
 export type SourceResult<T> = {
-  data: T;
+  /** amendment 9 — ABSENT when `error` is set. A failed fetch has no payload.
+   *  Required until Milestone 2's first real adapter, which made every error
+   *  path a cast past the contract — and let code typed on SourceResult write
+   *  `result.data.components` on an errored result with no type error. M1 never
+   *  noticed because a fixture never fails. */
+  data?: T;
   fetchedAt: string;      // ISO 8601
   degraded: boolean;      // partial result (some pages/regions failed)
   empty?: boolean;        // amendment 4 — fetch completed, returned no records.

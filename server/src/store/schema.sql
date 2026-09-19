@@ -13,11 +13,22 @@ PRAGMA foreign_keys = ON;
 -- fetchedAt, degraded, empty and error included — because the API mirrors it
 -- outward unchanged and flattening it here would lose the only thing that
 -- distinguishes "nothing is wrong" from "we could not look".
+-- Last GOOD payload and last ATTEMPT are separate columns, because they are
+-- separate facts and the panel needs both. The first version of this table kept
+-- one payload per source and upserted it on every poll — so a failed poll
+-- overwrote the good data it was supposed to fall back to, and `ok`'s comment
+-- ("last-good is the newest ok=1") described a history that could not exist
+-- with one row per source. Caught at G0 before anything depended on it.
+--
+-- A stale panel is then last_good_payload + last_error + degraded, which is
+-- exactly what DATA_CONTRACTS says the UI renders: the previous data with a
+-- stale badge, never zeros dressed as fresh.
 CREATE TABLE IF NOT EXISTS snapshots (
-  source      TEXT PRIMARY KEY,
-  payload     TEXT NOT NULL,
-  fetched_at  TEXT NOT NULL,
-  ok          INTEGER NOT NULL          -- 1 if this poll succeeded; last-good is the newest ok=1
+  source            TEXT PRIMARY KEY,
+  payload           TEXT,               -- last SUCCESSFUL SourceResult. NULL until one succeeds.
+  fetched_at        TEXT,               -- when that successful one was fetched
+  last_attempt_at   TEXT NOT NULL,      -- every poll, success or not
+  last_error        TEXT                -- the failed attempt's error as JSON; NULL if the last attempt was good
 );
 
 -- Every probe run. This is the table that makes the latency figures real.

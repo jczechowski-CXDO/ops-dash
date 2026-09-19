@@ -219,7 +219,7 @@ describe('the contract test cannot become a tautology', () => {
     // Stop at the sentinel: below it the test file uses deliberately malformed
     // literals as hostile probes, which are not contract shapes.
     const testSource = read(CONTRACT_TEST).split('@contract-shapes-end')[0]!;
-    const spec = fields(testSource).map((f) => f.replace(/^data: number$/, 'data: T'));
+    const spec = fields(testSource).map((f) => f.replace(/^data(\??): number$/, 'data$1: T'));
 
     // Counted multiset, not set membership. `label: string` appears under both
     // vendor and ours, so an includes() check leaves the survivor matching and a
@@ -475,6 +475,14 @@ describe('the server talks to the network only through its one helper', () => {
     // `fetchJson`, `fetchImpl`, `x.fetch` and a parameter named fetch are all
     // fine: the negative lookarounds below exclude an identifier that is part
     // of a longer name or reached through a property.
+    // `globalThis.fetch` and `window.fetch` reach the same global through a
+    // property, which the lookbehind above deliberately excludes — so they get
+    // their own pattern rather than a weaker one that would also flag
+    // `this.fetcher.fetch`. And a raw node HTTP module bypasses the helper
+    // entirely without the word `fetch` appearing at all, which is how an M3
+    // adapter ported from a Python client would most naturally do it.
+    const VIA_GLOBAL = /\b(?:globalThis|window|self)\s*\.\s*fetch\b/;
+    const RAW_HTTP = /from\s+['"]node:(?:http|https|net|dgram|tls)['"]|require\(['"]node:(?:http|https|net|dgram|tls)['"]\)/;
     const BARE_GLOBAL = /(?<![.\w$])fetch(?![\w$])/;
     const offenders: string[] = [];
     for (const file of serverSrc()) {
@@ -483,7 +491,9 @@ describe('the server talks to the network only through its one helper', () => {
       stripComments(read(file))
         .split('\n')
         .forEach((line, i) => {
-          if (BARE_GLOBAL.test(line)) offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
+          if (BARE_GLOBAL.test(line) || VIA_GLOBAL.test(line) || RAW_HTTP.test(line)) {
+            offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
+          }
         });
     }
     expect(offenders).toEqual([]);
@@ -493,14 +503,23 @@ describe('the server talks to the network only through its one helper', () => {
     // The guard's own control. Each of these is a real way to get at the
     // global, and the first version caught only the first.
     const BARE_GLOBAL = /(?<![.\w$])fetch(?![\w$])/;
+    const VIA_GLOBAL = /\b(?:globalThis|window|self)\s*\.\s*fetch\b/;
+    const RAW_HTTP = /from\s+['"]node:(?:http|https|net|dgram|tls)['"]|require\(['"]node:(?:http|https|net|dgram|tls)['"]\)/;
+    const reaches = (line: string) =>
+      BARE_GLOBAL.test(line) || VIA_GLOBAL.test(line) || RAW_HTTP.test(line);
+
     for (const shape of [
       'await fetch(url)',
       'const f = fetch;',
       'function p(impl = fetch) {}',
       'run(fetch, url)',
       'export const client = { get: fetch };',
+      // Found at G0: these three passed the first two versions of this guard.
+      'const go = globalThis.fetch;',
+      "import { request } from 'node:https';",
+      "const { request } = require('node:http');",
     ]) {
-      expect(BARE_GLOBAL.test(shape), shape).toBe(true);
+      expect(reaches(shape), shape).toBe(true);
     }
     // And must NOT fire on these, or the guard is unusable.
     for (const ok of [
@@ -508,8 +527,9 @@ describe('the server talks to the network only through its one helper', () => {
       'fetchImpl(spec.url)',
       'await this.fetcher.fetch(url)',
       'import { fetchJson } from "../http/fetchJson.js";',
+      "import { readFileSync } from 'node:fs';",
     ]) {
-      expect(BARE_GLOBAL.test(ok), ok).toBe(false);
+      expect(reaches(ok), ok).toBe(false);
     }
   });
 
