@@ -71,12 +71,36 @@ export function openStore(path = 'ops-dash.sqlite') {
       `SELECT level, last_successful_poll FROM vendor_state WHERE vendor = ? AND component = ?`,
     ),
     allVendorState: db.prepare(`SELECT vendor, component, level, last_successful_poll FROM vendor_state`),
+    // `severity` IS in the update list, and it was not until the integration
+    // test caught it. The engine escalates correctly — `carryForward` takes the
+    // finding's severity, so a vendor moving degraded -> outage raises the
+    // incident — but the store kept the value it opened with, and the API reads
+    // the store. An incident that opened Sev2 and escalated to Sev1 was served
+    // to the operator as a Sev2 for as long as it lasted.
+    //
+    // `opened_at` is deliberately NOT updated: an existing incident's start time
+    // must never move, or the duration on the detail page shrinks every tick.
+    // `rule_key` and `service_id` are not updated either — they are the identity
+    // the id was hashed from, so a row where they differed would mean a hash
+    // collision, and quietly overwriting them would hide it.
     putIncident: db.prepare(
       `INSERT INTO incidents (id, rule_key, service_id, severity, opened_at, resolved_at, summary)
        VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET resolved_at = excluded.resolved_at, summary = excluded.summary`,
+       ON CONFLICT(id) DO UPDATE SET
+         severity    = excluded.severity,
+         resolved_at = excluded.resolved_at,
+         summary     = excluded.summary`,
     ),
     openIncidents: db.prepare(`SELECT * FROM incidents WHERE resolved_at IS NULL ORDER BY opened_at DESC`),
+    // Open, PLUS anything resolved recently enough to still own its identity.
+    // The correlation engine needs both: a condition that clears and comes back
+    // inside its window must re-open the same incident rather than opening a
+    // second one, and it cannot recognise a prior it was never handed. Feeding
+    // it `openIncidents` alone leaves that whole branch of the engine dead in
+    // production while its unit tests pass.
+    incidentsSince: db.prepare(
+      `SELECT * FROM incidents WHERE resolved_at IS NULL OR resolved_at >= ? ORDER BY opened_at DESC`,
+    ),
   };
 
   return {
@@ -168,6 +192,12 @@ export function openStore(path = 'ops-dash.sqlite') {
     },
     openIncidents() {
       return stmt.openIncidents.all() as Array<Record<string, unknown>>;
+    },
+    /** Every incident the correlator could still be responsible for at `since`:
+     *  all open ones, and those resolved at or after `since`. Pass the start of
+     *  the correlation window. */
+    incidentsSince(since: string) {
+      return stmt.incidentsSince.all(since) as Array<Record<string, unknown>>;
     },
   };
 }
