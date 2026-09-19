@@ -49,6 +49,7 @@ const ROWS: { seconds: number; probe: 0 | 1 | 2 | 3; region: string; factor: num
 
 const passing = (b: Base): CheckRun[] =>
   ROWS.map((r) => ({
+    serviceId: b.id,            // amendment 6
     at: secondsAgo(r.seconds),
     check: PROBES[b.id][r.probe],
     region: r.region,
@@ -78,11 +79,11 @@ export const quietCheckRuns: Record<ServiceId, CheckRun[]> = everythingPassing()
  *  A timeout has no latency at all, so `latencyMs` is null and not 0; a zero
  *  would render as an extremely fast probe. */
 const m365Sev1Runs: CheckRun[] = [
-  { at: secondsAgo(41), check: 'Mailflow round trip', region: 'us-east', result: 'timeout', latencyMs: null },
-  { at: secondsAgo(72), check: 'Mailflow round trip', region: 'us-west', result: 'timeout', latencyMs: null },
-  { at: secondsAgo(101), check: 'Mailflow round trip', region: 'eu-west', result: 'timeout', latencyMs: null },
-  { at: secondsAgo(132), check: 'Mailflow round trip', region: 'ap-south', result: 'pass', latencyMs: 294 },
-  { at: secondsAgo(161), check: 'Graph /me', region: 'us-west', result: 'pass', latencyMs: 210 },
+  { serviceId: 'm365', at: secondsAgo(41), check: 'Mailflow round trip', region: 'us-east', result: 'timeout', latencyMs: null },
+  { serviceId: 'm365', at: secondsAgo(72), check: 'Mailflow round trip', region: 'us-west', result: 'timeout', latencyMs: null },
+  { serviceId: 'm365', at: secondsAgo(101), check: 'Mailflow round trip', region: 'eu-west', result: 'timeout', latencyMs: null },
+  { serviceId: 'm365', at: secondsAgo(132), check: 'Mailflow round trip', region: 'ap-south', result: 'pass', latencyMs: 294 },
+  { serviceId: 'm365', at: secondsAgo(161), check: 'Graph /me', region: 'us-west', result: 'pass', latencyMs: 210 },
 ];
 
 /** Proofpoint under the headline correlation: two of four regions failing by
@@ -91,13 +92,13 @@ const m365Sev1Runs: CheckRun[] = [
  *  tile shows as `latencyMs`, imported from services.ts so the table and the
  *  stat quote one measurement rather than two that drift. */
 const proofpointSev1Runs: CheckRun[] = [
-  { at: secondsAgo(41), check: 'Mailflow round trip', region: 'us-east', result: 'timeout', latencyMs: null },
-  { at: secondsAgo(72), check: 'Mailflow round trip', region: 'eu-west', result: 'timeout', latencyMs: null },
-  { at: secondsAgo(101), check: 'Mailflow round trip', region: 'us-west', result: 'pass', latencyMs: PROOFPOINT_SEV1_LATEST_MS },
-  { at: secondsAgo(132), check: 'Control Panel API', region: 'us-east', result: 'pass', latencyMs: 282 },
+  { serviceId: 'proofpoint', at: secondsAgo(41), check: 'Mailflow round trip', region: 'us-east', result: 'timeout', latencyMs: null },
+  { serviceId: 'proofpoint', at: secondsAgo(72), check: 'Mailflow round trip', region: 'eu-west', result: 'timeout', latencyMs: null },
+  { serviceId: 'proofpoint', at: secondsAgo(101), check: 'Mailflow round trip', region: 'us-west', result: 'pass', latencyMs: PROOFPOINT_SEV1_LATEST_MS },
+  { serviceId: 'proofpoint', at: secondsAgo(132), check: 'Control Panel API', region: 'us-east', result: 'pass', latencyMs: 282 },
   // Above proofpoint's p95 of 638, because the tile note says both surviving
   // regions are delivering above p95 and a 511 here would have contradicted it.
-  { at: secondsAgo(161), check: 'Mailflow round trip', region: 'ap-south', result: 'pass', latencyMs: 692 },
+  { serviceId: 'proofpoint', at: secondsAgo(161), check: 'Mailflow round trip', region: 'ap-south', result: 'pass', latencyMs: 692 },
 ];
 
 export const sev1CheckRuns: Record<ServiceId, CheckRun[]> = {

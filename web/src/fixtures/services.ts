@@ -1,4 +1,4 @@
-import type { ServiceStatus, ServiceId } from '@ops-dash/shared';
+import type { ServiceStatus, ServiceId, VendorPlatform } from '@ops-dash/shared';
 import { clock, daysAgo, hoursAhead, minutesAgo, secondsAgo } from './time.js';
 
 /** The prototype's LCG, retargeted from viewBox units to milliseconds so the
@@ -37,16 +37,27 @@ function derive(series: number[]): { latencyMs: number; p50Ms: number; p95Ms: nu
  *  `seed` keeps each service's curve stable across reloads; m365's and
  *  proofpoint's are the prototype's own seeds, the other five are fresh
  *  (their prototype counterparts were placeholder vendors). */
-export type Base = { id: ServiceId; short: string; name: string; base: number; seed: number };
+export type Base = {
+  id: ServiceId;
+  short: string;
+  name: string;
+  base: number;
+  seed: number;
+  /** amendment 5. Declared here rather than at each vendor literal so one
+   *  service cannot claim two platforms, and so the blackout rule's grouping
+   *  reads off the same table the tiles do. Four of the seven are `statuspage`,
+   *  which is the whole reason the rule exists. */
+  platform: VendorPlatform;
+};
 
 export const SERVICE_BASES: Base[] = [
-  { id: 'm365', short: 'Microsoft 365', name: 'Microsoft 365 / Entra ID', base: 210, seed: 3 },
-  { id: 'proofpoint', short: 'Proofpoint', name: 'Proofpoint 365 Total Protection', base: 260, seed: 13 },
-  { id: 'jira', short: 'Jira', name: 'Jira Software', base: 175, seed: 17 },
-  { id: 'zendesk', short: 'Zendesk', name: 'Zendesk Support', base: 190, seed: 19 },
-  { id: 'helpjuice', short: 'Helpjuice', name: 'Helpjuice Knowledge Base', base: 140, seed: 23 },
-  { id: 'claude', short: 'Claude', name: 'Claude (Anthropic)', base: 155, seed: 29 },
-  { id: 'openai', short: 'OpenAI', name: 'OpenAI', base: 165, seed: 31 },
+  { id: 'm365', short: 'Microsoft 365', name: 'Microsoft 365 / Entra ID', base: 210, seed: 3, platform: 'msgraph' },
+  { id: 'proofpoint', short: 'Proofpoint', name: 'Proofpoint 365 Total Protection', base: 260, seed: 13, platform: 'statusio' },
+  { id: 'jira', short: 'Jira', name: 'Jira Software', base: 175, seed: 17, platform: 'statuspage' },
+  { id: 'zendesk', short: 'Zendesk', name: 'Zendesk Support', base: 190, seed: 19, platform: 'zendesk-ssp' },
+  { id: 'helpjuice', short: 'Helpjuice', name: 'Helpjuice Knowledge Base', base: 140, seed: 23, platform: 'statuspage' },
+  { id: 'claude', short: 'Claude', name: 'Claude (Anthropic)', base: 155, seed: 29, platform: 'statuspage' },
+  { id: 'openai', short: 'OpenAI', name: 'OpenAI', base: 165, seed: 31, platform: 'statuspage' },
 ];
 
 export function serviceBase(id: ServiceId): Base {
@@ -85,6 +96,7 @@ const healthy = (b: Base): ServiceStatus => {
     short: b.short,
     name: b.name,
     vendor: {
+      platform: b.platform,
       level: 'operational',
       label: 'Operational',
       note: 'No advisories posted in the last 7 days. Feed polled every 60 seconds.',
@@ -120,7 +132,8 @@ const healthy = (b: Base): ServiceStatus => {
  *
  *  This must render `var(--text-disabled)`, never green, and must never count
  *  toward the all-clear. Do not "fix" it to operational. */
-const unknownVendor = (): ServiceStatus['vendor'] => ({
+const unknownVendor = (platform: VendorPlatform): ServiceStatus['vendor'] => ({
+  platform,
   level: 'unknown',
   label: 'Unknown',
   note: 'Zendesk SSP publishes no per-service status field and returned no incidents. An absence is not an affirmation. Reading is global Zendesk, not necessarily our pod.',
@@ -145,6 +158,10 @@ const unknownVendor = (): ServiceStatus['vendor'] => ({
  *  are ours, not Microsoft's. Being blind to the vendor's claim while our own
  *  checks fail is exactly the case the contract's two-level model exists for. */
 const noVendorFeed = (): ServiceStatus['vendor'] => ({
+  // msgraph even though it has never returned: the platform says where the
+  // claim WOULD come from, not whether it arrived. A blind feed still belongs
+  // to its platform, and the blackout rule needs it there to group correctly.
+  platform: 'msgraph',
   level: 'unknown',
   label: 'Unknown',
   note: 'No vendor signal. Microsoft publishes no per-workload status feed for commercial M365, and our Graph Service Health consent (ServiceHealth.Read.All + ServiceMessage.Read.All) is still pending, so this feed has never returned. This is not an assertion of health.',
@@ -153,7 +170,7 @@ const noVendorFeed = (): ServiceStatus['vendor'] => ({
 
 const withUnknownVendors = (s: ServiceStatus): ServiceStatus =>
   s.id === 'zendesk'
-    ? { ...s, vendor: unknownVendor() }
+    ? { ...s, vendor: unknownVendor('zendesk-ssp') }
     : s.id === 'm365'
       ? { ...s, vendor: noVendorFeed() }
       : s;
@@ -231,6 +248,7 @@ export const PROOFPOINT_SEV1_LATEST_MS: number =
 const proofpointSev1 = (): ServiceStatus => ({
   ...healthy(serviceBase('proofpoint')),
   vendor: {
+    platform: 'statusio',
     level: 'degraded',
     label: 'Degraded',
     note: `Status.io reports elevated processing latency in United States - Atlanta. Last vendor update ${PROOFPOINT_VENDOR_UPDATE_MINUTES_AGO} minutes ago.`,
@@ -267,6 +285,7 @@ const proofpointSev1 = (): ServiceStatus => ({
 const helpjuiceSev1 = (): ServiceStatus => ({
   ...healthy(serviceBase('helpjuice')),
   vendor: {
+    platform: 'statuspage',
     level: 'maintenance',
     label: 'Maintenance',
     note: 'Search index maintenance announced for tonight. Article reads are unaffected; search may return stale results during the window.',

@@ -1,6 +1,6 @@
 import { describe, it, expectTypeOf } from 'vitest';
 import type {
-  SourceResult, StatusLevel, ServiceId, VendorIncident, ServiceStatus, CheckRun,
+  SourceResult, StatusLevel, ServiceId, VendorPlatform, VendorIncident, ServiceStatus, CheckRun,
   Severity, BlastMetric, TimelineEntry, Incident,
   EntraSignal, AuditEvent, EntraSnapshot,
   EndpointIssue, EndpointSnapshot,
@@ -51,6 +51,12 @@ describe('contracts — services', () => {
     >();
   });
 
+  it('VendorPlatform is exactly the four adapters (amendment 5)', () => {
+    expectTypeOf<VendorPlatform>().toEqualTypeOf<
+      'statuspage' | 'statusio' | 'zendesk-ssp' | 'msgraph'
+    >();
+  });
+
   it('VendorIncident is exact (amendment 2)', () => {
     expectTypeOf<VendorIncident>().toEqualTypeOf<{
       id: string;
@@ -80,6 +86,7 @@ describe('contracts — services', () => {
         };
         incidentsSince: VendorIncident[];
         lastSuccessfulPoll?: string;
+        platform: VendorPlatform;
       };
       ours: {
         level: StatusLevel;
@@ -104,6 +111,7 @@ describe('contracts — services', () => {
 
   it('CheckRun is exact, and latencyMs stays nullable to encode a timeout', () => {
     expectTypeOf<CheckRun>().toEqualTypeOf<{
+      serviceId: ServiceId;
       at: string;
       check: string;
       region: string;
@@ -305,6 +313,19 @@ describe('contracts — log sources, rules and integrations', () => {
 // one of its fields as missing. The sentinel can only ever hide an ADDITION below
 // it, which is not a weakening. Hoisting the sentinel itself fails loudest of all.
 // ---------------------------------------------------------------------------
+
+describe('contracts — required fields reject their own absence', () => {
+  it('vendor.platform is required, so no adapter can omit its provenance', () => {
+    // Required rather than optional on purpose: the blackout rule groups by it,
+    // and a service whose platform is unknown cannot be grouped — it would sit
+    // outside every blackout silently. Pinned separately because toEqualTypeOf
+    // above would also pass for `platform?:`.
+    expectTypeOf<{
+      level: StatusLevel; label: string; note: string; incidentsSince: VendorIncident[];
+    }>().not.toMatchTypeOf<ServiceStatus['vendor']>();
+  });
+
+});
 
 describe('contracts — optional fields reject an explicit undefined', () => {
   // tsconfig.base.json sets exactOptionalPropertyTypes: true, which makes

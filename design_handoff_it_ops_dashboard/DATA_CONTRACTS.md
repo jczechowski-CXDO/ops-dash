@@ -24,6 +24,15 @@ type SourceResult<T> = {
 When `error` is set the UI renders the panel's last good data with a stale badge, or an
 error state if there is none. It never renders zeros as if they were real.
 
+**A 2xx carrying non-JSON is an error, not data (amendment 7).** A JSON-decode failure on a
+successful status code sets `error` with `code: 'non_json_2xx'` and maps the level to
+`unknown` — it is never parsed leniently and never treated as an empty result. This is not
+defensive programming: EPC's `/api/1.4/common/groups` returns **HTTP 200 with a Zoho sign-in
+HTML page** when the token has expired, so an adapter that trusts the status code reports a
+successful poll of zero groups. It belongs in one shared helper rather than in each adapter,
+because the failure is per-transport and not per-vendor. The companion trap, also proven on
+this tenant: EPC delivers its own errors as HTTP 200 with `{"status":"error","error_code":…}`.
+
 `empty` exists because a completed fetch that returns nothing is not the same claim as a
 completed fetch that returns "healthy" (**amendment 4**). Zendesk is the sharp case: its SSP
 feed publishes no per-service status field, so an empty `incidents.json` is the only green
@@ -54,6 +63,12 @@ type ServiceId =               // amendment 3 — the seven verified vendors
   | 'zendesk'
   | 'm365';                    // Microsoft 365 / Entra ID
 
+type VendorPlatform =          // amendment 5
+  | 'statuspage'               // Jira, Helpjuice, Claude, OpenAI — one adapter, four vendors
+  | 'statusio'                 // Proofpoint / Hornetsecurity
+  | 'zendesk-ssp'              // Zendesk's own SSP feed
+  | 'msgraph';                 // M365 Service Health
+
 type VendorIncident = {        // amendment 2
   id: string;
   title: string;
@@ -81,6 +96,12 @@ type ServiceStatus = {
     incidentsSince: VendorIncident[];  // amendment 2 — everything the vendor published since our
                                        // last SUCCESSFUL poll, not a current-state diff
     lastSuccessfulPoll?: string;       // ISO 8601; the lookback anchor for incidentsSince
+    platform: VendorPlatform;          // amendment 5 — WHICH upstream this claim came from.
+                                       // Four of the seven sit behind Statuspage, so a single
+                                       // upstream failure takes four vendors to `unknown` at
+                                       // once. Without this field that reads as four
+                                       // independent unknowns; with it, the correlation engine
+                                       // can say we have lost sight of a whole platform.
   };
   ours: {
     level: StatusLevel;
@@ -123,6 +144,10 @@ pre-render SVG point strings in an adapter.
 
 ```ts
 type CheckRun = {
+  serviceId: ServiceId;        // amendment 6 — which service this run belongs to. The M1
+                               // fixtures keyed a Record by service and got away with it; a
+                               // row written to the store cannot, and neither can a query
+                               // that reads runs back across services.
   at: string;                  // ISO 8601
   check: string;               // 'Mailflow round trip'
   region: string;              // 'us-east'
@@ -355,10 +380,19 @@ only to our own store.
 | `secrets` | Secret or certificate expiring | within 14 days | 3 |
 | `stale` | Agent stale | no check-in for 21 days | 2 |
 | `legacy` | Successful legacy protocol sign-in | any occurrence | 2 |
+| `blackout` | **All vendors on one platform went `unknown` together** (amendment 8) | every service whose `vendor.platform` matches, and more than one | 2 |
 
 The `vendor` rule is the headline behavior of the product: neither signal alone opens a
 Sev1. A vendor advisory with our checks still passing is informational; our checks
 failing with no vendor advisory is a Sev2 pointing at our own network or credentials.
+
+`blackout` is the rule amendment 1 implied and did not state. Amendment 1 stops a
+Statuspage-wide failure painting Jira, Helpjuice, Claude and OpenAI green; it leaves four grey
+tiles that look like four independent unknowns. They are one upstream failure, and that is the
+more alarming fact — we are blind to four vendors and nothing says so. It is a Sev2 rather than
+a Sev1 because nothing is known to be broken: we have lost the ability to tell. It fires only
+where more than one service shares the platform, so a single `msgraph` outage stays an ordinary
+`unknown` on one tile.
 
 The vendor half of the rule is satisfied by `degraded` or `outage` **only**. `unknown` and
 `maintenance` do not satisfy it (amendment 1). A vendor at `unknown` with our check failing is
@@ -395,6 +429,17 @@ file to change first; it did. After these four, `shared/contracts.ts` is frozen.
 | 2 | `ServiceStatus.vendor` gains `maintenance`, `incidentsSince[]` and `lastSuccessfulPoll` | Blindness to anything that flaps between polls — current-state diffing alone cannot see an incident that opened and closed inside the window |
 | 3 | `ServiceStatus.id` becomes the `ServiceId` union of the seven verified vendors | Building against the handoff's placeholder list (AWS / Okta / Cloudflare / GitHub / CrowdStrike), none of which is a monitored source |
 | 4 | `SourceResult.empty` added, with the rule that consumers never infer `operational` from it | Zendesk's absent status field reading as green when in fact nothing came back |
+
+**Amended again 2026-09-19**, approved by John, before the Milestone 2 adapters were written.
+Four amendments landed in one opening rather than four, because a freeze that is opened
+casually is not one.
+
+| # | Change | Prevents |
+|---|---|---|
+| 5 | `ServiceStatus.vendor` gains `platform`, and `VendorPlatform` is added | Four vendors going `unknown` behind one Statuspage failure reading as four unrelated unknowns. Nothing could group them, so nothing could say we had lost sight of a platform |
+| 6 | `CheckRun` gains `serviceId` | A check run in the store with no way back to its service. The M1 fixtures keyed a `Record` and got away with it; a persisted row cannot |
+| 7 | The non-JSON-2xx rule is stated, with `error.code: 'non_json_2xx'` | An expired EPC token returning an HTML sign-in page under HTTP 200 being parsed as a successful poll of zero records |
+| 8 | The `blackout` rule joins section 7's table | The gap amendment 1 left: it stops the false green and raises no alarm about the blindness that replaced it |
 
 Amendment 3 note: CrowdStrike is a plausible eighth tile later — the credential and a
 `pull_falcon.py` already exist — but it is not one of the seven verified feeds, so it is not in

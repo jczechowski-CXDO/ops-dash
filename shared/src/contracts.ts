@@ -10,6 +10,12 @@ export type SourceResult<T> = {
   degraded: boolean;      // partial result (some pages/regions failed)
   empty?: boolean;        // amendment 4 — fetch completed, returned no records.
                           // NOT an assertion of health. Never infer 'operational' from it.
+  /** amendment 7 — a 2xx carrying non-JSON is an error, not data. A JSON-decode
+   *  failure on a successful status sets code 'non_json_2xx' and maps the level
+   *  to `unknown`; it is never parsed leniently and never treated as empty.
+   *  Proven on this tenant: EPC's groups endpoint returns HTTP 200 with a Zoho
+   *  sign-in page when the token has expired. One shared helper, because the
+   *  failure is per-transport and not per-vendor. */
   error?: { code: string; message: string };
 };
 
@@ -31,6 +37,16 @@ export type ServiceId =
   | 'openai'
   | 'zendesk'
   | 'm365';                    // Microsoft 365 / Entra ID
+
+/** amendment 5 — which upstream a vendor claim came from. Four of the seven
+ *  services sit behind Statuspage, so one upstream failure takes four vendors to
+ *  `unknown` at once; without this field that reads as four independent
+ *  unknowns and nothing can say we have lost sight of a whole platform. */
+export type VendorPlatform =
+  | 'statuspage'               // Jira, Helpjuice, Claude, OpenAI — one adapter, four vendors
+  | 'statusio'                 // Proofpoint / Hornetsecurity
+  | 'zendesk-ssp'              // Zendesk's own SSP feed
+  | 'msgraph';                 // M365 Service Health
 
 /** amendment 2 */
 export type VendorIncident = {
@@ -61,6 +77,7 @@ export type ServiceStatus = {
      *  not a current-state diff. */
     incidentsSince: VendorIncident[];
     lastSuccessfulPoll?: string;  // ISO 8601; the lookback anchor for incidentsSince
+    platform: VendorPlatform;     // amendment 5
   };
   ours: {
     level: StatusLevel;
@@ -79,6 +96,9 @@ export type ServiceStatus = {
 };
 
 export type CheckRun = {
+  serviceId: ServiceId;        // amendment 6 — which service this run belongs to. The M1
+                               // fixtures keyed a Record by service; a row in the store
+                               // cannot, and neither can a query reading runs back.
   at: string;                  // ISO 8601
   check: string;               // 'Mailflow round trip'
   region: string;              // 'us-east'
