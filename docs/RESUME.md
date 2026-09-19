@@ -1050,3 +1050,32 @@ it is latent rather than hypothetical: statusio has one service today so blackou
 
 msgraph is also the first adapter that needs a credential. Nothing in M1 or M2 reads one,
 and no credential path has ever been transcribed into source. Keep it that way.
+
+## A derived identifier cannot verify the logic that derives it
+
+Task 7 step 3 in the M2 plan lists five mutations and calls them "the rule's specification".
+Two engine defects live outside that list, and both survive the verification the plan names.
+A reviewer following it literally signs off on either.
+
+**The plan's mutation:** *make the incident id include a timestamp so it changes every poll.*
+**The plan's check:** correlate twice and compare ids. **It does not fail.** Both calls land in
+the same millisecond, `new Date().toISOString()` returns the same string, the ids match, green.
+The only thing that kills it is recomputing the derivation independently in the test —
+`INC-<sha256(rule\0service\0windowStart)[0:8]>` as a pinned expression — so the assertion never
+takes the code's path to the value.
+
+**The mutation the plan omits:** *make a recurrence open a brand-new incident instead of
+re-opening the existing one.* The obvious check — same id, one row — passes, because a new
+incident in the same 30-minute bucket derives the same id from the same ingredients. What kills
+it is the facts the id does not carry: `openedAt` must be the original, the timeline must still
+hold the first `opened` entry under the new `detected` one, and one case must straddle a bucket
+boundary (resolve 12:29:30, recur 12:31:00) where a re-open and a fresh incident finally differ.
+See "Same id can pass on wrong behaviour" above, which the lead reached from the integration
+side at a cost of about an hour.
+
+The general form, and it belongs with the standing rule rather than beside it: **an identifier
+computed from the state cannot be used to check the logic that computed it.** Equality of two
+derived ids proves the ingredients matched, and nothing else — not that the right branch ran,
+not that the identity was carried rather than coincidentally re-derived. Verify a derived id
+against a literal or an independent re-derivation, and verify the *behaviour* against a fact
+the id does not encode.
