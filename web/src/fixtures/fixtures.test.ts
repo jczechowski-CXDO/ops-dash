@@ -442,6 +442,58 @@ describe('no incident may cite vendor evidence for a service we cannot see', () 
   });
 });
 
+describe('the product is shown detecting something by itself', () => {
+  // Without this, a future edit could leave every incident hand-opened and the
+  // demo would quietly stop demonstrating the one thing the product claims to
+  // do. It is the positive form of the invariant above: that one only says
+  // auto-created incidents must name an enabled rule, which a fixture set with
+  // no auto-created incidents at all satisfies vacuously.
+  it('auto-creates at least one sev1 incident from an enabled rule', () => {
+    const enabled = new Set(fixtures.sev1.rules.filter((r) => r.enabled).map((r) => r.key));
+    const auto = fixtures.sev1.incidents.filter((i) =>
+      /auto-created/i.test(i.timeline.find((t) => t.kind === 'opened')?.body ?? ''),
+    );
+    expect(auto.length).toBeGreaterThanOrEqual(1);
+    for (const i of auto) expect(enabled.has(i.ruleKey)).toBe(true);
+  });
+
+  it('demonstrates the headline vendor+ours correlation specifically', () => {
+    // The product's central thesis and Milestone 2's whole deliverable: two
+    // independently sourced signals agreeing. A demo where no tile shows this
+    // rule firing is the option John considered and rejected.
+    const auto = fixtures.sev1.incidents.filter(
+      (i) =>
+        i.ruleKey === 'vendor' &&
+        /auto-created/i.test(i.timeline.find((t) => t.kind === 'opened')?.body ?? ''),
+    );
+    expect(auto.map((i) => i.id)).toEqual(['INC-2292']);
+    const svc = serviceById('sev1', auto[0]?.serviceId ?? '');
+    expect(svc?.vendor.level).toBe('degraded');
+    expect(svc?.ours.level).toBe('outage');
+  });
+
+  it('shows both detection patterns side by side', () => {
+    // One the system caught by itself from two readable signals, one a human
+    // had to open because half the evidence is unavailable. The pair is the
+    // argument for the product and for the consent request at once.
+    const sev1s = fixtures.sev1.incidents.filter((i) => i.severity === 1);
+    const bodies = sev1s.map((i) => i.timeline.find((t) => t.kind === 'opened')?.body ?? '');
+    expect(bodies.filter((b) => /auto-created/i.test(b))).toHaveLength(1);
+    expect(bodies.filter((b) => /by hand/i.test(b))).toHaveLength(1);
+  });
+
+  it('orders the alert list by severity, then newest first', () => {
+    // Pinned so a Wave 3 agent can render `bundle.incidents` as-is and get the
+    // intended order, and so a silent re-sort shows up here rather than in a
+    // screenshot diff. Recency is the tie-break because it is the only ordering
+    // the data expresses without a per-incident judgement call.
+    const rank = (sev: (typeof fixtures)['sev1']['incidents'][number]['severity']): number =>
+      sev === 'info' ? 4 : sev;
+    const keys = fixtures.sev1.incidents.map((i) => [rank(i.severity), -Date.parse(i.openedAt)]);
+    expect(keys).toEqual([...keys].sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0) || (a[1] ?? 0) - (b[1] ?? 0)));
+  });
+});
+
 describe('a disabled rule cannot have produced an incident', () => {
   it('reconciles INC-2288 with the Agent stale rule being off', () => {
     const stale = fixtures.sev1.rules.find((r) => r.key === 'stale');
