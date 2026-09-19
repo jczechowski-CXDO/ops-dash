@@ -33,6 +33,24 @@ describe('Card', () => {
     expect(onClick).toHaveBeenCalledTimes(2);
   });
 
+  it('hangs a test hook on the card itself, so no wrapper div becomes the grid item', () => {
+    // w3-overview was wrapping Card in a <div> to carry this. Under
+    // grid-template-columns: repeat(auto-fill, minmax(190px,1fr)) the wrapper
+    // becomes the grid item and the Card its child, so minmax/gap/height apply
+    // to a box the Card does not control.
+    const { container } = render(<Card data-testid="service-tile">tile</Card>);
+    const hooked = screen.getByTestId('service-tile');
+    expect(hooked).toBe(container.firstElementChild);
+    expect(hooked).toHaveStyle({ borderRadius: '12px' }); // the card itself, not a wrapper
+  });
+
+  it('emits no test hook attribute at all when none is given', () => {
+    // exactOptionalPropertyTypes makes an explicit undefined a type error; this
+    // pins the runtime half, so the prop is absent rather than "undefined".
+    const { container } = render(<Card>plain</Card>);
+    expect(container.firstElementChild!.hasAttribute('data-testid')).toBe(false);
+  });
+
   it('a non-clickable card is not announced as a control and is not focusable', () => {
     render(<Card>plain</Card>);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -51,6 +69,14 @@ describe('StatCard', () => {
   it('renders a progress bar instead of a note when given one', () => {
     render(<StatCard label="Patch compliance" value="91.4%" progress={{ value: 91, color: 'warning' }} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '91');
+  });
+
+  it('forwards its test hook to the card root rather than an inner element', () => {
+    render(<StatCard data-testid="mfa-stat" label="MFA coverage" value="94.3%" />);
+    const hooked = screen.getByTestId('mfa-stat');
+    expect(hooked).toHaveStyle({ borderRadius: '12px' });
+    expect(hooked).toHaveTextContent('MFA coverage');
+    expect(hooked).toHaveTextContent('94.3%');
   });
 
   it('renders values with tabular numerals', () => {
