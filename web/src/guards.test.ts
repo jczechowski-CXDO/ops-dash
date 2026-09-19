@@ -4,7 +4,7 @@
 // pins itself to node. Nothing here touches the DOM.
 import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // fileURLToPath, not URL.pathname: the repo path contains a space
@@ -228,5 +228,105 @@ describe('the contract test cannot become a tautology', () => {
       inDocNotInTest: missing(doc, spec),
       inTestNotInDoc: missing(spec, doc),
     }).toEqual({ inDocNotInTest: [], inTestNotInDoc: [] });
+  });
+});
+
+describe('no optional contract field is carried by a fixture and read by nothing', () => {
+  // The general form of accepted finding M-9, proposed by ops-fixtures after the
+  // same thing happened twice: a fixture gains an optional field, the view that
+  // would render it has not been written yet (or vice versa), and nothing
+  // detects the open loop. Both halves type-check, both suites are green, and
+  // the field renders in no world — so it ships unbaselined and surfaces at
+  // Milestone 2 when real data first populates it.
+  //
+  // Static on purpose. A render-based version would have to defeat formatting
+  // (an ISO timestamp becomes "4 hours"), so it would either be fragile or be
+  // weakened until it proved nothing. Asking "does any non-fixture source file
+  // read this property name" is crude, errs toward passing, and still catches
+  // the case that has now bitten twice: nothing reads it at all.
+
+  /** Optional fields deliberately unread in Milestone 1, each with its reason.
+   *  An entry here is a decision on the record, not a suppression — remove one
+   *  and the guard tells you whether it became reachable. */
+  const DELIBERATELY_UNREAD: Record<string, string> = {
+    empty: 'SourceResult envelope. No adapter exists until Milestone 2, so no fixture carries one.',
+    error: 'Same: SourceResult envelope, Milestone 2.',
+    threshold:
+      'AlertRule.threshold is the machine-readable form of the same fact AlertRule.detail states ' +
+      'in prose, and Settings renders detail. Rendering both would show one threshold twice. It ' +
+      'becomes load-bearing at Milestone 2, when the poller reads it to decide whether a rule fires.',
+  };
+
+  /** Found by this guard and NOT yet fixed. Distinct from the map above: those
+   *  are decisions, these are open findings with owners. This map should empty. */
+  const OPEN_LOOPS: Record<string, string> = {
+    advisoryId:
+      'Proofpoint carries hs-8841 and nothing renders it, so the one vendor advisory we can ' +
+      'actually read is invisible. Owner: view-service, on ServiceDetail vendor card.',
+    scheduledFor:
+      'Amendment 2 maintenance window. Helpjuice is in one and the screen cannot say when it ' +
+      'started. Owner: view-service.',
+    scheduledUntil:
+      'Same window, and the more useful half — when does it end. Owner: view-service.',
+  };
+
+  function optionalContractFields(): string[] {
+    const text = readFileSync(join(REPO, 'shared/src/contracts.ts'), 'utf8');
+    const names = [...text.matchAll(/^\s+([a-zA-Z][\w]*)\?:/gm)].map((m) => m[1]!);
+    // Also the fields declared INSIDE an optional object's inline type. This is
+    // the case that motivated the guard: `muted?: { by; until }` makes `until`
+    // required-within-optional, so it never appears as `until?:` and a
+    // top-level-only scan would miss exactly the open loop we are hunting.
+    for (const [, body] of text.matchAll(/^\s+[a-zA-Z][\w]*\?:\s*\{([^}]*)\}/gm)) {
+      for (const [, inner] of body!.matchAll(/([a-zA-Z][\w]*)\s*:/g)) names.push(inner!);
+    }
+    return [...new Set(names)];
+  }
+
+  /** Every property name present (and not undefined) anywhere in the fixtures. */
+  function namesCarriedByFixtures(node: unknown, acc = new Set<string>()): Set<string> {
+    if (Array.isArray(node)) {
+      for (const v of node) namesCarriedByFixtures(v, acc);
+    } else if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (v !== undefined) acc.add(k);
+        namesCarriedByFixtures(v, acc);
+      }
+    }
+    return acc;
+  }
+
+  it('every optional field a fixture carries is read somewhere outside the fixtures', async () => {
+    const { fixtures } = (await import('./fixtures/index.js')) as { fixtures: unknown };
+    const carried = namesCarriedByFixtures(fixtures);
+
+    // Consumers only: not the fixtures that supply the value, not the guards.
+    const consumers = src()
+      .filter((f) => !f.includes(`${sep}fixtures${sep}`))
+      .map(read)
+      .join('\n');
+
+    const unread = optionalContractFields()
+      .filter((name) => carried.has(name))
+      .filter((name) => !(name in DELIBERATELY_UNREAD))
+      .filter((name) => !(name in OPEN_LOOPS))
+      .filter((name) => !new RegExp(`\\.${name}\\b|\\[['"]${name}['"]\\]|\\b${name}:`).test(consumers));
+
+    expect(unread).toEqual([]);
+  });
+
+  it('the allowlist names real contract fields and carries a reason for each', () => {
+    // Stops the allowlist rotting into a list of names nobody revisits. It does
+    // NOT assert the fields are still unread: this matcher is name-based, and
+    // `empty` collides with PanelState's `kind: 'empty'`, so "is it referenced"
+    // cannot distinguish SourceResult.empty from an unrelated property. Claiming
+    // otherwise would be a test asserting something it cannot see — which is the
+    // failure this whole file exists to prevent. The reason strings are the
+    // control instead: each must say why, so an exemption is a decision on the
+    // record rather than a silenced failure.
+    for (const [name, reason] of Object.entries({ ...DELIBERATELY_UNREAD, ...OPEN_LOOPS })) {
+      expect(optionalContractFields()).toContain(name);
+      expect(reason.length).toBeGreaterThan(20);
+    }
   });
 });
