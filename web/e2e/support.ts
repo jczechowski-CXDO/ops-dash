@@ -193,11 +193,22 @@ export async function tabTo(page: Page, target: Locator, max = 40): Promise<void
 }
 
 /**
- * Screenshot an element WITH the margin around it. A locator screenshot clips
- * to the element's own box, and index.html draws the focus ring as
- * `outline: 2px solid var(--primary-main); outline-offset: 2px` — entirely
- * outside that box. A locator screenshot of a focused control is therefore
- * pixel-identical to the unfocused one, which would bless a missing ring.
+ * Screenshot an element WITH the margin around it.
+ *
+ * Two reasons this is not `locator.screenshot()`. It clips to the element's own
+ * box, and index.html draws the focus ring as `outline: 2px solid ...;
+ * outline-offset: 2px` — entirely outside that box, so a locator screenshot of
+ * a focused control is pixel-identical to the unfocused one and would bless a
+ * missing ring.
+ *
+ * And `page.screenshot({ clip })` clips in VIEWPORT coordinates. An element
+ * below the fold produces a clip of blank page, silently — which is exactly
+ * what happened when the service tiles grew 6px each: at 1000px the dimmed
+ * alert rows dropped past the viewport bottom and the "baseline" became an
+ * empty strip with one rounded corner in it. It was caught by looking at the
+ * image, not by the run, which is the whole argument for looking. So: scroll
+ * into view first, then refuse to capture a region that is not wholly inside
+ * the viewport.
  */
 export async function shotAround(
   page: Page,
@@ -205,15 +216,36 @@ export async function shotAround(
   name: string,
   pad = 10,
 ): Promise<void> {
-  const box = await target.boundingBox();
+  const viewport = page.viewportSize();
+  expect(viewport, 'no viewport to clip against').not.toBeNull();
+  const v = viewport!;
+  await target.scrollIntoViewIfNeeded();
+  let box = await target.boundingBox();
   expect(box, 'element has no box to screenshot').not.toBeNull();
+  // Centre it only if the padded clip would not fit where it currently sits —
+  // a row at the very bottom of the document leaves no room for the margin.
+  // Conditional on purpose: scrolling unconditionally moves every other capture
+  // relative to the sticky header and sidebar, which rewrites baselines that had
+  // nothing wrong with them.
+  if (box!.y - pad < 0 || box!.y + box!.height + pad > v.height) {
+    await target.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    box = await target.boundingBox();
+  }
   const b = box!;
-  await expect(page).toHaveScreenshot(name, {
-    clip: {
-      x: Math.max(0, b.x - pad),
-      y: Math.max(0, b.y - pad),
-      width: b.width + pad * 2,
-      height: b.height + pad * 2,
-    },
-  });
+  // Clamp the margin to the viewport rather than failing on it. What must not
+  // be clamped away is the element itself, which is asserted below.
+  const x = Math.max(0, b.x - pad);
+  const y = Math.max(0, b.y - pad);
+  const clip = {
+    x,
+    y,
+    width: Math.min(b.width + pad * 2, v.width - x),
+    height: Math.min(b.height + pad * 2, v.height - y),
+  };
+  expect(
+    b.x >= clip.x && b.y >= clip.y && b.x + b.width <= clip.x + clip.width && b.y + b.height <= clip.y + clip.height,
+    `the element is not wholly inside the clip for ${name} — the capture would be ` +
+      `partly blank page (element ${JSON.stringify(b)}, clip ${JSON.stringify(clip)})`,
+  ).toBe(true);
+  await expect(page).toHaveScreenshot(name, { clip });
 }

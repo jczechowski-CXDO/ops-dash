@@ -108,11 +108,16 @@ test.describe('interactive states', () => {
       await shotAround(page, tile, `state-tile-rest-${theme}.png`);
       await tile.hover();
       await shotAround(page, tile, `state-tile-hover-${theme}.png`);
-      // The focusable thing inside the tile is the service-name link; the Card
-      // itself carries no onClick, so it is not in the tab order. (The
-      // prototype makes the whole tile clickable — reported, not baselined.)
-      await tabTo(page, tile.getByRole('link').first());
+      // The tile itself is the control as of cc42f8f, so it is the thing that
+      // takes the focus ring. Before that, `state-tile-hover` was byte-identical
+      // to `state-tile-rest` — a 190x90 card where only the 60px name responded
+      // to a mouse, which is the argument that decided LOW-4.
+      await tabTo(page, tile);
       await shotAround(page, tile, `state-tile-focus-${theme}.png`);
+      // And the name inside it, which stays separately focusable so middle-click
+      // and open-in-new-tab survive.
+      await tabTo(page, tile.getByRole('link').first());
+      await shotAround(page, tile, `state-tile-namefocus-${theme}.png`);
     });
   }
 });
@@ -161,6 +166,26 @@ test.describe('measurements from README § "Screens / views"', () => {
     await expect(clock).toHaveCSS('font-size', '15px');
     await expect(clock).toHaveCSS('font-weight', '600');
     await expect(clock).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  });
+
+  test('the tile sparkline occupies exactly the 26px it is specified at', async ({ page }) => {
+    // README § 1, sev1 row 2: the latency sparkline is
+    // `<svg viewBox="0 0 100 26">` at `width:100%; height:26px`.
+    //
+    // The SVG is 26. Its container is 32, because an SVG is `display: inline`
+    // and the wrapper div added for `data-testid="tile-spark"` gives it a
+    // 24px line box with descender space under it. Every tile is therefore 6px
+    // taller than the spec and everything below the tile grid shifts down —
+    // 11px on the Overview, visible in the baseline diff.
+    //
+    // This is the same lesson as the comment already in Overview.tsx about the
+    // testid moving from a wrapper onto the Card: "pixel identical is not
+    // structurally identical", one level further down. `display: block` on the
+    // svg, or `line-height: 0` on the wrapper, closes it.
+    await visit(page, '/', 'sev1', 'light');
+    const spark = page.getByTestId('tile-spark').first();
+    const box = await spark.boundingBox();
+    expect(box?.height).toBe(26);
   });
 
   test('the severity chip is 52x22 at radius 6', async ({ page }) => {

@@ -16,17 +16,54 @@ test('the sidebar navigates and marks the destination current', async ({ page })
   await expect(page.getByRole('link', { name: /^Overview/ })).not.toHaveAttribute('aria-current', 'page');
 });
 
-test('a service tile opens the service it names', async ({ page }) => {
+test('a service tile opens the service it names, from anywhere on the tile', async ({ page }) => {
+  // The whole tile is the click target as of cc42f8f, matching the prototype's
+  // `<div onClick>`. Click the tile BODY rather than the name, because the body
+  // is the part that was dead before and the part no other test covers.
   await visit(page, '/', 'sev1', 'light');
   const tile = page.getByTestId('service-tile').first();
   // Read the name off the tile first. Asserting a hard-coded id would pass even
-  // if every tile linked to the same wrong service.
-  const link = tile.getByRole('link').first();
-  const name = (await link.innerText()).trim();
+  // if every tile navigated to the same wrong service.
+  const name = (await tile.getByRole('link').first().innerText()).trim();
   expect(name.length).toBeGreaterThan(0);
-  await link.click();
+  await tile.getByTestId('tile-spark').click();
   await expect(page).toHaveURL(/\/services\/[a-z0-9]+/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText(name);
+});
+
+test('a service tile is operable from the keyboard', async ({ page }) => {
+  // Card takes role="button" and tabIndex 0 when it has an onClick, so Enter
+  // and Space must work. Role and tabindex without a key handler is the classic
+  // half-fix, so press the key rather than reading the markup.
+  await visit(page, '/', 'sev1', 'light');
+  const tile = page.getByTestId('service-tile').first();
+  await tile.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/services\/[a-z0-9]+/);
+});
+
+test('the service name is a real link, and clicking it navigates exactly once', async ({ page }) => {
+  // Two claims that pull against each other, which is why they are asserted
+  // together.
+  //
+  // The name stays an <a href> so middle-click and "open in new tab" survive —
+  // a bare div with an onClick would pass every click test while silently
+  // removing both.
+  //
+  // But the tile around it now navigates too, so a click on the name bubbles to
+  // the Card and BOTH handlers fire. Measured: history.length goes 2 -> 4 on one
+  // click, and a single Back press leaves you on the same page. To a user the
+  // Back button is broken. One click is one navigation.
+  await visit(page, '/', 'sev1', 'light');
+  const link = page.getByTestId('service-tile').first().getByRole('link').first();
+  await expect(link).toHaveAttribute('href', /^\/services\//);
+  const before = await page.evaluate(() => history.length);
+  await link.click();
+  await expect(page).toHaveURL(/\/services\/[a-z0-9]+/);
+  const after = await page.evaluate(() => history.length);
+  expect(after - before, 'one click on the service name pushed more than one history entry').toBe(1);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/\?demo=sev1$/);
 });
 
 test('a status pill opens the service it names, in quiet', async ({ page }) => {
