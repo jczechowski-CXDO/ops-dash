@@ -26,12 +26,24 @@ git clone <remote> && cd ops-dash
 git checkout milestone-1-scaffold
 npm install
 npm run typecheck     # must exit 0
-npm run build         # must exit 0
-npm test              # runs both projects; no test files yet — correct at Task 1
+npm run build         # must exit 0 (warns that /aurora/styles.css is missing — Task 3 adds it)
+npm test              # exits 1, "No test files found" — correct until Task 2
 ```
 
-Requires **Node >= 24.14.1** (the floor exists because `node:sqlite` is a Node 24 built-in,
-used from Milestone 2). Verified on Node v24.14.1 / npm 11.11.0.
+**`npm test` exiting 1 right now is expected and is deliberately not suppressed.** There are no
+tests yet. From Task 2 onward, a run that finds no tests is a real failure — a glob that stops
+matching would otherwise show green while asserting nothing, which is precisely the failure
+mode defect G-2 below was about. Chain the three with `;` not `&&` until the first test lands.
+
+**Node.** `package.json` requires `>=24.14.1`; npm warns `EBADENGINE` below that. Milestone 1
+genuinely builds and tests on Node 22 — nothing in it needs 24. **Milestone 2 is a hard stop**:
+the store is `node:sqlite`, a Node 24 built-in. Install Node 24 before starting M2, and do not
+lower the floor to silence the warning. Verified on v24.14.1 / npm 11.11.0 (Windows) and
+v22.22.3 / npm 11.17.0 (Linux, builds clean with the engine warning).
+
+**Dependency audit.** `npm audit --omit=dev` reports **0** — that is the check Task 11A runs.
+A plain `npm audit` reports 2 moderate, both dev-only in `vitest`. Do not `npm audit fix
+--force`; it installs vitest 5 as a breaking change mid-build.
 
 Linux notes:
 

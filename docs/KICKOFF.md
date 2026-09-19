@@ -8,16 +8,43 @@ Two steps: get the repo running, then paste the prompt into Claude Code.
 git clone https://github.com/jczechowski-CXDO/ops-dash.git
 cd ops-dash
 git checkout milestone-1-scaffold
-node --version            # must be >= 24.14.1
+node --version
 npm install
-npm run typecheck && npm run build && npm test
+npm run typecheck        # must exit 0
+npm run build            # must exit 0
+npm test                 # see note — exits 1 until Task 2, and that is correct
 ```
 
-The three verification commands must all exit 0. `npm test` reporting "no test files" is
-correct at this point — Task 1 wrote no tests.
+Three things you will see on a fresh box, all expected:
 
-If `node --version` is below 24.14.1, install Node 24 before going further. The floor is real:
-`node:sqlite` is a Node 24 built-in and Milestone 2 depends on it.
+1. **`npm test` exits 1 with "No test files found".** There are no tests yet — Task 1 wrote
+   none. Do not "fix" this with `passWithNoTests`: from Task 2 onward a zero-test run is a real
+   failure signal, and silencing it is how a suite goes green while asserting nothing. Chain the
+   three commands with `;` rather than `&&` until the first test lands.
+2. **`vite build` says `/aurora/styles.css doesn't exist at build time`.** Correct — Task 3
+   creates it. The warning disappears once the Aurora tokens are copied into `web/public/`.
+3. **`npm audit` reports 2 moderate.** Both are dev-only, in `vitest`. `npm audit --omit=dev`
+   reports **0**, which is the check the plan's Task 11A actually runs. Do not `npm audit fix
+   --force` — it would install vitest 5 as a breaking change mid-build.
+
+**Node version.** `package.json` requires `>=24.14.1` and npm will warn `EBADENGINE` on
+anything lower. Milestone 1 does in fact build and test on Node 22 — nothing in it needs 24 —
+so a warning is not a blocker today. **Milestone 2 is a hard stop**, because the store is
+`node:sqlite`, a Node 24 built-in. Install Node 24 now rather than discovering this later:
+
+```bash
+# nvm
+nvm install 24 && nvm use 24
+# or Debian/Ubuntu via NodeSource
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs
+```
+
+Do not lower the `engines` floor to silence the warning. The floor is correct; the environment
+is what is behind.
+
+**If `vite build` ever fails with a missing esbuild binary** — newer npm gates install scripts,
+and you may see `allow-scripts: esbuild@0.28.2 (postinstall)`. It resolved on its own here, but
+if it does not: `npm approve-scripts esbuild` then `npm install`.
 
 ## 2. Paste into Claude Code
 
