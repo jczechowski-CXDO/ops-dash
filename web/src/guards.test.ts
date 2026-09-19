@@ -31,6 +31,11 @@ function walk(dir: string, exts: string[], acc: string[] = []): string[] {
 // shapes, '[data-theme='), so without this exclusion each guard fails on its
 // own source. It ships in no bundle and renders nothing.
 const SELF = join(WEB, 'src', 'guards.test.ts');
+const SERVER = join(REPO, 'server');
+/** Every .ts under server/src. Milestone 2 added a workspace whose whole job is
+ *  to make network calls, so the guards below split: the web must make none,
+ *  the server must make them ONLY through its one helper. */
+const serverSrc = () => walk(join(SERVER, 'src'), ['.ts']);
 const src = () =>
   // Anchored to this exact path, not endsWith: the old form exempted ANY
   // web/src/**/guards.test.ts from every guard, so a new file with that name
@@ -109,7 +114,10 @@ describe('nothing reaches off-box', () => {
 
 describe('no credentials, ever', () => {
   it('no credential path or secret-shaped key in the repo source', () => {
-    const files = [...src(), ...walk(join(REPO, 'shared'), ['.ts'])];
+    // server/src included from Milestone 2. It holds no credential today and
+    // must hold none in M3 either — the adapters read from disk at runtime, and
+    // the PATHS are what must never be transcribed here.
+    const files = [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc()];
     const pattern = /C:\\+secure|cert\.pem|refresh_token|client_secret|api_key|Zoho-oauthtoken|BEGIN (RSA )?PRIVATE KEY/i;
     const offenders = files.filter((f) => pattern.test(read(f)));
     expect(offenders.map(rel)).toEqual([]);
@@ -432,5 +440,45 @@ describe('no background token is blind to the theme', () => {
     expect(aware.size).toBeGreaterThan(50);
     expect(aware.has('--text-primary')).toBe(true);        // a role: overridden
     expect(aware.has('--grey-grey-100')).toBe(false);      // a ramp value: not
+  });
+});
+
+
+describe('the server talks to the network only through its one helper', () => {
+  // The web must make no network call at all; the server exists to make them.
+  // So the rule inverts rather than extends: every outbound call goes through
+  // src/http/fetchJson.ts, which is where all four failure rules live —
+  // non-2xx, non-JSON-under-2xx, empty, and network error. An adapter calling
+  // `fetch` directly has bypassed every one of them, and the most likely
+  // symptom is an expired token's HTML error page being reported as a
+  // successful poll of zero records. That has happened on this tenant.
+  const HELPER = join(SERVER, 'src', 'http', 'fetchJson.ts');
+
+  /** A thin reachability probe is allowed its own request, because it must NOT
+   *  parse a body — but it has to say so at the call site, so the exemption is
+   *  a decision on the record rather than a bypass nobody noticed. */
+  const EXEMPT_MARKER = 'deliberately not fetchJson';
+
+  it('no bare fetch outside the helper', () => {
+    const offenders: string[] = [];
+    for (const file of serverSrc()) {
+      if (file === HELPER) continue;
+      stripComments(read(file))
+        .split('\n')
+        .forEach((line, i) => {
+          if (/\bfetch\s*\(/.test(line) && !read(file).includes(EXEMPT_MARKER)) {
+            offenders.push(`${rel(file)}:${i + 1}  ${line.trim()}`);
+          }
+        });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('this guard is watching a directory that exists', () => {
+    // Without this it passes vacuously while server/src is empty, and keeps
+    // passing if the directory is ever moved or renamed — which is the shape
+    // of half the defects this file was written to catch.
+    expect(existsSync(join(SERVER, 'src'))).toBe(true);
+    expect(serverSrc().length).toBeGreaterThan(0);
   });
 });
