@@ -13,10 +13,12 @@ import {
   statusColor,
 } from '../theme/statusColor.js';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
+import { clockOf } from '../fixtures/time.js';
 import Overview, {
   StatusStrip,
   alertSummary,
   listState,
+  muteCredit,
   statusPhrase,
   statusTally,
   stripOverline,
@@ -637,5 +639,57 @@ describe('a muted row says who silenced it', () => {
     const row = rowOf(acked.id);
     expect(row).toHaveTextContent(`Acknowledged by ${acked.ack!.by}`);
     expect(row).toHaveTextContent('Muted by John H.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ... and when it comes back: muted.until, both branches
+// ---------------------------------------------------------------------------
+
+describe('a muted row says when the silence expires', () => {
+  const mutedIncident = sev1.incidents.find((i) => i.muted)!;
+  const rowOf = (id: string) =>
+    screen.getAllByTestId('alert-row')[sev1.incidents.findIndex((i) => i.id === id)]!;
+
+  it('the fixture carries a TIMED mute, which is the case that renders', () => {
+    // Positive claim, not a branch: if ops-fixtures reverts `until` to null this
+    // file goes red rather than quietly asserting the other branch.
+    expect(mutedIncident.muted!.until).toBeTruthy();
+    expect(new Date(mutedIncident.muted!.until!).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('renders the expiry on the row, in the repository HH:MM idiom', () => {
+    at();
+    expect(rowOf(mutedIncident.id)).toHaveTextContent(
+      `Muted by ${mutedIncident.muted!.by} until ${clockOf(mutedIncident.muted!.until!)}`,
+    );
+  });
+
+  it('says only who, for an indefinite mute', () => {
+    // The `until: null` branch has no fixture by design — the timed case won
+    // that slot — so it is asserted here, through the pure function.
+    expect(muteCredit({ by: 'j.hart@example.com', until: null }, 'John H.')).toBe(
+      'Muted by j.hart@example.com',
+    );
+  });
+
+  it('says only who, for a mute taken here and now', () => {
+    expect(muteCredit(undefined, 'John H.')).toBe('Muted by John H.');
+  });
+
+  it('names the actor the data gives, with the expiry the data gives', () => {
+    const until = new Date(Date.UTC(2026, 8, 19, 18, 30)).toISOString();
+    expect(muteCredit({ by: 'j.hart@example.com', until }, 'John H.')).toBe(
+      `Muted by j.hart@example.com until ${clockOf(until)}`,
+    );
+  });
+
+  it('a mute taken by clicking carries no expiry', () => {
+    at();
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Mute' }));
+    const after = screen.getAllByTestId('alert-row')[0]!;
+    expect(after).toHaveTextContent('Muted by John H.');
+    expect(after).not.toHaveTextContent('Muted by John H. until');
   });
 });

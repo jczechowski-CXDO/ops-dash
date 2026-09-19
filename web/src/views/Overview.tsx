@@ -20,6 +20,10 @@ import {
 } from '../theme/statusColor.js';
 import { srOnly } from '../theme/srOnly.js';
 import type { HistoryRow } from '../fixtures/index.js';
+// The repository's one HH:MM formatter, already used by ServiceDetail and
+// IncidentDetail for "Opened {HH:MM}". A mute expiry is a wall-clock instant of
+// the same kind, so it takes the same idiom rather than a third one.
+import { clockOf } from '../fixtures/time.js';
 
 /**
  * The actor credited for an action taken HERE, by clicking, as in the prototype.
@@ -132,6 +136,29 @@ export function stripOverline(services: ServiceStatus[]): string {
 export function alertSummary(open: Incident[]): string {
   const sev = (s: 1 | 2 | 3) => open.filter((i) => i.severity === s).length;
   return `${open.length} open · ${sev(1)} Sev1 · ${sev(2)} Sev2 · ${sev(3)} Sev3`;
+}
+
+/**
+ * Who silenced this alert, and when it comes back.
+ *
+ * Both halves, because a mute that does not say when it expires is a mute
+ * somebody has to remember. `until` is `string | null` in the contract and the
+ * two cases mean different things: a timed mute ("silence this for four hours",
+ * which is what Milestone 2 will mostly write) and an indefinite one, silenced
+ * until a person unmutes it. Rendering only the actor collapsed that
+ * distinction; rendering "until null" would be worse.
+ *
+ * A pure function rather than an inline ternary, so BOTH branches can be
+ * asserted: only one of them has a fixture, and the indefinite case would
+ * otherwise be reachable in no test at all — the shape M-9 was about.
+ *
+ * The local-click case passes `undefined`, which is correct rather than a
+ * fallback: a mute taken here and now has no expiry until Milestone 4 gives the
+ * control one.
+ */
+export function muteCredit(muted: Incident['muted'], actor: string): string {
+  const by = muted?.by ?? actor;
+  return muted?.until ? `Muted by ${by} until ${clockOf(muted.until)}` : `Muted by ${by}`;
 }
 
 /** An empty list is a designed state, not a blank area. */
@@ -328,7 +355,7 @@ function AlertRow({
   const credits: string[] = [];
   if (state.resolved) credits.push(`Resolved by ${ACTOR}`);
   else if (state.ack) credits.push(`Acknowledged by ${incident.ack?.by ?? ACTOR}`);
-  if (state.muted) credits.push(`Muted by ${incident.muted?.by ?? ACTOR}`);
+  if (state.muted) credits.push(muteCredit(incident.muted, ACTOR));
   const meta = [...credits, ...incident.metaParts];
 
   return (
