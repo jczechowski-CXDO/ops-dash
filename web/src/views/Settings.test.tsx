@@ -198,41 +198,61 @@ describe('Settings · an integration row says what its state means', () => {
   });
 
   // G3 measured the needs-auth pill at 4.09:1 in light, under the 4.5 AA bar,
-  // with README § 7's `-dark` on `-lighter`. jsdom cannot resolve var() against
-  // the token sheet — a contrast assertion here would be the jsdom-contrast
-  // decoration this project has already been caught by once. So what is pinned
-  // is the INVARIANT the Chromium measurement blessed: one rung pair, the same
-  // for all four states, family-matched. A state reverted to `-dark`, or a pill
-  // whose text and background come from different families, fails here.
-  it('pairs -darker text with -lighter fill, identically for all four states', () => {
-    // All four, including `error`, which no fixture carries — a state whose
-    // colours nothing renders is a state nobody can measure.
-    const all: Integration[] = (
-      [
-        ['connected', 'Connected'],
-        ['polling', 'Polling 60s'],
-        ['needs_auth', 'Needs auth'],
-        ['error', 'Unreachable'],
-      ] as const
-    ).map(([state, stateLabel], i) => ({
-      key: `probe-${i}`,
-      name: `Probe ${i}`,
-      detail: 'synthetic row',
-      state,
-      stateLabel,
-      lastSuccessAt: new Date().toISOString(),
-    }));
+  // with README § 7's `-dark` on `-lighter`; the published pair moved all four
+  // states to `-darker`. Two things are deliberately NOT asserted here. Not the
+  // ratios: jsdom cannot resolve var() against the token sheet, and a contrast
+  // assertion under jsdom is the decoration this project has been caught by
+  // already. And not `pill.background === integrationFillColor(state)`, which
+  // would be the helper compared with itself.
+  //
+  // What is asserted is the meaning, written out by hand, because a contrast
+  // test never fails for a wrong-but-legible colour: `polling` in the success
+  // family is perfectly readable and reads as `connected` — the same wrong-green
+  // two gates were spent removing from the data layer.
+  const EXPECTED_FAMILY = {
+    connected: 'success',
+    polling: 'info',
+    needs_auth: 'warning',
+    error: 'error',
+  } as const satisfies Record<Integration['state'], string>;
 
-    at({ integrations: all });
-    const families = new Set<string>();
-    for (const pill of screen.getAllByTestId('integration-state')) {
+  // All four states, including `error`, which no fixture carries — a state whose
+  // colours nothing renders is a state nobody can check.
+  const oneOfEach: Integration[] = (
+    [
+      ['connected', 'Connected'],
+      ['polling', 'Polling 60s'],
+      ['needs_auth', 'Needs auth'],
+      ['error', 'Unreachable'],
+    ] as const
+  ).map(([state, stateLabel], i) => ({
+    key: `probe-${i}`,
+    name: `Probe ${i}`,
+    detail: 'synthetic row',
+    state,
+    stateLabel,
+    lastSuccessAt: new Date().toISOString(),
+  }));
+
+  it('gives each state the family its meaning demands, and nothing green but connected', () => {
+    at({ integrations: oneOfEach });
+    const pills = screen.getAllByTestId('integration-state');
+    expect(pills).toHaveLength(oneOfEach.length);
+
+    pills.forEach((pill, i) => {
+      const state = oneOfEach[i]!.state;
+      const family = EXPECTED_FAMILY[state];
       const { color, background } = (pill as HTMLElement).style;
-      const family = /^var\(--([a-z]+)-darker\)$/.exec(color)?.[1];
-      expect(family, `text colour was ${color}`).toBeDefined();
-      expect(background).toBe(`var(--${family}-lighter)`);
-      families.add(family!);
-    }
-    expect(families.size).toBe(all.length);
+      expect(background, `${state} fill`).toBe(`var(--${family}-lighter)`);
+      expect(color, `${state} text`).toBe(`var(--${family}-darker)`);
+      // The wrong-green rule, stated independently of the table above: an
+      // integration that is not connected must not borrow the success family.
+      expect(state === 'connected' || !`${background}${color}`.includes('success')).toBe(true);
+    });
+
+    // Four states, four families: a collision is how needs_auth renders as
+    // connected without any single row looking wrong.
+    expect(new Set(pills.map((p) => (p as HTMLElement).style.background)).size).toBe(4);
   });
 });
 

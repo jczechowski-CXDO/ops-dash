@@ -5,6 +5,7 @@ import { SectionHeading } from '../components/SectionHeading.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 import { Switch } from '../components/aurora/Switch.js';
 import { ageLabel } from '../theme/ageLabel.js';
+import { integrationFillColor, integrationOnFillColor } from '../theme/statusColor.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 
 /**
@@ -24,16 +25,20 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
  */
 
 /**
- * Total over `Integration['state']`: adding a state stops this compiling rather
- * than rendering a pill with no colour. `error` gets the token pair the README's
- * list stops short of, because the contract's union includes it.
+ * The pill colours come from the published pair in `theme/statusColor.ts` —
+ * `integrationFillColor` (-lighter) and `integrationOnFillColor` (-darker) —
+ * which is total over `Integration['state']`, so a new state fails to compile
+ * there rather than rendering colourless here. This view had its own map until
+ * `ops-primitives` published that pair; the local copy is gone.
  *
- * **One rung pair for all four states: `-darker` on `-lighter`.** README § 7
- * specifies `-dark` on `-lighter`, and that pairing does not clear WCAG AA at
- * 11px/700. Measured in Chromium against the production build, `document.fonts
- * .ready` awaited, background resolved by ancestor walk (need 4.5):
+ * The evidence for the rung choice stays here, where the badge is rendered.
+ * README section 7 specifies -dark on -lighter, and that pairing does not clear
+ * WCAG AA at the 11px/700 the same section mandates. Measured in Chromium
+ * against the production build, `document.fonts.ready` awaited, background
+ * resolved by ancestor walk (need 4.5) — and independently reproduced by
+ * `ops-primitives` from the token sheet, agreeing to two decimals:
  *
- *            README `-dark` on `-lighter`      this file, `-darker` on `-lighter`
+ *            README `-dark` on `-lighter`      published, `-darker` on `-lighter`
  *            light        dark                 light        dark
  *   success  5.53         5.49                 10.54        6.87
  *   info     4.65         5.60                  9.57        6.78
@@ -41,23 +46,15 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
  *   error    5.50         4.81                 11.79        6.68
  *
  * Only `warning` failed, and `warning` is the needs-auth pill — the row that
- * explains why the m365 tile is Unknown. It is fixed by moving the whole map one
- * rung rather than special-casing one state: four states treated as one system
- * is the entire point of this table, a mixed rung leaves the next state added
- * with no rule to follow, and `info` at 4.65 was a rounding error from failing
- * too. The worst pair in the table is now 6.68. Both values are published
- * Aurora tokens; no literal and no hand-picked colour enters this file.
+ * explains why the m365 tile is Unknown. All four states moved together rather
+ * than special-casing one: `info` at 4.65 was a rounding error from failing too.
  *
- * jsdom cannot resolve `var()`, so no test below proves those ratios — what the
- * tests pin is the invariant that produced them: every state pairs `-darker`
- * with `-lighter` of the same family, and no two states share a family.
+ * A contrast assertion cannot police this call site. Every family is legible at
+ * -darker on -lighter, so a pill handed the wrong state — `polling` rendering
+ * green and reading as `connected` — measures perfectly and is still false.
+ * What the tests below pin is therefore semantic: which family each state gets,
+ * that only `connected` may read as green, and that no two states collide.
  */
-const PILL: Record<Integration['state'], { bg: string; fg: string }> = {
-  connected: { bg: 'var(--success-lighter)', fg: 'var(--success-darker)' },
-  polling: { bg: 'var(--info-lighter)', fg: 'var(--info-darker)' },
-  needs_auth: { bg: 'var(--warning-lighter)', fg: 'var(--warning-darker)' },
-  error: { bg: 'var(--error-lighter)', fg: 'var(--error-darker)' },
-};
 
 const row: CSSProperties = {
   display: 'grid',
@@ -90,7 +87,6 @@ function List({ children }: { children: ReactNode }) {
 }
 
 function IntegrationRow({ integration }: { integration: Integration }) {
-  const pill = PILL[integration.state];
   // `lastSuccessAt` is optional and genuinely absent on the feed that has never
   // authenticated. That absence is the finding, so it is rendered as an absence
   // — not as an age, and never as the unknown-age sentinel, which would read as
@@ -123,8 +119,8 @@ function IntegrationRow({ integration }: { integration: Integration }) {
           fontSize: 11,
           fontWeight: 700,
           whiteSpace: 'nowrap',
-          background: pill.bg,
-          color: pill.fg,
+          background: integrationFillColor(integration.state),
+          color: integrationOnFillColor(integration.state),
         }}
       >
         {integration.stateLabel}
