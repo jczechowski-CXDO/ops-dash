@@ -73,9 +73,32 @@ describe('the probe list', () => {
     const zendesk = DEFAULT_PROBES.filter((p) => p.serviceId === 'zendesk');
     expect(zendesk).toHaveLength(2);
     expect(zendesk.map((p) => p.url).sort()).toEqual([
-      'https://crexendo.zendesk.com',
-      'https://help.netsapiens.com',
+      'https://help.netsapiens.com/api/v2/help_center/en-us/categories.json',
+      'https://support.crexendo.com/api/v2/help_center/en-us/categories.json',
     ]);
+  });
+
+  it('probes the help-centre API, never a pod root behind the bot challenge', () => {
+    // The hand-run measured both pod roots answering 403 `cf-mitigated:
+    // challenge` to any automated client, forever. A probe pointed there scores
+    // Cloudflare's opinion of us, not Zendesk's health, and would have pinned
+    // the tile red from day one. Assert the positive — every Zendesk probe
+    // names the API path — rather than the negative "is not the root", which a
+    // third wrong hostname would satisfy.
+    for (const p of DEFAULT_PROBES.filter((p) => p.serviceId === 'zendesk')) {
+      expect(p.url).toMatch(/\/api\/v2\/help_center\//);
+    }
+  });
+
+  it('expects 401 from the restricted pod, because that is its healthy answer', () => {
+    // Measured 2026-09-19, stable over three rounds: crexendo 200, netsapiens
+    // 401 (`Couldn't authenticate you` — sign-in restricted help centre).
+    // Zendesk reaching the point of refusing us is Zendesk being up. Scored
+    // against `response.ok` this probe fails forever, which arms half the
+    // `vendor` Sev1 condition permanently.
+    const byCheck = Object.fromEntries(DEFAULT_PROBES.map((p) => [p.check, p]));
+    expect(byCheck['Zendesk pod: netsapiens']?.expectStatus).toBe(401);
+    expect(byCheck['Zendesk pod: crexendo']?.expectStatus).toBeUndefined();
   });
 
   it('runs one region only in this milestone, and every target is HTTPS', async () => {
@@ -88,7 +111,18 @@ describe('the probe list', () => {
     // passes is worse than no probe, because the correlation rule would read
     // it as an affirmative "our side is fine".
     expect(DEFAULT_PROBES.map((p) => p.serviceId)).toEqual([
-      'zendesk', 'zendesk', 'jira', 'helpjuice',
+      'zendesk', 'zendesk', 'helpjuice',
     ]);
+  });
+
+  it('carries no Jira probe either — the tenant hostname is not known', () => {
+    // `crexendo.atlassian.net` was derived from the tenant pattern and the
+    // hand-run found it answers 404 on every path. Same reasoning as M365, from
+    // the other direction: a probe pointed at a host that does not exist
+    // reports `fail` forever, and a permanently-failing our-side check turns
+    // the first flicker on Atlassian's status page into a Sev1. Jira keeps its
+    // vendor half, which is live and correct, and renders "no check" for ours —
+    // which is true. Delete this test when John supplies the real hostname.
+    expect(DEFAULT_PROBES.filter((p) => p.serviceId === 'jira')).toEqual([]);
   });
 });

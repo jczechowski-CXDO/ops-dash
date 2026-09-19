@@ -10,22 +10,62 @@ import { runProbe, type ProbeSpec } from './probe.js';
  * probe that always passes is worse than no probe, because the correlation
  * rule would read it as an affirmative "our side is fine".
  *
- * **Zendesk is one service with two probes.** `crexendo.zendesk.com` and
- * `help.netsapiens.com` are two pods of one tile, confirmed by John
- * 2026-09-19; `ServiceId` is unchanged and a tile reading `1/2 passing` when
- * one pod is down is the intended rendering, not a bug. Which is why the probe
- * list is a flat array keyed by `check` rather than a map keyed by service.
+ * **Zendesk is one service with two probes.** The crexendo and netsapiens pods
+ * are two pods of one tile, confirmed by John 2026-09-19; `ServiceId` is
+ * unchanged and a tile reading `1/2 passing` when one pod is down is the
+ * intended rendering, not a bug. Which is why the probe list is a flat array
+ * keyed by `check` rather than a map keyed by service.
+ *
+ * **The URLs below are the ones the hand-run proved, not the obvious ones.**
+ * Task 9 step 4 ran every probe against the live internet on 2026-09-19 and
+ * three of the four original targets failed — none of them because the vendor
+ * was unwell:
+ *
+ *   - Both Zendesk pod roots sit behind a Cloudflare bot challenge that answers
+ *     `403 cf-mitigated: challenge` to any automated client, forever. Probing
+ *     them measures Cloudflare's opinion of us, not Zendesk's health. The help
+ *     centre API underneath the challenge answers honestly and fast, so that is
+ *     what we probe.
+ *   - `crexendo.atlassian.net` answered 404 on every path tried. The hostname
+ *     was a guess derived from the tenant pattern and the guess was wrong.
+ *
+ * The lesson is the one this product is about: a probe that cannot pass is
+ * worse than no probe, because it teaches the operator that red means nothing.
  */
 export const DEFAULT_PROBES: ProbeSpec[] = [
-  // Confirmed by John, 2026-09-19.
-  { serviceId: 'zendesk', check: 'Zendesk pod: crexendo', url: 'https://crexendo.zendesk.com', region: 'us-east' },
-  { serviceId: 'zendesk', check: 'Zendesk pod: netsapiens', url: 'https://help.netsapiens.com', region: 'us-east' },
-  // UNCONFIRMED tenant hostnames: derived from the Crexendo tenant pattern the
-  // two Zendesk pods follow, not from anything anyone told us. Task 9 step 4 —
-  // the one hand-run against the real internet — is where these are proven or
-  // corrected, and they must not reach a live poller before then.
-  { serviceId: 'jira', check: 'Jira Cloud tenant', url: 'https://crexendo.atlassian.net', region: 'us-east' },
-  { serviceId: 'helpjuice', check: 'Helpjuice knowledge base', url: 'https://crexendo.helpjuice.com', region: 'us-east' },
+  // Measured 2026-09-19: 200 JSON in ~190ms. The public help-centre API, which
+  // is not behind the challenge the pod root is behind, and which exercises
+  // Zendesk's application tier rather than its CDN edge.
+  {
+    serviceId: 'zendesk',
+    check: 'Zendesk pod: crexendo',
+    url: 'https://support.crexendo.com/api/v2/help_center/en-us/categories.json',
+    region: 'us-east',
+  },
+  // Measured 2026-09-19: 401 JSON in ~150ms, every time. This pod's help centre
+  // is sign-in restricted, so 401 IS its healthy answer — see `expectStatus`.
+  // Zendesk reaching the point of refusing us is Zendesk being up.
+  {
+    serviceId: 'zendesk',
+    check: 'Zendesk pod: netsapiens',
+    url: 'https://help.netsapiens.com/api/v2/help_center/en-us/categories.json',
+    region: 'us-east',
+    expectStatus: 401,
+  },
+  // Measured 2026-09-19: 200 in ~435ms. The tenant-pattern guess, confirmed.
+  {
+    serviceId: 'helpjuice',
+    check: 'Helpjuice knowledge base',
+    url: 'https://crexendo.helpjuice.com',
+    region: 'us-east',
+  },
+  // NO JIRA PROBE. `crexendo.atlassian.net` was a guess and it answers 404 on
+  // every path, so Jira's tile carries the vendor half only until John gives us
+  // the real tenant hostname. That is deliberate and it is the honest option:
+  // a probe pointed at a host that does not exist would report `fail` forever,
+  // and under the `vendor` rule a permanently-failing our-side check means the
+  // first flicker on Atlassian's status page opens a Sev1. An absent probe
+  // renders as "no check", which is true. A wrong probe renders as a lie.
 ];
 
 /** Injected only by the isolation test. A probe that rejects cannot be

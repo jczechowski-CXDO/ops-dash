@@ -5,7 +5,7 @@ import { fetchJson, type FetchLike } from '../../http/fetchJson.js';
 const SPEC: ProbeSpec = {
   serviceId: 'zendesk',
   check: 'Zendesk pod: crexendo',
-  url: 'https://crexendo.zendesk.com',
+  url: 'https://support.crexendo.com/api/v2/help_center/en-us/categories.json',
   region: 'us-east',
 };
 
@@ -36,6 +36,58 @@ const neverAnswers = (): { impl: FetchLike; signal: () => AbortSignal | undefine
 };
 
 describe('runProbe — reachability, and the three diagnoses it can return', () => {
+  describe('expectStatus — when the healthy answer is not a 2xx', () => {
+    // Forced by the real estate: `help.netsapiens.com`'s help-centre API answers
+    // 401 every time because the centre is sign-in restricted. That 401 is
+    // Zendesk's application tier responding, in ~150ms, exactly as it always
+    // does. Under `response.ok` it is a permanent `fail`.
+    const restricted: ProbeSpec = { ...SPEC, expectStatus: 401 };
+
+    it('passes on the named status', async () => {
+      const run = await runProbe(restricted, after(0, res(401)));
+      expect(run.result).toBe('pass');
+      expect(run.latencyMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('fails on a 2xx when 401 is what healthy looks like', async () => {
+      // Both directions, deliberately. A restricted help centre that started
+      // answering 200 has been opened to the world — still a change worth
+      // hearing about, and emphatically not something to score as healthy just
+      // because 200 is generically good.
+      expect((await runProbe(restricted, after(0, res(200)))).result).toBe('fail');
+    });
+
+    it('fails on a different error status — 401 is not "any non-2xx"', async () => {
+      // The mutation that matters. `expectStatus` must be an equality test, not
+      // a licence for every failure: a 403 challenge or a 500 from this host is
+      // a real fail, and a predicate that merely tolerated non-2xx would score
+      // Zendesk healthy while it burned.
+      for (const status of [403, 404, 429, 500, 503]) {
+        expect((await runProbe(restricted, after(0, res(status)))).result).toBe('fail');
+      }
+    });
+
+    it('leaves the ordinary rule alone when no status is named', async () => {
+      // The default path must not have moved. Every 2xx still passes and every
+      // non-2xx still fails for a spec that names nothing.
+      for (const status of [200, 201, 204, 299]) {
+        expect((await runProbe(SPEC, after(0, res(status)))).result).toBe('pass');
+      }
+      for (const status of [301, 401, 403, 404, 500]) {
+        expect((await runProbe(SPEC, after(0, res(status)))).result).toBe('fail');
+      }
+    });
+
+    it('still calls our deadline a timeout, not an unexpected status', async () => {
+      // A spec that expects 401 and gets nothing at all has not been refused —
+      // it has been unreachable, and the diagnoses stay distinct.
+      const { impl } = neverAnswers();
+      const run = await runProbe({ ...restricted, timeoutMs: 10 }, impl);
+      expect(run.result).toBe('timeout');
+      expect(run.latencyMs).toBeNull();
+    });
+  });
+
   it('a 2xx is a pass carrying a measured latency', async () => {
     const run = await runProbe(SPEC, after(0, res(200)));
     expect(run.result).toBe('pass');
@@ -130,7 +182,7 @@ describe('runProbe — reachability, and the three diagnoses it can return', () 
         text: async () => html,
       }) as unknown as Response;
 
-    const envelope = await fetchJson<unknown>('https://crexendo.zendesk.com', { fetchImpl: stub });
+    const envelope = await fetchJson<unknown>('https://support.crexendo.com', { fetchImpl: stub });
     expect(envelope.error?.code).toBe('non_json_2xx');
 
     const run = await runProbe(SPEC, stub);

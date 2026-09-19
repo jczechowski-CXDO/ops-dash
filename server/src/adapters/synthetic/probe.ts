@@ -15,6 +15,26 @@ export type ProbeSpec = {
   /** Per-probe override. A slow-but-alive host is a p95 story, not a failure,
    *  so this is generous by default. */
   timeoutMs?: number;
+  /**
+   * The status this endpoint returns **when it is healthy**, when that is not
+   * a 2xx. Absent means the ordinary rule: any 2xx passes.
+   *
+   * This exists because the real estate forced it (Task 9 step 4, the hand-run
+   * against the live internet). `help.netsapiens.com`'s help centre is
+   * sign-in restricted, so its public API answers `401 {"error":"Couldn't
+   * authenticate you"}` in ~150ms — every time, by design. That 401 is Zendesk's
+   * application tier responding correctly; it is the *healthy* reading. Scored
+   * against `response.ok` it is a permanent `fail`, which would have pinned the
+   * Zendesk tile red forever and left half the `vendor` Sev1 condition armed
+   * from the day we shipped.
+   *
+   * A probe asks "is this host answering the way it answers when it is well?".
+   * For most hosts that is "with a 2xx". For a restricted one it is "with a
+   * 401". Deviation in EITHER direction is a fail and that is deliberate: a 401
+   * turning into a 200 means the help centre was opened to the world, which is
+   * a change an operator wants to hear about.
+   */
+  expectStatus?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -28,12 +48,18 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  *
  *   - `fetchJson` answers "is this feed's payload usable?" and a probe asks
  *     "did this host answer at all?" — different questions with different
- *     right answers. Crexendo's Zendesk pod serves an HTML login page under
- *     HTTP 200. To `fetchJson` that is `non_json_2xx`, an error, and correctly
- *     so. To a reachability probe it is a pass: the host is up. Routing the
- *     probe through the shared helper would make every reachable host in the
- *     estate report as failing, and the correlation rule would then read our
- *     own half as "our check is failing" forever.
+ *     right answers. A host that answers with an HTML sign-in page, or with a
+ *     JSON `{"error":"Couldn't authenticate you"}`, is up; to `fetchJson` the
+ *     first is `non_json_2xx` and the second is `http_401`, both errors, and
+ *     correctly so for a feed. Routing the probe through the shared helper
+ *     would make reachable hosts report as failing, and the correlation rule
+ *     would then read our own half as "our check is failing" forever.
+ *
+ *     (The original note here asserted that Crexendo's Zendesk pod serves an
+ *     HTML login page under HTTP 200. The hand-run measured it: it serves a
+ *     Cloudflare bot challenge under 403, `cf-mitigated: challenge`. The
+ *     conclusion survived; the reason for it did not, and a comment nobody had
+ *     measured was load-bearing for a whole exemption.)
  *   - The four failure rules `fetchJson` exists to enforce are rules about
  *     *bodies*. A probe reads no body — it cancels the stream as soon as the
  *     headers arrive — so there is no body for those rules to be applied to or
@@ -49,12 +75,14 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  *
  * The three results, and why they are three and not two:
  *
- *   2xx           -> 'pass',    latency measured to the response headers
- *   non-2xx       -> 'fail',    latency measured — a response did arrive
+ *   expected      -> 'pass',    latency measured to the response headers
+ *   unexpected    -> 'fail',    latency measured — a response did arrive
  *   no response   -> 'fail',    latencyMs null — nothing was timed
  *   our deadline  -> 'timeout', latencyMs null
  *
- * A timeout is NOT a 'fail' and a non-2xx is NOT a 'timeout'. They are
+ * "Expected" is any 2xx, or exactly `spec.expectStatus` when the spec names one.
+ *
+ * A timeout is NOT a 'fail' and an unexpected status is NOT a 'timeout'. They are
  * different diagnoses: a 503 means the host is up and the app is not, a
  * timeout means we could not reach it. An operator does different things with
  * each. And `latencyMs` is null rather than 0 on both no-response paths,
@@ -92,7 +120,7 @@ export async function runProbe(spec: ProbeSpec, fetchImpl: FetchLike = fetch): P
     // vendor's home page into a number we present as reachability.
     await response.body?.cancel().catch(() => undefined);
 
-    return row(spec, at, response.ok ? 'pass' : 'fail', latencyMs);
+    return row(spec, at, healthy(spec, response.status) ? 'pass' : 'fail', latencyMs);
   } catch {
     // No latency on either path: nothing completed, so there is nothing to
     // have timed. Null, never 0.
@@ -100,6 +128,14 @@ export async function runProbe(spec: ProbeSpec, fetchImpl: FetchLike = fetch): P
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Whether this status is the one this endpoint gives when it is well.
+ *  Exact match when the spec names a status — NOT "expected or any 2xx", which
+ *  would let a restricted help centre that started returning 200 read healthy
+ *  and silently stop being the thing we thought we were measuring. */
+function healthy(spec: ProbeSpec, status: number): boolean {
+  return spec.expectStatus === undefined ? status >= 200 && status < 300 : status === spec.expectStatus;
 }
 
 function row(
