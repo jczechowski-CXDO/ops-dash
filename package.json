@@ -16,6 +16,8 @@
     "pretest": "npm run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test --config web/playwright.config.ts",
+    "test:e2e:update": "playwright test --config web/playwright.config.ts --update-snapshots",
     "typecheck": "tsc -b shared web",
     "icons": "npm run icons --workspace @ops-dash/web",
     "fonts": "npm run fonts --workspace @ops-dash/web"
