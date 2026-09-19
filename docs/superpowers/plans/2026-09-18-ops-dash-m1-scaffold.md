@@ -2797,7 +2797,16 @@ const at = () =>
     </MemoryRouter>,
   );
 
-const toQuiet = () => fireEvent.click(screen.getByRole('button', { name: 'Quiet' }));
+// amended at G3 — G-17. This clicked the SIDEBAR's segmented control, which the
+// view-under-test's tree does not render, so getByRole THROWS rather than fails.
+// It is also gated by DEMO_TOGGLE_VISIBLE and therefore absent from production
+// builds entirely. Select the world the way the app itself does — the ?demo=
+// query parameter, which works in every build and is what Task 10A must use too.
+const at = (path = '/', mode = 'sev1') =>
+  render(
+    <MemoryRouter initialEntries={[`${path}?demo=${mode}`]}>…</MemoryRouter>,
+  );
+const toQuiet = undefined;  // removed; pass mode to at() instead
 
 describe('Overview — sev1 (the default)', () => {
   it('renders one tile per verified service', () => {
