@@ -59,7 +59,9 @@ Linux notes:
 
 ## Pick up here
 
-**Wave 1 — Tasks 4 and 5, two agents in parallel.** `ops-primitives` builds the eight
+**Wave 2 — Task 6, `ops-shell` solo.** Shell, routing, theme, view stubs. Then gate G2.
+
+Superseded, for the record: **Wave 1 — Tasks 4 and 5, two agents in parallel.** `ops-primitives` builds the eight
 primitives, the five shared dashboard components and `theme/statusColor.ts`; `ops-fixtures`
 builds the prototype-derived fixture modules. Disjoint ownership; dispatch both together, then
 run gate G1.
@@ -145,6 +147,61 @@ procedure its read-only tools cannot perform — it now states that it verifies 
 reports while the lead performs the edit, so a change to a frozen file always passes
 through a second pair of hands.
 
+
+## Gate G1 — closed with accepted findings (2026-09-19)
+
+Wave 1 (Tasks 4 and 5) is complete and reviewed twice, by `ops-reviewer` and `ops-contract`
+in parallel. 193 tests, typecheck clean.
+
+**All three gate questions passed, verified mechanically rather than by eye.** All 14 primitive
+signatures match the plan's Interfaces block exactly — transcribed into a compiled probe with
+proven negative controls, and re-run after remediation. Fixtures carry zero `as any`,
+`as unknown`, `satisfies`, `@ts-ignore` or explicit `undefined`, with optional fields genuinely
+absent. `statusColor` is total over all three unions, confirmed by adding a member to each and
+watching `tsc` fail.
+
+**The expensive findings were not divergence between agents.** They were places the *plan* was
+internally inconsistent and each agent had faithfully implemented its own half:
+
+- **G-13, the largest.** Task 5 point 3 adds the `needs_auth` row precisely because it "tells
+  the truth" about the real M365 blocker — while the same task builds the flagship Sev1 on an
+  m365 *vendor advisory*. We cannot read M365 vendor health and correlate on it. The sev1 story
+  was resting on that: `ruleKey: 'vendor'` means "vendor degraded + our check failing", and
+  amendment 1 forbids `unknown` from satisfying the vendor half, so the rule that supposedly
+  opened the flagship incident **could not have fired**. John ruled the correlation moves to
+  Proofpoint, whose Status.io feed is genuinely readable.
+- **The quiet-mode BLOCKER.** Zendesk rendered `operational` in quiet, on evidence the contract
+  says can never be green. Combined with amendment 1 this means **ALL SYSTEMS OPERATIONAL is
+  unreachable in production**, and the quiet fixture was showing a screen the live system can
+  never render — asserted by a test, and about to be frozen into 28 visual baselines.
+- **H-3 and H-4**, both the same shape: a disabled rule that produced an incident, and a tile
+  claiming a successful poll from a feed that has never authenticated.
+
+Every one of these type-checked, passed 151 tests, and was invisible to the guards. They needed
+someone reading the contract's prose against the fixtures' behaviour.
+
+**Accepted at gate G1, not fixed.** This is the written acceptance the gate rule requires.
+
+| Finding | Owner | Due |
+|---|---|---|
+| **M-9** — no incident carries `ack` or `muted`, so README:81's acknowledged/muted opacity-0.45 row ships unrendered and unbaselined. No Wave 3 agent owns that file, so the request must route back through the lead | `ops-fixtures` | before Task 10A |
+| **M-6 residual** — no `:focus-visible` ring is expressible from `web/src`; every primitive carries an `aur-*` class awaiting a stylesheet | lead | Task 11A |
+| **M-8 residual** — `@keyframes aur-skel-pulse` and eight orphaned `aur-*` classes have no home; `Skeleton` is static until then | lead | Task 11A |
+| **L-1** three disabled treatments across `Button`/`IconButton`/`Switch` · **L-3** `Card.tsx:26,31` `style` overrides the recipe · **L-4** hard-coded relative copy in `history.ts`/`incidents.ts` · **L-6** `email.ts:19-23` registrable hostile sender domains · **L-7** `primitives.test.tsx:43` duplicate hex guard · **L-8** `guards.test.ts` marker still line-scoped · **L-9** `dashboard.test.tsx:51` name contradicts code · **L-10** `Sparkline.tsx:22` returns `null` against a published `JSX.Element` · **L-12** `Card` `role="button"` nesting interactive children | as cited | before G4 |
+
+L-2, L-5 and L-11 were fixed rather than accepted.
+
+**Seven plan edits made at source**, tagged `amended at G1 — G-13` / `amended at G0 — H-1` /
+`amended at G1 — G-12`. The reviewer argued this and was right: `RESUME.md` calls the plan "the
+plan you execute" and a fresh agent on a fresh box is told to run it, so a plan whose tests
+contradict the fixtures is a trap. Two of the seven are defects the plan would otherwise
+*reintroduce on regeneration* — Task 3 Step 8's unsafe `Icon.tsx` prop-spread ordering, and a
+real corporate hostname in a committed fixture.
+
+**Published to Wave 3 alongside the Interfaces block:** `ageLabel` and `UNKNOWN_AGE`
+(`web/src/theme/ageLabel.ts`), `srOnly` (`web/src/theme/srOnly.ts`), and
+`checkRunsFor(mode, id)` — `FixtureBundle.checkRuns` is now `Record<ServiceId, CheckRun[]>`, and
+`useParams` hands `ServiceDetail` a `string | undefined` the record's key type rejects.
 
 ## The one practice this project has earned the hard way
 

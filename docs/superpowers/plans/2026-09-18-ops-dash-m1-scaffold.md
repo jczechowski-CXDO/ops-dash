@@ -1032,7 +1032,7 @@ export type IconProps = {
   color?: string;
   className?: string;
   style?: CSSProperties;
-} & Omit<SVGProps<SVGSVGElement>, 'name' | 'color' | 'style' | 'className'>;
+} & Omit<SVGProps<SVGSVGElement>, 'name' | 'color' | 'style' | 'className' | 'dangerouslySetInnerHTML'>;  // amended at G0 — H-1
 
 export function Icon({
   name,
@@ -1052,9 +1052,14 @@ export function Icon({
       className={`aur-icon ${className}`}
       aria-hidden={rest['aria-label'] ? undefined : true}
       style={{ display: 'inline-block', flexShrink: 0, color, verticalAlign: 'middle', ...style }}
-      // Build-time-generated geometry from the vendored Aurora bundle. No user input.
-      dangerouslySetInnerHTML={{ __html: glyph.body }}
       {...rest}
+      // amended at G0 — H-1. {...rest} MUST stay ABOVE this line. JSX spread is
+      // last-wins, so with the sink above it a caller could replace the glyph
+      // body with arbitrary markup, and the repository guard cannot see it —
+      // the guard greps for the literal string, which `<Icon {...props} />`
+      // does not contain. Proven: it rendered <image href="x" onerror="1">.
+      // `dangerouslySetInnerHTML` is also in the Omit below for the same reason.
+      dangerouslySetInnerHTML={{ __html: glyph.body }}
     />
   );
 }
@@ -2119,7 +2124,7 @@ function spark(seed: number, base: number, spike: boolean): number[] {
 Then one record per service. `m365` and `proofpoint` differ by mode; `zendesk` is `unknown` in sev1 (see below); the rest stay operational in both. Field values:
 
 - **quiet, every service:** `vendor.level: 'operational'`, `vendor.label: 'Operational'`, `vendor.note: 'No advisories posted in the last 7 days. Feed polled every 60 seconds.'`, `vendor.incidentsSince: []`, `vendor.lastSuccessfulPoll` = now minus 41s. `ours.level: 'operational'`, `ours.label: 'Passing'`, `ours.note: 'All probes green from four regions. Last run 41 seconds ago.'`, `ours.passing: 4`, `ours.total: 4`. `latencyMs` = the baseline from the table. `p50Ms` = baseline, `p95Ms` = `Math.round(baseline * 1.8)`. `uptime30d: 0.9998`, `incidents90d: 1`, `lastStateChange` = 11 days ago.
-- **sev1 `m365`:** `vendor.level: 'degraded'`, `label: 'Degraded'`, `note: 'Advisory EX1084221 — "Users may experience delays receiving email." Last vendor update 12 minutes ago.'`, `advisoryId: 'EX1084221'`, `incidentsSince: [{ id: 'EX1084221', title: 'Users may experience delays receiving email', level: 'degraded', startedAt: <09:12 today> }]`. `ours.level: 'outage'`, `label: 'Failing'`, `note: 'Mailflow probe failing from us-east, us-west and eu-west. Last success 09:08.'`, `passing: 1`, `total: 4`. `latencyMs: 840` (4x baseline), `spark: spark(3, 210, true)`, `uptime30d: 0.9921`, `incidents90d: 4`, `lastStateChange` = 09:12 today.
+- **sev1 `m365`:** *(amended at G1 — G-13: superseded. m365's vendor half is `unknown`/`Unknown` with NO `lastSuccessfulPoll`, because `ServiceHealth.Read.All` consent is pending and the feed has never authenticated. `advisoryId`, `incidentsSince` and every mention of EX1084221 are removed. The `ours` half below still stands. The vendor+ours correlation moved to Proofpoint, which carries INC-2292. See docs/RESUME.md, gate G1.)* ~~`vendor.level: 'degraded'`, `label: 'Degraded'`, `note: 'Advisory EX1084221 — "Users may experience delays receiving email." Last vendor update 12 minutes ago.'`, `advisoryId: 'EX1084221'`, `incidentsSince: [{ id: 'EX1084221', title: 'Users may experience delays receiving email', level: 'degraded', startedAt: <09:12 today> }]`. `ours.level: 'outage'`, `label: 'Failing'`, `note: 'Mailflow probe failing from us-east, us-west and eu-west. Last success 09:08.'`, `passing: 1`, `total: 4`. `latencyMs: 840` (4x baseline), `spark: spark(3, 210, true)`, `uptime30d: 0.9921`, `incidents90d: 4`, `lastStateChange` = 09:12 today.
 - **sev1 `proofpoint`:** `vendor.level: 'degraded'`, `label: 'Advisory'`, `note: 'Status.io reports elevated processing latency in United States - Atlanta. Last vendor update 34 minutes ago.'`, `ours.level: 'degraded'`, `label: 'Slow'`, `note: 'Mailflow round trip above p95 from us-east. Last success 2 minutes ago.'`, `passing: 3`, `total: 4`.
 - **sev1 `zendesk`:** `vendor.level: 'unknown'`, `label: 'Unknown'`, `note: 'Zendesk SSP publishes no per-service status field and returned no incidents. An absence is not an affirmation. Reading is global Zendesk, not necessarily our pod.'`, `incidentsSince: []`, `lastSuccessfulPoll` = 60s ago. `ours` stays operational. This one fixture is what proves amendment 1 and amendment 4 render correctly; do not "fix" it to green.
 
@@ -2239,7 +2244,7 @@ and six `Integration` records:
 [
   { key: 'graph',         name: 'Microsoft Graph',        detail: 'App-only, certificate auth · CXDO-GraphExport',         state: 'connected',  stateLabel: 'Connected' },
   { key: 'epc',           name: 'Endpoint Central Cloud', detail: 'Zoho OAuth self-client · read-only',                    state: 'connected',  stateLabel: 'Connected' },
-  { key: 'stellar',       name: 'Stellar Cyber XDR',      detail: 'crexendo.stellarcyber.cloud · API token',               state: 'connected',  stateLabel: 'Connected' },
+  { key: 'stellar',       name: 'Stellar Cyber XDR',      detail: 'Tenant API token · read-only',  /* amended at G1 — G-12 */  state: 'connected',  stateLabel: 'Connected' },
   { key: 'proofpoint',    name: 'Proofpoint 365 TP',      detail: 'Hornetsecurity Control Panel API',                      state: 'connected',  stateLabel: 'Connected' },
   { key: 'vendorstatus',  name: 'Vendor status feeds',    detail: 'Hornetsecurity, Jira, Helpjuice, Claude, OpenAI, Zendesk', state: 'polling', stateLabel: 'Polling 60s' },
   { key: 'm365health',    name: 'M365 Service Health',    detail: 'ServiceHealth.Read.All + ServiceMessage.Read.All consent pending', state: 'needs_auth', stateLabel: 'Needs auth' },
@@ -2359,10 +2364,13 @@ describe('sidebar', () => {
     expect(screen.getByRole('link', { name: /Entra security/ })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('badges Overview with the open incident count and Incident with one', () => {
+  it('badges Overview with the open incident count and Incident with the open Sev1s', () => {
     at('/');
-    expect(within(screen.getByRole('link', { name: /Overview/ })).getByText('4')).toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: /^Incident/ })).getByText('1')).toBeInTheDocument();
+    // amended at G1 — G-13: sev1 now holds FIVE incidents, and TWO of them are
+    // Sev1 — INC-2292 (proofpoint, auto-created by the vendor rule) and INC-2291
+    // (m365, opened by hand because its vendor feed is unreadable).
+    expect(within(screen.getByRole('link', { name: /Overview/ })).getByText('5')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: /^Incident/ })).getByText('2')).toBeInTheDocument();
   });
 
   it('shows the brand block', () => {
@@ -2778,9 +2786,11 @@ describe('Overview — sev1 (the default)', () => {
     expect(screen.getAllByTestId('service-tile')[0]?.querySelector('polyline')).toBeInTheDocument();
   });
 
-  it('lists the four open incidents with their severity chips', () => {
+  it('lists the five open incidents with their severity chips', () => {
     at();
-    expect(screen.getByText('SEV 1')).toBeInTheDocument();
+    // amended at G1 — G-13: two Sev1s now. getByText THROWS on multiple matches,
+    // so this must be getAllByText — it would not merely fail, it would error.
+    expect(screen.getAllByText('SEV 1')).toHaveLength(2);
     expect(screen.getAllByText('SEV 2')).toHaveLength(2);
     expect(screen.getByText('SEV 3')).toBeInTheDocument();
   });
@@ -2827,7 +2837,14 @@ describe('Overview — sev1 (the default)', () => {
 describe('Overview — quiet', () => {
   it('shows the status strip with its overline and one pill per service', () => {
     at(); toQuiet();
-    expect(screen.getByText(/ALL SYSTEMS OPERATIONAL/i)).toBeInTheDocument();
+    // amended at G1 — G-13: quiet is no longer all-green and never can be.
+    // Zendesk's SSP publishes no per-service status, and M365 Service Health
+    // consent is pending, so both are affirmatively `unknown` in BOTH worlds.
+    // Per the rule twelve lines above, the overline is not rendered at all when
+    // any service is unknown; the strip leads with the affirmed/unknown split.
+    expect(screen.queryByText(/ALL SYSTEMS OPERATIONAL/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/5 AFFIRMED/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 UNKNOWN/i)).toBeInTheDocument();
     expect(screen.getAllByTestId('service-pill')).toHaveLength(7);
   });
 
@@ -2922,7 +2939,11 @@ describe('ServiceDetail', () => {
     at('m365');
     expect(screen.getByText('Vendor status page')).toBeInTheDocument();
     expect(screen.getByText('Our synthetic checks')).toBeInTheDocument();
-    expect(screen.getByText('Degraded')).toBeInTheDocument();
+    // amended at G1 — G-13: m365's vendor half is `unknown`, not `degraded`.
+    // Our probes are ours and still fail, so only 'Failing' survives. This pair
+    // now reads well against the at('zendesk') case below: two services unknown
+    // for two different reasons, one with our probes green and one with them red.
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
     expect(screen.getByText('Failing')).toBeInTheDocument();
   });
 
@@ -2991,7 +3012,10 @@ describe('IncidentDetail', () => {
     expect(screen.getByText('SEV 1')).toBeInTheDocument();
     expect(screen.getByText('INC-2291')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Exchange Online mail delivery delays' })).toBeInTheDocument();
-    expect(screen.getByText(/EX1084221/)).toBeInTheDocument();
+    // amended at G1 — G-13: EX1084221 is GONE from the fixtures and a test pins
+    // its absence. We cannot read M365's vendor feed, so the advisory id could
+    // never legitimately appear on this screen. Assert the absence instead.
+    expect(screen.getByText(/no vendor signal|Service Health consent/i)).toBeInTheDocument();
   });
 
   it('renders four blast-radius metrics tinted by level', () => {
