@@ -239,6 +239,31 @@ the dev server serves the page with local-only asset references and audited `dis
 `https://` strings are React error-message URLs in vendor code), but nobody has *seen* the
 shell. Worth a look before G2 closes.
 
+## The published API Wave 3 builds on
+
+Everything the four view agents import. Every signature is unchanged from the plan's
+Interfaces block; the only behaviour change to a published function is `allOperational([])`,
+which now returns **`false`** rather than `true` — `[].every()` is vacuously true, so an empty
+or failed fixture load would otherwise render ALL SYSTEMS OPERATIONAL over no evidence at all.
+
+```
+theme/statusColor.ts   statusColor · severityColor · severityLabel · timelineColor
+                       isAffirmed · allOperational
+theme/ageLabel.ts      ageLabel(iso, now?) · UNKNOWN_AGE
+theme/srOnly.ts        srOnly            (CSSProperties; clip-path idiom, NOT display:none)
+components/aurora/     Button IconButton Switch Table<R>+Column<R> LinearProgress Skeleton Alert
+components/            Card StatCard Sparkline Panel+PanelState SectionHeading
+fixtures/              fixtures · serviceById · incidentById · checkRunsFor(mode, id)
+```
+
+`isAffirmed` considers **both halves** — a vendor status page is a claim about their fleet, not
+a measurement of our path to it — and only `operational` affirms: `maintenance` and `unknown`
+both return false.
+
+**`affirmedCount` is deliberately NOT published.** "How many to name in a subtitle" is a view
+concern; "is this service healthy" is a health rule. That line was drawn on purpose, after
+three helpers had been duplicated because nobody had decided where the boundary was.
+
 ## The one practice this project has earned the hard way
 
 **A passing test is not evidence until someone has watched it fail.**

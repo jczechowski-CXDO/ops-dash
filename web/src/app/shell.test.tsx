@@ -189,6 +189,23 @@ describe('theme', () => {
   });
 });
 
+describe('demo state by URL', () => {
+  it('renders the whole quiet shell from ?demo=quiet, with no toggle click', () => {
+    // G2 HIGH-2: the sidebar control is dev-only, Task 10A screenshots the
+    // production build, so without this parameter all 28 baselines would be
+    // sev1 and the quiet Overview would ship unphotographed.
+    at('/?demo=quiet');
+    expect(screen.getByText(/5 of 7 monitored services affirmed healthy · 2 unknown/)).toBeInTheDocument();
+    const nav = screen.getByRole('navigation');
+    expect(within(nav).queryByText(/^\d+$/)).toBeNull();
+  });
+
+  it('ignores a demo parameter it does not recognise', () => {
+    at('/?demo=all-green');
+    expect(screen.getByText(/5 open incidents across 7 monitored services/)).toBeInTheDocument();
+  });
+});
+
 describe('demo state toggle', () => {
   it('switches the fixture bundle between quiet and sev1', () => {
     at('/');

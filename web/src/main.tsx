@@ -11,11 +11,14 @@ if (!root) throw new Error('#root not found');
 createRoot(root).render(
   <StrictMode>
     <ThemeProvider>
-      <DemoModeProvider>
-        <BrowserRouter>
+      {/* The router is OUTSIDE the demo-mode provider, which the plan had the
+          other way round: the provider reads ?demo= through useSearchParams and
+          needs router context to do it. */}
+      <BrowserRouter>
+        <DemoModeProvider>
           <App />
-        </BrowserRouter>
-      </DemoModeProvider>
+        </DemoModeProvider>
+      </BrowserRouter>
     </ThemeProvider>
   </StrictMode>,
 );

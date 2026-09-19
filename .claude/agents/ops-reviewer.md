@@ -122,3 +122,18 @@ Before you commit a test whose name makes a claim, **break the thing the name pr
 watch it go red.** Thirty seconds. If nothing fails, the test is decoration and you have
 learned something more useful than a green run. Say in your report which mutations you
 tried and what failed.
+
+## Guard against the recurrence, not just the instance
+
+When two things must agree — a count and a verdict, a badge and the list it counts, a subtitle
+and the rows it summarises, a derived helper and its definition — assert **the relationship**
+across several shapes, not the two current values.
+
+The pattern, from Wave 1: `expect(allOperational(list)).toBe(list.every(isAffirmed))` over four
+different fixture shapes. A re-inlined divergent copy fails that even when it happens to agree
+on today's data. Contrast the version it replaced, which compared two values over `quiet` and
+`sev1` only — where both sides were `false`, so the assertion passed while proving nothing, and
+kept passing when the predicate was widened to accept `maintenance`.
+
+Wave 3 has several of these pairs and they are exactly the seams four agents who cannot see
+each other are most likely to split.

@@ -3,12 +3,58 @@ import { fixtures } from '../fixtures/index.js';
 import { allOperational } from '../theme/statusColor.js';
 import { affirmedCount, pageMeta } from './pageMeta.js';
 
-const worlds = ['quiet', 'sev1'] as const;
+import type { ServiceStatus, StatusLevel } from '@ops-dash/shared';
+
+/** Force every service in a list to one level on both halves. */
+const forceAll = (services: ServiceStatus[], level: StatusLevel): ServiceStatus[] =>
+  services.map((s) => ({ ...s, vendor: { ...s.vendor, level }, ours: { ...s.ours, level } }));
+
+/** Force one service — the first — to one level on both halves. */
+const forceOne = (services: ServiceStatus[], level: StatusLevel): ServiceStatus[] =>
+  services.map((s, i) => (i === 0 ? { ...s, vendor: { ...s.vendor, level }, ours: { ...s.ours, level } } : s));
+
+const affirmedWorld = forceAll(fixtures.quiet.services, 'operational');
+
+/**
+ * G2 HIGH-1: the previous version of this table held only the two fixture
+ * worlds, and BOTH sides of the assertion are false in both of them. It passed
+ * with `allOperational` replaced by `return false`, and passed again with
+ * `isAffirmed` widened to accept 'maintenance' — a test whose name claimed to
+ * pin two predicates together while pinning nothing at all.
+ *
+ * The last three rows are what make it bite. `all affirmed` is the only world
+ * where both sides are TRUE, so a predicate that never affirms fails there. The
+ * two single-service rows are worlds where a WIDER predicate would wrongly
+ * report every service affirmed while allOperational — amendment 1 — says no,
+ * which is precisely the "maintenance reads as healthy" regression this pair
+ * exists to prevent.
+ */
+const worlds: readonly [string, ServiceStatus[]][] = [
+  ['quiet', fixtures.quiet.services],
+  ['sev1', fixtures.sev1.services],
+  ['all affirmed', affirmedWorld],
+  ['one in maintenance', forceOne(affirmedWorld, 'maintenance')],
+  ['one unknown', forceOne(affirmedWorld, 'unknown')],
+];
 
 describe('affirmedCount', () => {
-  it.each(worlds)('agrees with allOperational in the %s world', (mode) => {
-    const services = fixtures[mode].services;
+  it.each(worlds)('agrees with allOperational in the %s world', (_name, services) => {
     expect(affirmedCount(services) === services.length).toBe(allOperational(services));
+  });
+
+  it('has a case where both predicates say yes, and cases where they say no', () => {
+    // Guards the table above against collapsing back into vacuity: if every row
+    // ever agrees on the same answer again, the it.each proves nothing.
+    const answers = worlds.map(([, services]) => allOperational(services));
+    expect(new Set(answers)).toEqual(new Set([true, false]));
+  });
+
+  it('does not count a service in an announced maintenance window', () => {
+    // Maintenance is a known, planned absence of service. It is not health, and
+    // amendment 1 keeps it out of the all-clear.
+    expect(affirmedCount(affirmedWorld)).toBe(7);
+    expect(affirmedCount(forceOne(affirmedWorld, 'maintenance'))).toBe(6);
+    expect(affirmedCount(forceAll(affirmedWorld, 'maintenance'))).toBe(0);
   });
 
   it('counts a service only when both halves affirm it', () => {
