@@ -264,6 +264,27 @@ both return false.
 concern; "is this service healthy" is a health rule. That line was drawn on purpose, after
 three helpers had been duplicated because nobody had decided where the boundary was.
 
+## Staging discipline while other agents are writing
+
+**Stage by path. Never `git add -A` in a tree where another agent is working.**
+
+This was learned by breaking it. Commit `1fbd2a8`, whose message says "docs: publish the Wave 3
+API surface", also contains five of `ops-shell`'s in-flight source files — `DemoModeProvider.tsx`
+and its test, `pageMeta.test.ts`, `shell.test.tsx`, `main.tsx` — swept up mid-edit, before their
+author had run the suite over them. Nothing was lost and `8b95234` completed the work, but the
+commit message misdescribes the commit, and had the agent been mid-refactor it would have
+captured a broken intermediate state under someone else's name.
+
+Two related hazards, both hit in Wave 1:
+
+- **`git stash` is worse.** `ops-fixtures` used it to compare against HEAD and swept up a live
+  agent's working tree. It popped back clean, but `git diff -- <path>` and
+  `git show HEAD:<path>` do the same job without touching anyone else's files.
+- **`git add -A` also picks up scratch and probe files.** Several agents create throwaway probes;
+  reviewers create them by design.
+
+The task steps already specify the paths to stage. Use them.
+
 ## The one practice this project has earned the hard way
 
 **A passing test is not evidence until someone has watched it fail.**

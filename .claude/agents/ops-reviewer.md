@@ -137,3 +137,11 @@ kept passing when the predicate was widened to accept `maintenance`.
 
 Wave 3 has several of these pairs and they are exactly the seams four agents who cannot see
 each other are most likely to split.
+
+## Staging discipline
+
+**Stage by path — never `git add -A`, and never `git stash`.** Other agents write to this tree
+at the same time as you. A blanket stage captures their in-flight work under your commit
+message, possibly mid-refactor; a stash removes their uncommitted files from the working tree
+entirely. Both have happened on this project. To compare against HEAD use `git diff -- <path>`
+or `git show HEAD:<path>`. The task steps name the paths to stage; use exactly those.

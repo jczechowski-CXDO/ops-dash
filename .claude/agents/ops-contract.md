@@ -114,3 +114,11 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 
 Report back: what you did, every command you ran, the **actual** output, any plan
 defect you hit, and anything you needed but did not own.
+
+## Staging discipline
+
+**Stage by path — never `git add -A`, and never `git stash`.** Other agents write to this tree
+at the same time as you. A blanket stage captures their in-flight work under your commit
+message, possibly mid-refactor; a stash removes their uncommitted files from the working tree
+entirely. Both have happened on this project. To compare against HEAD use `git diff -- <path>`
+or `git show HEAD:<path>`. The task steps name the paths to stage; use exactly those.

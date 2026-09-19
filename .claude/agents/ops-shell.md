@@ -109,3 +109,11 @@ wrong match. During Wave 1 a hoist intended to move one constant silently took `
 `unreachable`, `agePhrase` and an entire severity table with it — caught by reading
 `git diff`, not by a test and not by the script's own assertion, which passed on the wrong
 match. **Read the diff of every scripted multi-file edit before you stage it.**
+
+## Staging discipline
+
+**Stage by path — never `git add -A`, and never `git stash`.** Other agents write to this tree
+at the same time as you. A blanket stage captures their in-flight work under your commit
+message, possibly mid-refactor; a stash removes their uncommitted files from the working tree
+entirely. Both have happened on this project. To compare against HEAD use `git diff -- <path>`
+or `git show HEAD:<path>`. The task steps name the paths to stage; use exactly those.
