@@ -239,6 +239,58 @@ the dev server serves the page with local-only asset references and audited `dis
 `https://` strings are React error-message URLs in vendor code), but nobody has *seen* the
 shell. Worth a look before G2 closes.
 
+## The no-second-dark-palette guard catches prose, not just code
+
+Third time this has bitten, so it is written down. The contrast test needed to locate the dark
+block in `fig-tokens.css`, and the obvious regex spells out the `[data-theme="dark"]` attribute
+selector — which is exactly what the guard greps for, so the guard fired.
+
+**The guard was right.** It cannot tell "reads the one palette" from "declares a second", and it
+should not have to: the moment it tries, it acquires a semantic judgement it will get wrong in
+the other direction.
+
+**The fix is to write the pattern another way** — matching the `, .dark {` half of the same
+selector is equally precise and contains no guarded literal.
+
+**Two fixes to refuse**: weakening the guard, and assembling the literal from fragments to slip
+past it. The second is worse, because it leaves the guard *looking* intact while it no longer
+guards. A guard you can satisfy by spelling something differently has stopped being a guard.
+This is the same ruling made at G3 over the redaction assertion, and the general form is:
+**when a guard fires, it is usually telling you the code is the wrong shape — not that it has a
+blind spot you can aim for.**
+
+## Contrast is testable without a browser
+
+`web/src/theme/statusColor.test.ts` runs under `@vitest-environment node`, parses
+`fig-tokens.css` directly and computes WCAG ratios itself. **It would have caught all 14 G3
+contrast failures**, it needs no Chromium, and it runs on every `npm test`.
+
+This corrects a conclusion drawn at G1. A ratio assertion *through the DOM* genuinely is
+theatre, because jsdom does not resolve `var()` — but that only meant the class was untestable
+*through the DOM*, not untestable. Any defect class that seems to need a browser is worth a
+second look for an out-of-band way to compute the same fact.
+
+The file carries a deliberate canary: one test asserts `--warning-main` **fails** as text while
+`--warning-dark` passes. Without it, a resolver bug returning the same colour twice would paint
+every assertion vacuously green.
+
+It also pins the exact list of decoration colours that do **not** clear WCAG 1.4.11's 3:1 bar
+(`degraded` 2.40, `maintenance` 2.82, `unknown` 2.29, sev2 2.40, sev3/info 2.82 in light). That
+is a **recorded decision, not an open failure** — see the dot ruling below.
+
+## Ruling: a dot that has a text equivalent may stay decoration-grade
+
+Where a status dot is accompanied by text carrying the same information — the Overview tile's
+"Vendor: {label}" / "Ours: {label}" row, for instance — the dot is redundant decoration and
+`-main` is appropriate.
+
+Where a dot is the **sole** carrier, the fix is to add the text equivalent, **not** to darken the
+dot. The Overview strip pill was `[dot][service name]` with no label: that is WCAG 1.4.1 Use of
+Color at Level A, not merely a 1.4.11 contrast miss, and a screen-reader user got the service
+name with no status at all. Darkening it would have satisfied a contrast checker while still
+telling a blind user nothing — a signal that looks right and does not mean what it says, which
+is the defect this whole project keeps producing.
+
 ## Queued for the post-G3 consolidation pass
 
 **Hoist `ago` and `signedDelta` to `web/src/theme/`, beside `ageLabel`.** They currently live in

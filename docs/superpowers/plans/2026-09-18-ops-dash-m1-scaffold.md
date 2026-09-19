@@ -27,7 +27,13 @@ Every task's requirements implicitly include this section.
 - **`shared/src/contracts.ts` is frozen after Task 2.** Read-only for every later task and every agent. An agent that believes it needs a change **stops and reports** — it does not edit the file and does not work around it. Changing it means amending `DATA_CONTRACTS.md` first, which requires John's approval.
 - **Fixtures are permanently redacted.** No real UPNs, hostnames, IP addresses or mail subjects, ever, including in tests. People are `@example.com`, machines are `DEMO-*`. The exact redacted values are given in Task 6 — use them verbatim, because the Wave 2 view tests assert against them.
 - **Seven services, not ten.** The prototype's ten-service list (AWS, Azure, Okta, Cloudflare, CrowdStrike, GitHub, Endpoint Central, Stellar Cyber) is placeholder and was superseded by amendment 3. The `ServiceId` union is `proofpoint | jira | helpjuice | claude | openai | zendesk | m365`. Every copy string reading "10 monitored services" or "Ten monitored services" becomes seven. Exact replacement copy is in Task 6.
-- **`unknown` never renders green and never counts toward "ALL SYSTEMS OPERATIONAL."** The strip asserts health only when every service is affirmatively `operational`. `unknown` renders `var(--text-disabled)`. This is amendment 1 and it is load-bearing.
+- **`unknown` never renders green and never counts toward "ALL SYSTEMS OPERATIONAL."** The strip asserts health only when every service is affirmatively `operational`. `unknown` renders `var(--text-disabled)` **as decoration** — a dot, a border, a sparkline.
+  *(amended at G3: as **text** it renders `var(--text-secondary)`. `--text-disabled` measures
+  2.29:1 light and 2.78:1 dark, failing WCAG AA in both themes, and `unknown` is the status word
+  read most often because two of seven services are permanently unknown. Amendment 1's substance
+  is that `unknown` never reads as green and never counts toward the all-clear; a neutral grey
+  people can actually read satisfies that better than one they cannot. Use `statusTextColor`.)*
+  This is amendment 1 and it is load-bearing.
 - **Pixel fidelity to `design_handoff_it_ops_dashboard/README.md` § "Screens / views".** Those measurements are acceptance criteria, not suggestions. Where this plan quotes a measurement it is quoting that file.
 - **Commit at the end of every task**, using the message the task's final step gives.
 
