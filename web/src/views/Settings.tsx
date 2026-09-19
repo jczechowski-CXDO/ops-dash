@@ -23,14 +23,40 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
  * written anywhere. Milestone 4 replaces `useState` with the real setting.
  */
 
-/** Total over `Integration['state']`: adding a state stops this compiling
- *  rather than rendering a pill with no colour. `error` gets the token pair the
- *  README's list stops short of, because the contract's union includes it. */
+/**
+ * Total over `Integration['state']`: adding a state stops this compiling rather
+ * than rendering a pill with no colour. `error` gets the token pair the README's
+ * list stops short of, because the contract's union includes it.
+ *
+ * **One rung pair for all four states: `-darker` on `-lighter`.** README § 7
+ * specifies `-dark` on `-lighter`, and that pairing does not clear WCAG AA at
+ * 11px/700. Measured in Chromium against the production build, `document.fonts
+ * .ready` awaited, background resolved by ancestor walk (need 4.5):
+ *
+ *            README `-dark` on `-lighter`      this file, `-darker` on `-lighter`
+ *            light        dark                 light        dark
+ *   success  5.53         5.49                 10.54        6.87
+ *   info     4.65         5.60                  9.57        6.78
+ *   warning  4.09 FAIL    5.73                  8.91        6.75
+ *   error    5.50         4.81                 11.79        6.68
+ *
+ * Only `warning` failed, and `warning` is the needs-auth pill — the row that
+ * explains why the m365 tile is Unknown. It is fixed by moving the whole map one
+ * rung rather than special-casing one state: four states treated as one system
+ * is the entire point of this table, a mixed rung leaves the next state added
+ * with no rule to follow, and `info` at 4.65 was a rounding error from failing
+ * too. The worst pair in the table is now 6.68. Both values are published
+ * Aurora tokens; no literal and no hand-picked colour enters this file.
+ *
+ * jsdom cannot resolve `var()`, so no test below proves those ratios — what the
+ * tests pin is the invariant that produced them: every state pairs `-darker`
+ * with `-lighter` of the same family, and no two states share a family.
+ */
 const PILL: Record<Integration['state'], { bg: string; fg: string }> = {
-  connected: { bg: 'var(--success-lighter)', fg: 'var(--success-dark)' },
-  polling: { bg: 'var(--info-lighter)', fg: 'var(--info-dark)' },
-  needs_auth: { bg: 'var(--warning-lighter)', fg: 'var(--warning-dark)' },
-  error: { bg: 'var(--error-lighter)', fg: 'var(--error-dark)' },
+  connected: { bg: 'var(--success-lighter)', fg: 'var(--success-darker)' },
+  polling: { bg: 'var(--info-lighter)', fg: 'var(--info-darker)' },
+  needs_auth: { bg: 'var(--warning-lighter)', fg: 'var(--warning-darker)' },
+  error: { bg: 'var(--error-lighter)', fg: 'var(--error-darker)' },
 };
 
 const row: CSSProperties = {
@@ -45,12 +71,15 @@ const row: CSSProperties = {
 const nameStyle: CSSProperties = { fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' };
 const detailStyle: CSSProperties = { fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2 };
 
-/** A consequence line, not a second detail: it is dimmer, and it exists only
- *  when there is something an operator would otherwise have to infer. */
+/** A consequence line, not a second detail: it exists only when there is
+ *  something an operator would otherwise have to infer. It takes the same
+ *  `-darker` rung as the pills, for the same reason — on `--background-paper`,
+ *  `--warning-dark` measured 4.61:1 in light, clearing AA by 0.11, which is
+ *  noise; `--warning-darker` measures 10.03 light / 13.50 dark. */
 const noteStyle: CSSProperties = {
   fontSize: 11.5,
   fontWeight: 700,
-  color: 'var(--warning-dark)',
+  color: 'var(--warning-darker)',
   marginTop: 3,
 };
 

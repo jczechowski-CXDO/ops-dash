@@ -196,6 +196,44 @@ describe('Settings · an integration row says what its state means', () => {
       seen.set(state, bg);
     });
   });
+
+  // G3 measured the needs-auth pill at 4.09:1 in light, under the 4.5 AA bar,
+  // with README § 7's `-dark` on `-lighter`. jsdom cannot resolve var() against
+  // the token sheet — a contrast assertion here would be the jsdom-contrast
+  // decoration this project has already been caught by once. So what is pinned
+  // is the INVARIANT the Chromium measurement blessed: one rung pair, the same
+  // for all four states, family-matched. A state reverted to `-dark`, or a pill
+  // whose text and background come from different families, fails here.
+  it('pairs -darker text with -lighter fill, identically for all four states', () => {
+    // All four, including `error`, which no fixture carries — a state whose
+    // colours nothing renders is a state nobody can measure.
+    const all: Integration[] = (
+      [
+        ['connected', 'Connected'],
+        ['polling', 'Polling 60s'],
+        ['needs_auth', 'Needs auth'],
+        ['error', 'Unreachable'],
+      ] as const
+    ).map(([state, stateLabel], i) => ({
+      key: `probe-${i}`,
+      name: `Probe ${i}`,
+      detail: 'synthetic row',
+      state,
+      stateLabel,
+      lastSuccessAt: new Date().toISOString(),
+    }));
+
+    at({ integrations: all });
+    const families = new Set<string>();
+    for (const pill of screen.getAllByTestId('integration-state')) {
+      const { color, background } = (pill as HTMLElement).style;
+      const family = /^var\(--([a-z]+)-darker\)$/.exec(color)?.[1];
+      expect(family, `text colour was ${color}`).toBeDefined();
+      expect(background).toBe(`var(--${family}-lighter)`);
+      families.add(family!);
+    }
+    expect(families.size).toBe(all.length);
+  });
 });
 
 describe('Settings · the feed that has never authenticated', () => {
