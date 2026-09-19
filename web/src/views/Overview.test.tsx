@@ -564,3 +564,78 @@ describe('the testid hangs on the Card itself, not on a wrapper', () => {
     expect(screen.getAllByTestId('alert-row')[0]).toHaveStyle({ borderRadius: '12px' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Muted, credited — the README gap the lead ruled on
+// ---------------------------------------------------------------------------
+
+describe('a muted row says who silenced it', () => {
+  const mutedIncident = sev1.incidents.find((i) => i.muted)!;
+  const rowOf = (id: string) =>
+    screen.getAllByTestId('alert-row')[sev1.incidents.findIndex((i) => i.id === id)]!;
+
+  it('credits the muter the DATA names, with no interaction', () => {
+    at();
+    expect(mutedIncident.muted!.by).toBeTruthy();
+    const row = rowOf(mutedIncident.id);
+    expect(row).toHaveTextContent(`Muted by ${mutedIncident.muted!.by}`);
+    // Muting suppresses future alerting, so crediting the wrong person is worse
+    // here than on the ack line, not better.
+    expect(row).not.toHaveTextContent('Muted by John H.');
+  });
+
+  it('credits the local actor when the mute happens here', () => {
+    at();
+    const first = sev1.incidents[0]!;
+    expect(first.muted).toBeUndefined();
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Mute' }));
+    expect(screen.getAllByTestId('alert-row')[0]!).toHaveTextContent('Muted by John H.');
+  });
+
+  it('drops the credit again on unmute, rather than leaving a stale name', () => {
+    at();
+    const row = screen.getAllByTestId('alert-row')[0]!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Mute' }));
+    fireEvent.click(within(screen.getAllByTestId('alert-row')[0]!).getByRole('button', { name: 'Unmute' }));
+    expect(screen.getAllByTestId('alert-row')[0]!).not.toHaveTextContent('Muted by');
+  });
+
+  it('drops the credit on unmuting a row muted in the DATA, not just one muted here', () => {
+    at();
+    // The version of the test above clicks a row with no `muted` in the fixture,
+    // so a `state.muted || incident.muted` credit — which never clears — passes
+    // it. This is the row where the two differ, and it is the one that matters:
+    // an operator who unmutes must see the alert stop reporting itself silenced.
+    const row = rowOf(mutedIncident.id);
+    fireEvent.click(within(row).getByRole('button', { name: 'Unmute' }));
+    const after = rowOf(mutedIncident.id);
+    expect(after).not.toHaveTextContent('Muted by');
+    expect(after).not.toHaveStyle({ opacity: '0.45' });
+    expect(within(after).getByRole('button', { name: 'Mute' })).toBeInTheDocument();
+  });
+
+  it('credits acknowledgement and mute independently, on the rows that carry each', () => {
+    at();
+    // The relationship over all five rows: a credit appears exactly where the
+    // data carries the state, and names exactly the person the data names.
+    for (const incident of sev1.incidents) {
+      const row = rowOf(incident.id);
+      if (incident.muted) expect(row).toHaveTextContent(`Muted by ${incident.muted.by}`);
+      else expect(row).not.toHaveTextContent('Muted by');
+      if (incident.ack) expect(row).toHaveTextContent(`Acknowledged by ${incident.ack.by}`);
+      else expect(row).not.toHaveTextContent('Acknowledged by');
+    }
+  });
+
+  it('shows both credits when a row is acknowledged AND muted', () => {
+    at();
+    // Reached by clicking, because no fixture carries both — the ack credit
+    // comes from the data, the mute credit from the keyboard, on one row.
+    const acked = sev1.incidents.find((i) => i.ack)!;
+    fireEvent.click(within(rowOf(acked.id)).getByRole('button', { name: 'Mute' }));
+    const row = rowOf(acked.id);
+    expect(row).toHaveTextContent(`Acknowledged by ${acked.ack!.by}`);
+    expect(row).toHaveTextContent('Muted by John H.');
+  });
+});

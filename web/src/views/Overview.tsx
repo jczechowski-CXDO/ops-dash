@@ -303,16 +303,33 @@ function AlertRow({
 }) {
   const color = severityColor(incident.severity);
   const dimmed = state.ack || state.muted || state.resolved;
-  // Resolving is click-only in this milestone — the contract carries no
-  // `resolvedBy` — so it credits the person at the keyboard. Acknowledgement can
-  // arrive either way, so it credits whoever the data names and falls back to
-  // the local actor only when the acknowledgement happened here.
-  const credit = state.resolved
-    ? `Resolved by ${ACTOR}`
-    : state.ack
-      ? `Acknowledged by ${incident.ack?.by ?? ACTOR}`
-      : null;
-  const meta = credit ? [credit, ...incident.metaParts] : incident.metaParts;
+  /**
+   * Who did what, in front of the metadata.
+   *
+   * Resolving is click-only in this milestone — the contract carries no
+   * `resolvedBy` — so it credits the person at the keyboard. Acknowledging and
+   * muting can arrive either way, so each credits whoever the DATA names and
+   * falls back to the local actor only when the action happened here.
+   *
+   * DELIBERATE README DEVIATION (the third, after the chip's fill rung and the
+   * strip overline), ruled by the lead. README:81 names three states that dim —
+   * "Acknowledged / muted / resolved" — and then gives prefixes for only two of
+   * them. That is an omission rather than a decision: `muted.by` exists in the
+   * frozen contract, carried and redacted and validated, so the contract and the
+   * README disagree about whether anyone needs to know who silenced an alert.
+   * Muting is the one action here that suppresses FUTURE alerting, which makes
+   * its actor the most consequential of the three, not the least. Uncredited, a
+   * real `muted.by` written by Milestone 2 would go nowhere visible.
+   *
+   * Resolved and acknowledged are alternatives — resolving implies the
+   * acknowledgement — but a muted row can also be acknowledged, so the mute
+   * credit is additive rather than part of the same chain.
+   */
+  const credits: string[] = [];
+  if (state.resolved) credits.push(`Resolved by ${ACTOR}`);
+  else if (state.ack) credits.push(`Acknowledged by ${incident.ack?.by ?? ACTOR}`);
+  if (state.muted) credits.push(`Muted by ${incident.muted?.by ?? ACTOR}`);
+  const meta = [...credits, ...incident.metaParts];
 
   return (
     <Card
