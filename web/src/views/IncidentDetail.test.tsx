@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { Incident } from '@ops-dash/shared';
-import { ageLabel } from '../theme/ageLabel.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 import { clockOf } from '../fixtures/time.js';
 import {
   blastTextColor,
@@ -201,6 +201,41 @@ describe('IncidentDetail', () => {
     expect(credits).toHaveTextContent(ageLabel(inc.ack!.at));
     // Credited to its actor, not to 'you', and not still on offer.
     expect(screen.getByRole('button', { name: 'Acknowledged' })).toBeDisabled();
+
+    // ...and NOT a clock time. This ack is two days old, so "Acknowledged at
+    // 12:30" would read as today — the asymmetry with the mute's "until 16:47"
+    // is load-bearing, not an inconsistency somebody should tidy up. Asserted as
+    // an absence so a later tidy-up back to clockOf fails. Safe to scan the
+    // whole line here: this incident carries no mute, so no legitimate clock.
+    expect(inc.muted, 'this assertion assumes the ack-only incident').toBeUndefined();
+    expect(credits.textContent).not.toMatch(/\d\d:\d\d/);
+  });
+
+  // The multi-word age, stolen from w3-overview's mutation pass: their regex
+  // `\S+ ago` could not match "less than a minute ago", so an invented time slid
+  // past an assertion written to forbid one. Any age phrasing has to survive the
+  // composition, and this is the one that breaks naive patterns.
+  it('composes a multi-word age without mangling it', () => {
+    const base = fixtures.sev1.incidents.find((i) => i.severity === 1)!;
+    at(base.id, 'sev1', {
+      incident: { ...base, ack: { by: 'a.patel@example.com', at: new Date(Date.now() - 10_000).toISOString() } },
+    });
+    expect(screen.getByTestId('incident-credits'))
+      .toHaveTextContent('Acknowledged by a.patel@example.com · less than a minute ago');
+  });
+
+  // A bad timestamp must read as a bad timestamp, never as prose. Composing
+  // UNKNOWN_AGE bare gives "Acknowledged by X an unknown age ago", which is a
+  // sentence, and sentences do not get double-checked.
+  it('drops the time rather than composing an unknown age into prose', () => {
+    const base = fixtures.sev1.incidents.find((i) => i.severity === 1)!;
+    at(base.id, 'sev1', {
+      incident: { ...base, ack: { by: 'a.patel@example.com', at: 'not-a-timestamp' } },
+    });
+    const credits = screen.getByTestId('incident-credits');
+    expect(credits).toHaveTextContent('Acknowledged by a.patel@example.com');
+    expect(credits.textContent).not.toContain(UNKNOWN_AGE);
+    expect(credits.textContent).not.toMatch(/ ago\b/);
   });
 
   it('credits a mute that arrived on the record, with its expiry', () => {
@@ -227,6 +262,28 @@ describe('IncidentDetail', () => {
       }
       unmount();
     }
+  });
+
+  // The same mutation that survived w3-overview's pass, and it survived mine too
+  // until this existed: a local click inventing a time — "Acknowledged by you ·
+  // less than a minute ago" — when nothing on the record says when, because
+  // nothing has been written anywhere. Milestone 4 gives the control a clock;
+  // until then the honest credit has no time in it.
+  //
+  // Pinned by EXACT equality on the whole line, not a regex. Their survivor got
+  // through a pattern written specifically to forbid it, because `\S+ ago`
+  // cannot match a multi-word age; equality has no such gap, and it pins the
+  // ' · ' join between the two local credits as well.
+  it('invents no time for an ack or a mute taken here and now', () => {
+    const inc = fixtures.sev1.incidents.find((i) => !i.ack && !i.muted)!;
+    at(inc.id);
+    expect(screen.queryByTestId('incident-credits'), 'nothing to credit yet').toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+    expect(screen.getByTestId('incident-credits').textContent).toBe('Acknowledged by you');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute service' }));
+    expect(screen.getByTestId('incident-credits').textContent).toBe('Acknowledged by you · Muted by you');
   });
 
   // Caught by mutation: hard-coding `m.reyes@example.com` as the ack actor

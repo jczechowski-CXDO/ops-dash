@@ -11,7 +11,7 @@ import { incidentById, serviceById } from '../fixtures/index.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
 import { clockOf, span } from '../fixtures/time.js';
-import { ageLabel } from '../theme/ageLabel.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
 import {
   blastTextColor,
   severityColor,
@@ -177,8 +177,23 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
    * mute is a deadline, so it keeps `clockOf`'s wall clock. Using one form for
    * both would print "Acknowledged at 10:58" for something two days old.
    */
+  /**
+   * An unparseable timestamp DROPS the time rather than composing it.
+   * "Acknowledged by X an unknown age ago" renders a bad timestamp as prose, and
+   * prose is the one form nobody double-checks. Panel.tsx makes the same branch
+   * for the same reason; `ServiceDetail`'s two `ago` sites still compose bare,
+   * which is the gap queued at 0fdc154 — the hoist that gives this a home must
+   * carry THIS branch, not the bare composition, or it will standardise the bug.
+   */
+  const ackCredit = (ack: NonNullable<Incident['ack']>): string => {
+    const age = ageLabel(ack.at);
+    return age === UNKNOWN_AGE
+      ? `Acknowledged by ${ack.by}`
+      : `Acknowledged by ${ack.by} · ${age} ago`;
+  };
+
   const credits: string[] = [];
-  if (incident.ack) credits.push(`Acknowledged by ${incident.ack.by} · ${ageLabel(incident.ack.at)} ago`);
+  if (incident.ack) credits.push(ackCredit(incident.ack));
   else if (ackedHere) credits.push('Acknowledged by you');
   if (incident.muted) credits.push(muteCredit(incident.muted, 'you'));
   else if (mutedHere) credits.push(muteCredit(undefined, 'you'));
