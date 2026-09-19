@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import type { AuditEvent, EntraSignal, EntraSnapshot } from '@ops-dash/shared';
+import type { AuditEvent, BlastMetric, EntraSignal, EntraSnapshot } from '@ops-dash/shared';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { Card } from '../components/Card.js';
 import { Panel, type PanelState } from '../components/Panel.js';
@@ -7,7 +7,7 @@ import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
 import { ageLabel } from '../theme/ageLabel.js';
-import { severityColor, severityLabel } from '../theme/statusColor.js';
+import { blastTextColor, severityLabel, severityTextColor } from '../theme/statusColor.js';
 
 /* ------------------------------------------------------------------ shared --
  * Entra, Endpoints and Email are one screen shape — a stat row over one or two
@@ -80,12 +80,26 @@ export function TableSection({
 
 /* ------------------------------------------------------------------- Entra -- */
 
+/* A stat VALUE is a 22px/700 word, so it takes the text rung — `blastTextColor`,
+ * the published picker for exactly this union — and never a `-main` token.
+ * `-main` is decoration grade: correct for a dot, a 3px border, a sparkline or a
+ * LinearProgress bar, where the bar is 3:1 non-text, and 2.40:1 against paper as
+ * a word. G3 measured 42 failures across these three screens because every stat
+ * here passed a raw `var(--*-main)` literal, which routes around the helpers
+ * entirely — a published fix cannot reach a call site that calls nothing.
+ *
+ * So each stat derives a `BlastMetric['level']` — the vocabulary the incident
+ * hero already uses for 'a headline number and how alarming it is' — and the
+ * colour comes from the one picker. A new tone is a new member of that union,
+ * not a new literal in this file. */
+type Tone = BlastMetric['level'];
+
 /** Red means a compromise was confirmed; amber means risky sign-ins were seen
  *  but none confirmed; no risky sign-in at all is not a warning. Derived, so the
  *  quiet world is not painted with the sev1 world's alarm. */
-function riskyColor(stats: EntraSnapshot['stats']): string {
-  if (stats.riskyConfirmedCompromised > 0) return 'var(--error-main)';
-  return stats.riskySignIns24h > 0 ? 'var(--warning-main)' : 'var(--text-primary)';
+export function riskyTone(stats: EntraSnapshot['stats']): Tone {
+  if (stats.riskyConfirmedCompromised > 0) return 'error';
+  return stats.riskySignIns24h > 0 ? 'warning' : 'normal';
 }
 
 const signalColumns: Column<EntraSignal>[] = [
@@ -100,8 +114,10 @@ const signalColumns: Column<EntraSignal>[] = [
   {
     key: 'severity',
     label: 'Severity',
+    // The severity WORD, so the text rung. The `-main` rung still belongs on the
+    // dots and borders that carry the same severity elsewhere.
     render: (_v, row) => (
-      <span style={{ color: severityColor(row.severity), fontWeight: 700 }}>
+      <span style={{ color: severityTextColor(row.severity), fontWeight: 700 }}>
         {severityLabel(row.severity)}
       </span>
     ),
@@ -124,7 +140,7 @@ const auditColumns: Column<AuditEvent>[] = [
         {row.result === 'failure' ? (
           <>
             {' · '}
-            <span style={{ color: 'var(--error-main)', fontWeight: 700 }}>failed</span>
+            <span style={{ color: blastTextColor('error'), fontWeight: 700 }}>failed</span>
           </>
         ) : null}
       </>
@@ -148,19 +164,22 @@ export default function Entra({ snapshot }: { snapshot?: EntraSnapshot } = {}) {
           label="Risky sign-ins (24h)"
           value={stats.riskySignIns24h.toLocaleString('en-US')}
           note={`${stats.riskyConfirmedCompromised.toLocaleString('en-US')} confirmed compromised`}
-          valueColor={riskyColor(stats)}
+          valueColor={blastTextColor(riskyTone(stats))}
         />
         <StatCard
           label="Failed sign-ins (24h)"
           value={stats.failedSignIns24h.toLocaleString('en-US')}
           note={`against ${stats.failedSignInAccounts.toLocaleString('en-US')} accounts`}
-          valueColor={stats.failedSignIns24h > 0 ? 'var(--warning-main)' : 'var(--text-primary)'}
+          valueColor={blastTextColor(stats.failedSignIns24h > 0 ? 'warning' : 'normal')}
         />
         <StatCard
           label="MFA coverage"
           value={`${(stats.mfaCoverage * 100).toFixed(1)}%`}
           note={`${stats.mfaUnregistered.toLocaleString('en-US')} users unregistered`}
-          valueColor={stats.mfaUnregistered > 0 ? 'var(--warning-main)' : 'var(--success-main)'}
+          // Full coverage is 'normal', not a green claim: 'good' is not a member
+          // of this union, and inventing a family mapping in a view is the exact
+          // bypass that produced the G3 failures.
+          valueColor={blastTextColor(stats.mfaUnregistered > 0 ? 'warning' : 'normal')}
         />
         <StatCard
           label="Privileged accounts"

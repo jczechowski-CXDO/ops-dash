@@ -1,4 +1,5 @@
 import type { EndpointIssue, EndpointSnapshot } from '@ops-dash/shared';
+import { blastTextColor } from '../theme/statusColor.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
@@ -35,13 +36,18 @@ export default function Endpoints({ snapshot }: { snapshot?: EndpointSnapshot } 
         <StatCard
           label="Patch compliance"
           value={`${(stats.patchCompliance * 100).toFixed(1)}%`}
-          valueColor="var(--warning-main)"
+          // The BAR keeps `-main`: it is a 6px block, judged at the 3:1
+          // non-text bar, and that is the rung `-main` is for. The NUMBER above
+          // it is a word and takes the text rung. See the note in Entra.tsx.
+          valueColor={blastTextColor(stats.patchCompliance < 1 ? 'warning' : 'normal')}
           progress={{ value: Math.round(stats.patchCompliance * 100), color: 'warning' }}
         />
         <StatCard
           label="Agents checked in (7d)"
           value={`${stats.checkedIn7d.toLocaleString('en-US')} / ${stats.total.toLocaleString('en-US')}`}
-          valueColor="var(--success-main)"
+          // Was `--success-main` at 2.40:1. There is no 'good' tone in this
+          // union and a count of agents is a measurement, not an assertion of
+          // health — the green LinearProgress under it carries that.
           progress={{ value: pctOf(stats.checkedIn7d, stats.total), color: 'success' }}
         />
         <StatCard
@@ -52,9 +58,7 @@ export default function Endpoints({ snapshot }: { snapshot?: EndpointSnapshot } 
         <StatCard
           label="Critical patches missing"
           value={stats.criticalPatchesMissing.toLocaleString('en-US')}
-          valueColor={
-            stats.criticalPatchesMissing > 0 ? 'var(--error-main)' : 'var(--text-primary)'
-          }
+          valueColor={blastTextColor(stats.criticalPatchesMissing > 0 ? 'error' : 'normal')}
           // A count, not a ratio — the prototype fills this bar by the count
           // itself. Capped, so 240 missing patches is a full bar rather than an
           // aria-valuenow above its own maximum.

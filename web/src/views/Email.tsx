@@ -1,4 +1,5 @@
-import type { BlockedMessage, EmailSnapshot } from '@ops-dash/shared';
+import type { BlastMetric, BlockedMessage, EmailSnapshot } from '@ops-dash/shared';
+import { blastTextColor } from '../theme/statusColor.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
@@ -12,23 +13,27 @@ import { STAT_GRID, TableSection, VIEW_STACK, ago, signedDelta } from './Entra.j
  * `Malware` nor `Spam`. So this is total over `string` with a real default
  * branch, and the default is proven by a view test rather than by data that
  * happens to cover every case (G0 LOW, carried to G3).
+ *
+ * It returns a TONE, not a colour. These are 14px/700 words in a table, so the
+ * colour comes from `blastTextColor`; `--warning-main` on a word is 2.40:1 and
+ * was one of the 42 failures G3 measured across these three screens.
  */
-export function reasonColor(reason: string): string {
+export function reasonTone(reason: string): BlastMetric['level'] {
   switch (reason) {
     case 'Credential phishing':
     case 'Malware':
-      return 'var(--error-main)';
+      return 'error';
     case 'Impersonation':
     case 'Lookalike domain':
     case 'Malicious URL':
-      return 'var(--warning-main)';
+      return 'warning';
     case 'Spam':
-      return 'var(--text-secondary)';
+      return 'normal';
     // An unrecognised reason is still a blocked message. It renders, as text, in
     // the neutral tone — never dropped, and never given a severity we did not
     // measure.
     default:
-      return 'var(--text-secondary)';
+      return 'normal';
   }
 }
 
@@ -48,10 +53,19 @@ const blockedColumns: Column<BlockedMessage>[] = [
     label: 'Reason',
     align: 'right',
     render: (_v, row) => (
-      <span style={{ color: reasonColor(row.reason), fontWeight: 700 }}>{row.reason}</span>
+      <span style={{ color: blastTextColor(reasonTone(row.reason)), fontWeight: 700 }}>
+        {row.reason}
+      </span>
     ),
   },
 ];
+
+/** A rising number is the alarm, a standing one is a warning, none of it is not
+ *  — the same rule Entra's risky sign-ins use, in the same vocabulary. */
+export function phishingTone(stats: EmailSnapshot['stats']): BlastMetric['level'] {
+  if (stats.credentialPhishingDelta > 0) return 'error';
+  return stats.credentialPhishing24h > 0 ? 'warning' : 'normal';
+}
 
 export default function Email({ snapshot }: { snapshot?: EmailSnapshot } = {}) {
   const { bundle } = useDemoMode();
@@ -82,9 +96,7 @@ export default function Email({ snapshot }: { snapshot?: EmailSnapshot } = {}) {
           label="Quarantined"
           value={stats.quarantined.toLocaleString('en-US')}
           note={`${stats.quarantinePendingReview.toLocaleString('en-US')} pending review`}
-          valueColor={
-            stats.quarantinePendingReview > 0 ? 'var(--warning-main)' : 'var(--text-primary)'
-          }
+          valueColor={blastTextColor(stats.quarantinePendingReview > 0 ? 'warning' : 'normal')}
         />
         <StatCard
           label="Credential phishing"
@@ -92,13 +104,7 @@ export default function Email({ snapshot }: { snapshot?: EmailSnapshot } = {}) {
           note={`${signedDelta(stats.credentialPhishingDelta)} vs yesterday`}
           // Same rule as Entra's risky sign-ins: a rising number is the alarm,
           // a standing one is a warning, none of it is not.
-          valueColor={
-            stats.credentialPhishingDelta > 0
-              ? 'var(--error-main)'
-              : stats.credentialPhishing24h > 0
-                ? 'var(--warning-main)'
-                : 'var(--text-primary)'
-          }
+          valueColor={blastTextColor(phishingTone(stats))}
         />
       </div>
 

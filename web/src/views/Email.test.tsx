@@ -73,11 +73,11 @@ describe('Email', () => {
     const base = fixtures.sev1.email.stats;
     const { unmount } = at();
     expect(stats().getByText('+9 vs yesterday')).toBeInTheDocument();
-    expect(stats().getByText('38')).toHaveStyle({ color: 'var(--error-main)' });
+    expect(stats().getByText('38')).toHaveStyle({ color: 'var(--error-dark)' });
     unmount();
     at({ snapshot: { stats: { ...base, credentialPhishing24h: 11, credentialPhishingDelta: -6 } } });
     expect(stats().getByText('-6 vs yesterday')).toBeInTheDocument();
-    expect(stats().getByText('11')).toHaveStyle({ color: 'var(--warning-main)' });
+    expect(stats().getByText('11')).toHaveStyle({ color: 'var(--warning-dark)' });
   });
 
   it('renders the recently-blocked table with redacted recipients', () => {
@@ -115,9 +115,9 @@ describe('Email', () => {
       },
     });
     expect(screen.getByRole('cell', { name: 'Bulk sender policy' })).toBeInTheDocument();
-    expect(screen.getByText('Bulk sender policy')).toHaveStyle({ color: 'var(--text-secondary)' });
-    expect(screen.getByText('Malware')).toHaveStyle({ color: 'var(--error-main)' });
-    expect(screen.getByText('Spam')).toHaveStyle({ color: 'var(--text-secondary)' });
+    expect(screen.getByText('Bulk sender policy')).toHaveStyle({ color: 'var(--text-primary)' });
+    expect(screen.getByText('Malware')).toHaveStyle({ color: 'var(--error-dark)' });
+    expect(screen.getByText('Spam')).toHaveStyle({ color: 'var(--text-primary)' });
     expect(bodyRows('Recently blocked')).toHaveLength(3);
   });
 
@@ -173,6 +173,27 @@ describe('Email', () => {
     expect(stats().getByText('17,960')).toBeInTheDocument();
     expect(stats().getByText('18.9% of inbound')).toBeInTheDocument();
     expect(stats().queryByText('+9 vs yesterday')).not.toBeInTheDocument();
+  });
+
+  it('paints no word with a decoration-grade -main token', () => {
+    // Call-site level, deliberately. The browser-free contrast suite asserts
+    // that severityTextColor() returns a readable colour — a property of the
+    // FUNCTION, not of any call site — so it stays green while a call site
+    // bypasses the helper with a raw literal. That bypass is what produced G3's
+    // 42 failures across these three screens, and a published fix cannot reach
+    // a call site that calls nothing. This walks what was actually rendered.
+    //
+    // `color` only: `-main` remains correct on a dot, a 3px border and a
+    // LinearProgress bar, which are `background` and judged at the 3:1 non-text
+    // bar. It is words this rules out.
+    for (const opts of [{}, { mode: 'quiet' as const }, { snapshot: { recentBlocked: [message({ reason: 'Bulk sender policy' }), message({ reason: 'Malware' }), message({ reason: 'Impersonation' })] } }]) {
+      const { container, unmount } = at(opts);
+      const offenders = [...container.querySelectorAll<HTMLElement>('*')]
+        .filter((el) => /-main\)/.test(el.style.color))
+        .map((el) => `${el.textContent?.slice(0, 30)} => ${el.style.color}`);
+      expect(offenders).toEqual([]);
+      unmount();
+    }
   });
 
   it('keeps the view testid the shell asserts', () => {

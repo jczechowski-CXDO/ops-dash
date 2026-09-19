@@ -71,7 +71,7 @@ describe('Endpoints', () => {
   it('tints critical patches missing red only when some are missing', () => {
     const base = fixtures.sev1.endpoints.stats;
     const { unmount } = at({ snapshot: { stats: { ...base, criticalPatchesMissing: 38 } } });
-    expect(stats().getByText('38')).toHaveStyle({ color: 'var(--error-main)' });
+    expect(stats().getByText('38')).toHaveStyle({ color: 'var(--error-dark)' });
     unmount();
     at({ snapshot: { stats: { ...base, criticalPatchesMissing: 0 } } });
     expect(stats().getByText('0')).toHaveStyle({ color: 'var(--text-primary)' });
@@ -140,6 +140,27 @@ describe('Endpoints', () => {
     at({ snapshot: { attention: [] } });
     expect(screen.getByText(/No endpoints need attention/)).toBeInTheDocument();
     expect(screen.queryAllByRole('table')).toHaveLength(0);
+  });
+
+  it('paints no word with a decoration-grade -main token', () => {
+    // Call-site level, deliberately. The browser-free contrast suite asserts
+    // that severityTextColor() returns a readable colour — a property of the
+    // FUNCTION, not of any call site — so it stays green while a call site
+    // bypasses the helper with a raw literal. That bypass is what produced G3's
+    // 42 failures across these three screens, and a published fix cannot reach
+    // a call site that calls nothing. This walks what was actually rendered.
+    //
+    // `color` only: `-main` remains correct on a dot, a 3px border and a
+    // LinearProgress bar, which are `background` and judged at the 3:1 non-text
+    // bar. It is words this rules out.
+    for (const opts of [{}, { mode: 'quiet' as const }]) {
+      const { container, unmount } = at(opts);
+      const offenders = [...container.querySelectorAll<HTMLElement>('*')]
+        .filter((el) => /-main\)/.test(el.style.color))
+        .map((el) => `${el.textContent?.slice(0, 30)} => ${el.style.color}`);
+      expect(offenders).toEqual([]);
+      unmount();
+    }
   });
 
   it('keeps the view testid the shell asserts', () => {

@@ -46,9 +46,9 @@ describe('Entra', () => {
     // Scoped to the stat grid: '7' is also the Risky sign-ins COUNT cell in the
     // signals table, so an unscoped getByText matches two elements and throws.
     expect(stats().getByText('Risky sign-ins (24h)')).toBeInTheDocument();
-    expect(stats().getByText('7')).toHaveStyle({ color: 'var(--error-main)' });
+    expect(stats().getByText('7')).toHaveStyle({ color: 'var(--error-dark)' });
     expect(stats().getByText('3 confirmed compromised')).toBeInTheDocument();
-    expect(stats().getByText('1,204')).toHaveStyle({ color: 'var(--warning-main)' });
+    expect(stats().getByText('1,204')).toHaveStyle({ color: 'var(--warning-dark)' });
     expect(stats().getByText('against 96 accounts')).toBeInTheDocument();
     expect(stats().getByText('11')).toHaveStyle({ color: 'var(--text-primary)' });
     expect(stats().getByText('4 Global Administrators')).toBeInTheDocument();
@@ -72,10 +72,10 @@ describe('Entra', () => {
     // 'confirmed compromised', amber means 'seen but unconfirmed', and no risky
     // sign-in at all is not a warning.
     const shapes: { compromised: number; risky: number; expected: string }[] = [
-      { compromised: 3, risky: 7, expected: 'var(--error-main)' },
-      { compromised: 0, risky: 1, expected: 'var(--warning-main)' },
+      { compromised: 3, risky: 7, expected: 'var(--error-dark)' },
+      { compromised: 0, risky: 1, expected: 'var(--warning-dark)' },
       { compromised: 0, risky: 0, expected: 'var(--text-primary)' },
-      { compromised: 1, risky: 1, expected: 'var(--error-main)' },
+      { compromised: 1, risky: 1, expected: 'var(--error-dark)' },
     ];
     for (const shape of shapes) {
       const base = fixtures.sev1.entra;
@@ -120,7 +120,7 @@ describe('Entra', () => {
   it('labels and tints severity through severityLabel / severityColor', () => {
     at();
     const risky = bodyRows('Signals · last 24 hours')[0]!;
-    expect(within(risky).getByText('SEV 1')).toHaveStyle({ color: 'var(--error-main)' });
+    expect(within(risky).getByText('SEV 1')).toHaveStyle({ color: 'var(--error-dark)' });
     expect(screen.getAllByText('INFO').length).toBeGreaterThan(0);
   });
 
@@ -159,7 +159,7 @@ describe('Entra', () => {
         ],
       },
     });
-    expect(screen.getByText('failed')).toHaveStyle({ color: 'var(--error-main)' });
+    expect(screen.getByText('failed')).toHaveStyle({ color: 'var(--error-dark)' });
   });
 
   it('keeps each heading count equal to the rows beneath it', () => {
@@ -189,6 +189,27 @@ describe('Entra', () => {
     expect(screen.getByText(/No signals in the last 24 hours/)).toBeInTheDocument();
     expect(screen.getByText(/No directory changes recorded/)).toBeInTheDocument();
     expect(screen.queryAllByRole('table')).toHaveLength(0);
+  });
+
+  it('paints no word with a decoration-grade -main token', () => {
+    // Call-site level, deliberately. The browser-free contrast suite asserts
+    // that severityTextColor() returns a readable colour — a property of the
+    // FUNCTION, not of any call site — so it stays green while a call site
+    // bypasses the helper with a raw literal. That bypass is what produced G3's
+    // 42 failures across these three screens, and a published fix cannot reach
+    // a call site that calls nothing. This walks what was actually rendered.
+    //
+    // `color` only: `-main` remains correct on a dot, a 3px border and a
+    // LinearProgress bar, which are `background` and judged at the 3:1 non-text
+    // bar. It is words this rules out.
+    for (const opts of [{}, { mode: 'quiet' as const }]) {
+      const { container, unmount } = at(opts);
+      const offenders = [...container.querySelectorAll<HTMLElement>('*')]
+        .filter((el) => /-main\)/.test(el.style.color))
+        .map((el) => `${el.textContent?.slice(0, 30)} => ${el.style.color}`);
+      expect(offenders).toEqual([]);
+      unmount();
+    }
   });
 
   it('keeps the view testid the shell asserts', () => {
