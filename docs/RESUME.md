@@ -239,6 +239,25 @@ the dev server serves the page with local-only asset references and audited `dis
 `https://` strings are React error-message URLs in vendor code), but nobody has *seen* the
 shell. Worth a look before G2 closes.
 
+## Task 10A environment notes — read before starting it
+
+- **G-16: `vite preview` binds `localhost`, not `127.0.0.1`.** Verified on this box:
+  `localhost:4173` → 200, `127.0.0.1:4173` → connection refused (localhost resolves to `::1`).
+  The plan's Playwright config used `127.0.0.1` for both `baseURL` and the `webServer` health
+  check, so **nothing would have started** — the health check times out before a single test
+  runs. Amended at source to `localhost`; the offline assertion already allows either hostname.
+- **The installed Playwright and the cached browser disagree.** `@playwright/test` wants
+  `chromium_headless_shell-1243`; the cache has `chromium-1228`. Either run
+  `npx playwright install chromium`, or pass
+  `executablePath: '/home/hermes/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome'`.
+- **Baselines must cover hover and focus, not just rest.** At G1 a proposed fix for the
+  dark-mode Button would have moved the invisible state from rest to hover — 1.09:1 — and
+  **every static screenshot would have shown it fixed**. A rest-only baseline suite would have
+  certified the bug and made it the acceptance criterion.
+- **Both demo worlds must be photographed.** `?demo=quiet` / `?demo=sev1` works in a production
+  build; the footer control does not, because it is `import.meta.env.DEV`-gated and stripped.
+  Without the query parameter all 28 baselines would be sev1-only (G2 HIGH-2).
+
 ## The published API Wave 3 builds on
 
 Everything the four view agents import. Every signature is unchanged from the plan's

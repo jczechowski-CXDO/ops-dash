@@ -3344,7 +3344,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: [['list']],
-  use: { baseURL: 'http://127.0.0.1:4173', trace: 'retain-on-failure' },
+  // amended at G3 — G-16. This read 127.0.0.1 and nothing would have started:
+  // `vite preview` binds localhost, which resolves to ::1 here, so 127.0.0.1 is
+  // refused outright (verified: localhost -> 200, 127.0.0.1 -> connection
+  // refused). Playwright's webServer health check would time out before a single
+  // test ran. Keep both this and `url` below on localhost; the offline assertion
+  // further down already allows either hostname, so nothing is weakened.
+  use: { baseURL: 'http://localhost:4173', trace: 'retain-on-failure' },
   // Pixel-diff tolerance: tight enough to catch a spacing or colour regression,
   // loose enough to survive font antialiasing across machines.
   expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled' } },
@@ -3354,7 +3360,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run build && npm run preview -- --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
+    url: 'http://localhost:4173',   // amended at G3 — G-16, see above
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
