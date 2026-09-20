@@ -348,5 +348,7 @@ panels.
 else is verified; that needs elapsed time and has not had it.
 
 Milestone 4 — the Entra, Endpoints and Email adapters, the auth seam, and the mutating
-routes that need it — gets its own plan under `docs/superpowers/plans/`. **The server needs Node 24**:
+routes that need it — is planned in
+`docs/superpowers/plans/2026-09-20-ops-dash-m4-write.md`, **not started**, and has four
+open questions for John that change the work. **The server needs Node 24**:
 the store is `node:sqlite`, a built-in.
