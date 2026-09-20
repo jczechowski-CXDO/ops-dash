@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
-import type { ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
+import type { CheckRun, ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
 import type { SourceStatus } from '../poller/schedule.js';
 // The ONE definition of "what is this service now", shared with `index.ts` and
 // the engine. Imported rather than reimplemented: a second copy of this rule
@@ -80,6 +80,11 @@ export type ApiStore = TileStore & {
   getSnapshot(source: string): SourceResult<unknown> | undefined;
   openIncidents(): Array<Record<string, unknown>>;
 };
+
+/** How many individual runs `/api/checks` will hand back. The detail page shows
+ *  a short table, not a log; anything wanting the history should ask for a
+ *  window rather than a bigger page of the newest rows. */
+export const CHECKS_PAGE = 25;
 
 /** The poller, narrowed the same way. Typed from `schedule.ts`'s own
  *  `SourceStatus` rather than a copy of it, so the health payload cannot drift
@@ -568,6 +573,55 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
       // No `empty` here on purpose: "we found no records" and "we could not
       // look" are different claims, and only the first one is about records.
       return { servedAt, result: storeUnavailable(servedAt, cause) };
+    }
+  });
+
+  /**
+   * The individual check runs behind a service's counts.
+   *
+   * `/api/services` says "1 of 2 checks passing"; this says WHICH, when, from
+   * where and how fast. Until it existed the detail page could only print the
+   * counts and admit that the runs were not served — honest, and useless to
+   * anyone diagnosing which pod is down.
+   *
+   * A `SourceResult` like everything else on this surface: `empty: true` when a
+   * service has no runs, which is NOT the same as a read that failed, and a
+   * store error is `error` with no `data` rather than an empty list. "We looked
+   * and there are none" and "we could not look" must not render the same.
+   */
+  app.get('/api/checks', async (request, reply): Promise<SourceResult<CheckRun[]>> => {
+    const servedAt = clock().toISOString();
+    const asked = (request.query as { service?: unknown } | undefined)?.service;
+
+    // Validated against the frozen union, not passed through. The value reaches
+    // a SQL parameter — bound, so not injectable — but an unknown id would
+    // silently return an empty list, and "no runs" for a service that does not
+    // exist reads exactly like "no runs" for one that does.
+    if (typeof asked !== 'string' || !SERVICE_ORDER.includes(asked as ServiceId)) {
+      void reply.code(400);
+      return {
+        fetchedAt: servedAt,
+        degraded: false,
+        error: { code: 'bad_service', message: `service must be one of: ${SERVICE_ORDER.join(', ')}` },
+      };
+    }
+
+    try {
+      const runs = store.runsFor(asked as ServiceId, CHECKS_PAGE);
+      return {
+        fetchedAt: servedAt,
+        degraded: false,
+        data: runs,
+        ...(runs.length === 0 ? { empty: true } : {}),
+      };
+    } catch (cause) {
+      // 200, like every other read failure here: the transport succeeded and
+      // the store did not, and those are different facts.
+      return {
+        fetchedAt: servedAt,
+        degraded: true,
+        error: { code: 'store_unavailable', message: String((cause as Error)?.message ?? cause) },
+      };
     }
   });
 

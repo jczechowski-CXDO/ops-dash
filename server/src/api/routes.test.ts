@@ -19,6 +19,7 @@ import {
   type ServicesResponse,
   type IncidentsResponse,
   type HealthResponse,
+  CHECKS_PAGE,
 } from './routes.js';
 
 /* --------------------------------------------------------------- fixtures */
@@ -1008,7 +1009,7 @@ describe('the API is read-only', () => {
     // Control: without this the method assertion below passes vacuously on an
     // empty list, which is exactly how a guard stops guarding.
     const seen = await registered();
-    expect(seen.map((r) => r.url).sort()).toEqual(['/api/health', '/api/incidents', '/api/services']);
+    expect(seen.map((r) => r.url).sort()).toEqual(['/api/checks', '/api/health', '/api/incidents', '/api/services']);
   });
 
   it('every registered route is GET and nothing else', async () => {
@@ -1226,5 +1227,77 @@ describe('the poller half of /api/health is computed from something that can spe
     // all-clear made of nothing is the emptiest kind of green there is.
     const { body } = await get({ store: memStore(), poller: pollerWith({}) }, '/api/health');
     expect((body as HealthResponse).poller.ok).toBe(false);
+  });
+});
+
+describe('GET /api/checks — the runs behind the counts', () => {
+  const runsFor = (n: number, failing = 0) =>
+    Array.from({ length: n }, (_, i) => ({
+      serviceId: 'zendesk' as const,
+      at: new Date(Date.parse('2026-09-19T12:00:00.000Z') - i * 60_000).toISOString(),
+      check: i % 2 === 0 ? 'Zendesk pod: crexendo' : 'Zendesk pod: netsapiens',
+      region: 'us-east',
+      result: (i < failing ? 'fail' : 'pass') as 'fail' | 'pass',
+      latencyMs: i < failing ? null : 40 + i,
+    }));
+
+  it('serves the individual runs for a service', async () => {
+    // `/api/services` says "1 of 2 checks passing"; this says WHICH, when, from
+    // where and how fast. Without it the detail page could only print the count
+    // and admit the runs were not served — honest, and useless to anyone trying
+    // to work out which pod is down.
+    const store = { ...memStore(), runsFor: () => runsFor(4, 1) };
+    const res = await get({ store }, '/api/checks?service=zendesk');
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { data?: { check: string; result: string }[]; empty?: boolean };
+    expect(body.data).toHaveLength(4);
+    expect(body.data![0]!.result).toBe('fail');
+    expect(body.data![0]!.check).toBe('Zendesk pod: crexendo');
+    expect(body.empty).toBeUndefined();
+  });
+
+  it('empty is a completed read of a service with no runs', async () => {
+    // Amendment 4, at the last hop. Five of seven services have no probe at
+    // all, so this is the common path — and it must not look like a failure.
+    const store = { ...memStore(), runsFor: () => [] };
+    const body = (await get({ store }, '/api/checks?service=claude')).body as {
+      data?: unknown[]; empty?: boolean; error?: unknown;
+    };
+    expect(body.empty).toBe(true);
+    expect(body.data).toEqual([]);
+    expect(body.error).toBeUndefined();
+  });
+
+  it('a store failure is an error with NO data, at 200', async () => {
+    // "We looked and there are none" and "we could not look" must not render
+    // the same, and the transport succeeded either way.
+    const store = { ...memStore(), runsFor: () => { throw new Error('disk gone'); } };
+    const res = await get({ store }, '/api/checks?service=zendesk');
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { data?: unknown; empty?: boolean; error?: { code: string } };
+    expect(body.error?.code).toBe('store_unavailable');
+    expect(body.data).toBeUndefined();
+    expect(body.empty).toBeUndefined();
+  });
+
+  it('refuses a service that is not one of the seven', async () => {
+    // An unknown id would otherwise return an empty list, and "no runs" for a
+    // service that does not exist reads exactly like "no runs" for one that
+    // does. 400, because this is the caller's mistake and not ours.
+    for (const q of ['?service=nope', '?service=', '', '?service[]=zendesk']) {
+      const res = await get({ store: memStore() }, `/api/checks${q}`);
+      expect(res.statusCode, q).toBe(400);
+      expect((res.body as { error?: { code: string } }).error?.code).toBe('bad_service');
+    }
+  });
+
+  it('caps the page rather than serving the whole log', async () => {
+    // The detail page shows a table, not a history. Asserted on the argument
+    // the store was given, because a store that ignored the limit would make a
+    // length assertion pass while the route asked for everything.
+    let askedLimit: number | undefined;
+    const store = { ...memStore(), runsFor: (_id: unknown, limit?: number) => { askedLimit = limit; return runsFor(3); } };
+    await get({ store }, '/api/checks?service=zendesk');
+    expect(askedLimit).toBe(CHECKS_PAGE);
   });
 });
