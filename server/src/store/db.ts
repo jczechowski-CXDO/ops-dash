@@ -51,7 +51,25 @@ export type Store = ReturnType<typeof openStore>;
  * Adding an entry is a deliberate act with a failing test attached, and it
  * belongs to whoever owns the adapter that emits the code — but nobody has to
  * REMEMBER to, because `db.test.ts` greps the adapters for a partial-shaped code
- * that is not registered here and fails naming it. That guard exists because
+ * that is not registered here and fails naming it.
+ *
+ * ## THE THRESHOLD, and it is already met
+ *
+ * The lead's ruling (2026-09-20): *"One entry is a special case. Three is a
+ * category the type system should be carrying, and at that point the amendment
+ * is worth John's time."* **There are three.** The ruling was written against a
+ * set that had one, twenty minutes after it had grown to three, so the condition
+ * it names is satisfied now and the decision is open rather than deferred — it
+ * is with the lead and John, not with this file.
+ *
+ * The one argument that has appeared SINCE the ruling, and that should be
+ * weighed rather than assumed: the ruling's case for the closed set was that it
+ * "forces them to come and add an entry, which is a moment of thought", where a
+ * contract boolean would be filled in without one. The gap guard now forces the
+ * visit mechanically — so the set keeps the moment of thought AND no longer
+ * depends on anyone remembering, which is the combination a boolean field cannot
+ * offer. That strengthens the set rather than the amendment. It does not settle
+ * it, and it is not this file's call. That guard exists because
  * the first version of this set had one entry and there were already three
  * producers, spelled three different ways: `entra_partial`, `epc_partial` and
  * `partial_read`. A closed set keyed on strings that three agents each named
