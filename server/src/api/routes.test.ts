@@ -897,6 +897,89 @@ describe('GET /api/incidents hydrates the operator’s own actions', () => {
   });
 });
 
+describe('a write and the read that shows it — one real store, no stubs', () => {
+  /**
+   * **The seam test for the whole write path**, and the only one here that uses
+   * no stub at all: a real SQLite store, the real routes, POST then GET.
+   *
+   * Every other test in this file stubs one side to isolate a decision. That is
+   * right for a decision and wrong for a JOIN — the hydration tests above pass
+   * with `allIncidentFlags` returning a literal keyed however the test likes,
+   * so they cannot see the one thing that would break this in production: the
+   * store keying flags by one string while the route looks them up by another.
+   * This is the run where those two definitions have to agree.
+   */
+  const NOW = new Date('2026-09-20T09:05:00.000Z');
+  const seeded = () => {
+    const store = memStore();
+    store.putIncident({
+      id: 'INC-7f3a1b2c', ruleKey: 'vendor', serviceId: 'jira', severity: 'sev2',
+      openedAt: '2026-09-20T08:00:00.000Z', resolvedAt: null, summary: 'Jira degraded and our probe is failing',
+    });
+    return store;
+  };
+
+  const app = (store: ApiStore) => buildApi({ store, now: () => NOW, auth: authAs('operator') });
+
+  it('an acknowledgement made through the API is visible on the next read', async () => {
+    const store = seeded();
+    const api = app(store);
+    try {
+      const wrote = await api.inject({ method: 'POST', url: '/api/incidents/INC-7f3a1b2c/ack' });
+      expect(wrote.statusCode).toBe(200);
+
+      const read = await api.inject({ method: 'GET', url: '/api/incidents' });
+      const [incident] = (read.json() as IncidentsResponse).result.data!;
+      // Pinned as a literal, not read back off the write's own reply: the two
+      // must agree, and comparing one to the other would pass if both were
+      // wrong together.
+      expect(incident?.ack).toEqual({ by: 'operator', at: '2026-09-20T09:05:00.000Z' });
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('a mute that has already lapsed does not render as muted', async () => {
+    // The store folds expiry against the clock the ROUTE passes it. Two reads of
+    // the same row, one either side of the expiry, is the only way to see that
+    // the fold is happening at read time rather than at write time.
+    const store = seeded();
+    const before = buildApi({ store, now: () => NOW, auth: authAs('operator') });
+    try {
+      await before.inject({
+        method: 'POST', url: '/api/incidents/INC-7f3a1b2c/mute',
+        payload: { until: '2026-09-20T09:30:00.000Z' },
+      });
+      const live = (((await before.inject({ method: 'GET', url: '/api/incidents' })).json()) as IncidentsResponse).result.data!;
+      expect(live[0]?.muted).toEqual({ by: 'operator', until: '2026-09-20T09:30:00.000Z' });
+    } finally {
+      await before.close();
+    }
+
+    const after = buildApi({ store, now: () => new Date('2026-09-20T10:00:00.000Z'), auth: authAs('operator') });
+    try {
+      const lapsed = (((await after.inject({ method: 'GET', url: '/api/incidents' })).json()) as IncidentsResponse).result.data!;
+      expect('muted' in (lapsed[0] ?? {})).toBe(false);
+    } finally {
+      await after.close();
+    }
+  });
+
+  it('a resolve removes it from the open list, and 404s for an id that never existed', async () => {
+    const store = seeded();
+    const api = app(store);
+    try {
+      expect((await api.inject({ method: 'POST', url: '/api/incidents/INC-nope/ack' })).statusCode).toBe(404);
+      expect((await api.inject({ method: 'POST', url: '/api/incidents/INC-7f3a1b2c/resolve' })).statusCode).toBe(200);
+      const read = (((await api.inject({ method: 'GET', url: '/api/incidents' })).json()) as IncidentsResponse).result;
+      expect(read.data).toEqual([]);
+      expect(read.empty).toBe(true);
+    } finally {
+      await api.close();
+    }
+  });
+});
+
 describe('GET /api/entra mirrors the stored snapshot', () => {
   const SNAPSHOT = { fetchedAt: '2026-09-20T09:00:00.000Z', degraded: false, data: { stats: { guests: 514 } } } as unknown as SourceResult<unknown>;
 
