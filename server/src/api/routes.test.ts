@@ -21,6 +21,7 @@ import {
   type HealthResponse,
   CHECKS_PAGE,
   toWire,
+  ENDPOINTS_SOURCE,
 } from './routes.js';
 import type { SessionAuth } from '../auth/session.js';
 import { UnknownIncident } from '../store/incidentActions.js';
@@ -1015,6 +1016,88 @@ describe('GET /api/entra mirrors the stored snapshot', () => {
     } as unknown as SourceResult<unknown>);
     const { body } = await get({ store }, '/api/entra');
     expect(Object.keys((body as { result: SourceResult<unknown> }).result.error ?? {}).sort()).toEqual(['code', 'message']);
+  });
+});
+
+describe('GET /api/endpoints mirrors the stored estate', () => {
+  const SNAPSHOT = {
+    fetchedAt: '2026-09-20T09:00:00.000Z',
+    degraded: false,
+    data: { stats: { total: 213, checkedIn7d: 176 }, attention: [] },
+  } as unknown as SourceResult<unknown>;
+
+  it('serves the stored result in the envelope every snapshot source uses', async () => {
+    const store = memStore();
+    store.putSnapshot('endpoints', SNAPSHOT);
+    const { statusCode, body } = await get({ store, now: () => new Date('2026-09-20T09:05:00.000Z') }, '/api/endpoints');
+    expect(statusCode).toBe(200);
+    expect(body).toEqual({
+      servedAt: '2026-09-20T09:05:00.000Z',
+      result: { fetchedAt: '2026-09-20T09:00:00.000Z', degraded: false, data: { stats: { total: 213, checkedIn7d: 176 }, attention: [] } },
+    });
+  });
+
+  it('carries data AND error together — the NORMAL case on this estate, not an edge', async () => {
+    // Two of the 213 real machines have no agent installed, so the adapter's
+    // partial path runs on live data every poll. `PARTIAL_READ_CODES` keeps the
+    // payload; a route that treated an error as "no payload" would reproduce
+    // the store defect at the last hop, and the screen would be blank.
+    const store = memStore();
+    store.putSnapshot('endpoints', {
+      fetchedAt: '2026-09-20T09:00:00.000Z',
+      degraded: true,
+      data: { stats: { total: 213 }, attention: [] },
+      error: { code: 'epc_partial', message: 'Two machines have no readable check-in time.' },
+    } as unknown as SourceResult<unknown>);
+    const { body } = await get({ store }, '/api/endpoints');
+    const { result } = body as { result: SourceResult<unknown> };
+    expect(result.data).toEqual({ stats: { total: 213 }, attention: [] });
+    expect(result.error?.code).toBe('epc_partial');
+  });
+
+  it('says NO CREDENTIAL when the composition root says there is none', async () => {
+    const { body } = await get({ store: memStore(), endpointsConfigured: () => false }, '/api/endpoints');
+    expect((body as { result: SourceResult<unknown> }).result.error).toEqual({
+      code: 'endpoints_unconfigured',
+      message: 'No Endpoint Central credential is configured on this host, so the estate has never been polled.',
+    });
+  });
+
+  it('says NEVER POLLED when there IS one — the world where the two answers differ', async () => {
+    const { body } = await get({ store: memStore(), endpointsConfigured: () => true }, '/api/endpoints');
+    expect((body as { result: SourceResult<unknown> }).result.error?.code).toBe('never_polled');
+  });
+
+  it('claims least when nobody told it — an absent predicate is not a claim that nobody set this up', async () => {
+    // A route that read `unconfigured` off a missing dependency would print
+    // "nobody set this up" on a box where somebody had.
+    const { body } = await get({ store: memStore() }, '/api/endpoints');
+    expect((body as { result: SourceResult<unknown> }).result.error?.code).toBe('never_polled');
+  });
+
+  it('a store that throws is an error with no data, at HTTP 200', async () => {
+    const { statusCode, body } = await get({ store: brokenStore() }, '/api/endpoints');
+    expect(statusCode).toBe(200);
+    expect((body as { result: SourceResult<unknown> }).result.error?.code).toBe('store_unavailable');
+  });
+
+  it('strips retryAfterMs here too, so no route leaks what its neighbours hide', async () => {
+    const store = memStore();
+    store.putSnapshot('endpoints', {
+      fetchedAt: '2026-09-20T09:00:00.000Z',
+      degraded: true,
+      error: { code: 'http_429', message: '429 Too Many Requests', retryAfterMs: 30_000 },
+    } as unknown as SourceResult<unknown>);
+    const { body } = await get({ store }, '/api/endpoints');
+    expect(Object.keys((body as { result: SourceResult<unknown> }).result.error ?? {}).sort()).toEqual(['code', 'message']);
+  });
+
+  it('reads the key the composition root will write under', async () => {
+    // The two ends of a source key must be the same string. This file names the
+    // literal; `ENDPOINTS_SOURCE` is exported for the root to import rather
+    // than respell, and if the two ever diverge every test above still passes
+    // while the real dashboard shows a source that was never polled.
+    expect(ENDPOINTS_SOURCE).toBe('endpoints');
   });
 });
 

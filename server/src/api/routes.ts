@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
-import type { CheckRun, EntraSnapshot, ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
+import type { CheckRun, EndpointSnapshot, EntraSnapshot, ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
 import type { SourceStatus } from '../poller/schedule.js';
 // The ONE definition of "what is this service now", shared with `index.ts` and
 // the engine. Imported rather than reimplemented: a second copy of this rule
@@ -223,9 +223,40 @@ export type ApiDeps = {
    * through without knowing who they are.
    */
   auth?: SessionAuth;
+  /**
+   * Whether this host has an Endpoint Central credential.
+   *
+   * A predicate the composition root owns, for `graphCert`'s reason exactly:
+   * **the route never learns where the file is**, and `web/src/guards.test.ts`
+   * forbids a credential path in source. A boolean is all this route needs to
+   * tell two absences apart.
+   *
+   * Absent means "we cannot tell", and the route then says `never_polled`
+   * rather than claiming the host is unconfigured — a route that guessed
+   * `unconfigured` from a missing dependency would print "nobody set this up"
+   * on a box where somebody had.
+   */
+  endpointsConfigured?: () => boolean;
 };
 
 /* ------------------------------------------------------------ source names */
+
+/**
+ * The snapshot key Endpoint Central's poll is stored under.
+ *
+ * **Declared here and imported by the composition root**, the way `index.ts`
+ * already imports `vendorSource` from this file — not respelled at each end. A
+ * key spelled two ways reads as a source that has never been polled, which is
+ * indistinguishable from one that genuinely has not, and the reader would have
+ * no way to tell.
+ *
+ * Note the asymmetry with `ENTRA_SOURCE`, which this file imports FROM
+ * `index.ts`: two source keys, two homes, opposite directions. That is a smell
+ * and the fix is the same one already agreed — both belong in `services.ts`,
+ * which the root and the API both import. Recorded rather than fixed here
+ * because `index.ts` and `services.ts` are not mine.
+ */
+export const ENDPOINTS_SOURCE = 'endpoints';
 
 /** The snapshot key for a vendor's stored `SourceResult`. One function so the
  *  writer (the poller) and the reader (this file) cannot spell it differently;
@@ -383,6 +414,14 @@ export type IncidentsResponse = {
 export type EntraResponse = {
   servedAt: string;
   result: SourceResult<EntraSnapshot>;
+};
+
+/** Endpoint Central, in the same envelope for the same reasons as
+ *  `EntraResponse`. One shape for every snapshot source, so the browser's four
+ *  parsers differ only in what they read out of `data`. */
+export type EndpointsResponse = {
+  servedAt: string;
+  result: SourceResult<EndpointSnapshot>;
 };
 
 export type HealthResponse = {
@@ -555,6 +594,19 @@ const graphUnconfigured = (at: string): SourceResult<never> => ({
   error: {
     code: 'graph_unconfigured',
     message: 'No Graph credential is configured on this host, so Entra has never been polled.',
+  },
+});
+
+/** No Endpoint Central credential on this host. `graphUnconfigured`'s argument,
+ *  for the other adapter that needs one: a deliberate absence is not a failure,
+ *  and the two must not render the same. Its own code so the browser can choose
+ *  a neutral panel rather than a red one. */
+const endpointsUnconfigured = (at: string): SourceResult<never> => ({
+  fetchedAt: at,
+  degraded: true,
+  error: {
+    code: 'endpoints_unconfigured',
+    message: 'No Endpoint Central credential is configured on this host, so the estate has never been polled.',
   },
 });
 
@@ -994,10 +1046,61 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
       // No row at all. Which of the two absences it is, is answered by the same
       // function `/api/health` answers it with — not by a second reading of the
       // credential taken here.
+      //
+      // **`poller.allStatus()['entra']` is the better question and is
+      // deliberately not asked** — *is this source registered* is literally
+      // what we want to know, while `graphHealth` answers it through whether a
+      // certificate is readable. The two disagree in exactly one case:
+      // `graph.json` exists with a missing or non-string `cert_pem`, so the
+      // source IS registered and polling while this reads `configured: false`.
+      // For at most one poll the operator then sees "no Graph credential is
+      // configured" about a host that has one, and the first error row replaces
+      // it with the real reason — it self-corrects to a MORE accurate message,
+      // and `m4-views` renders it neutral rather than red either way, so the
+      // window cannot produce a false all-clear.
+      //
+      // Ruled (lead, `m4-views`, 2026-09-20): not worth two-tier logic plus a
+      // fallback branch — `poller` is optional in `ApiDeps` — against a
+      // transient inaccuracy. **The trigger that would change it**, from
+      // `m4-views`: if `graph.json` ever becomes a file something other than a
+      // human writes — a provisioning script, an installer, config management —
+      // a half-written credential stops being a typo somebody is fixing and
+      // becomes a steady state a machine can hold indefinitely. "At most one
+      // poll" becomes "until somebody notices", and the better question earns
+      // its fallback.
       return {
         servedAt,
         result: graphHealth(deps.graphCert, at).configured ? neverPolled(servedAt) : graphUnconfigured(servedAt),
       };
+    } catch (cause) {
+      return { servedAt, result: storeUnavailable(servedAt, cause) };
+    }
+  });
+
+  /**
+   * The Endpoint Central estate.
+   *
+   * `/api/entra`'s shape, deliberately, down to the envelope — `m4-views`'
+   * `parseEndpoints` sits beside `parseEntra` and reads the same fields.
+   *
+   * **`data` and `error` together is the NORMAL case here, not an edge.** Two
+   * of the 213 real machines have no agent installed, so the adapter's partial
+   * path runs on live data, and `PARTIAL_READ_CODES` now keeps the payload
+   * rather than discarding it. Mirroring instead of re-deriving is exactly what
+   * makes that arrive intact: a route that treated an error as "no payload"
+   * would reproduce, at the last hop, the store defect that was just fixed.
+   */
+  app.get('/api/endpoints', { config: { auth: 'public-read' } }, async (): Promise<EndpointsResponse> => {
+    const at = clock();
+    const servedAt = at.toISOString();
+    try {
+      const stored = store.getSnapshot(ENDPOINTS_SOURCE);
+      if (stored !== undefined) return { servedAt, result: toWire(stored) as SourceResult<EndpointSnapshot> };
+      // Which absence this is, from a predicate the composition root owns. See
+      // `ApiDeps.endpointsConfigured`: absent means we cannot tell, and
+      // `never_polled` is the answer that claims least.
+      const configured = deps.endpointsConfigured?.() ?? true;
+      return { servedAt, result: configured ? neverPolled(servedAt) : endpointsUnconfigured(servedAt) };
     } catch (cause) {
       return { servedAt, result: storeUnavailable(servedAt, cause) };
     }

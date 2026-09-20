@@ -108,6 +108,7 @@ describe('the route table — every route declares a policy, and every write nee
     // the tautology this repo has now paid for four times.
     expect(await routeTable()).toEqual([
       { method: 'GET', url: '/api/checks', policy: 'public-read' },
+      { method: 'GET', url: '/api/endpoints', policy: 'public-read' },
       { method: 'GET', url: '/api/entra', policy: 'public-read' },
       { method: 'GET', url: '/api/health', policy: 'public-read' },
       { method: 'GET', url: '/api/incidents', policy: 'public-read' },
@@ -158,6 +159,7 @@ describe('the route table — every route declares a policy, and every write nee
     expect(await composedTable()).toEqual([
       { method: 'GET', url: '/*', policy: 'public-read' },
       { method: 'GET', url: '/api/checks', policy: 'public-read' },
+      { method: 'GET', url: '/api/endpoints', policy: 'public-read' },
       { method: 'GET', url: '/api/entra', policy: 'public-read' },
       { method: 'GET', url: '/api/health', policy: 'public-read' },
       { method: 'GET', url: '/api/incidents', policy: 'public-read' },
@@ -182,7 +184,12 @@ describe('the route table — every route declares a policy, and every write nee
     // something is exactly these six. A route added anywhere fails one of the
     // two.
     const composed = await composedTable();
-    expect(composed.filter((r) => r.policy === undefined)).toEqual([]);
+    // The message says which DIRECTION the drift went. `expected [] to deeply
+    // equal ['GET /*']` reads identically whether a row appeared or vanished,
+    // and those are opposite events with opposite remedies — two agents spent
+    // real minutes working out which one it was when this last fired.
+    const undeclared = composed.filter((r) => r.policy === undefined).map((r) => `${r.method} ${r.url}`);
+    expect(undeclared, `these routes APPEARED without a policy: ${undeclared.join(', ')}`).toEqual([]);
     expect(composed.filter((r) => r.method !== 'GET').map((r) => `${r.method} ${r.url}`).sort()).toEqual([
       'DELETE /api/session',
       'POST /api/incidents/:id/ack',
@@ -198,7 +205,7 @@ describe('the route table — every route declares a policy, and every write nee
     // the first would be "fixed" by deleting a row. This says the walk found a
     // router at all, against a count and a literal nobody can rename away.
     const rows = await routeTable();
-    expect(rows.length).toBeGreaterThanOrEqual(10);
+    expect(rows.length).toBeGreaterThanOrEqual(11);
     expect(rows.map((r) => `${r.method} ${r.url}`)).toContain('GET /api/services');
   });
 
