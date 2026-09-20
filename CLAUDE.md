@@ -113,6 +113,21 @@ self-hosted. Read-only upstream; the only writes are to our own store.
 The specialists live in `.claude/agents/`. They are long-lived collaborators, not
 one-shot functions, and the difference matters more than it sounds.
 
+**Two idle agents of the same type is the thing to watch for.** Not the headcount —
+three `ops-view`s with two dormant. A duplicate specialist is a reuse failure made
+visible: the second one exists only because the first was not reused, and the two
+now hold divergent, partial pictures of the same files.
+
+Several instances of one type is correct while they are genuinely working in
+parallel — four `ops-view`s building four different views is what that type is for.
+It stops being correct the moment the parallel work ends: collapse back to one and
+give the follow-on task to the agent that owns the files, rather than leaving the
+others dormant and spawning a fresh one later.
+
+A good check before dispatching: *if I spawn this, will there be two live agents of
+this type, and is the second one doing something the first genuinely cannot?* If the
+honest answer is "the first one is idle and knows these files", that is the agent.
+
 **Keep an agent alive while it still owns something.** An idle agent costs nothing.
 What costs is closing the one that wrote `parse.ts` and spawning a fresh
 `ops-view` twenty minutes later to extend `parse.ts` — which happened, repeatedly,
