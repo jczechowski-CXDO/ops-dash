@@ -1977,4 +1977,26 @@ quietly started rendering nothing-as-something. Both agents had independently re
 
 So, sharpening the standing rule: **watch it fail where you said it would.** "It should go red
 somewhere" scores that mutation a success — four tests did fail, all of them the wrong ones.
-The prediction has to name the tests, or it only confirms that something is broken.
+The prediction has to name the tests, or it only confirms that something is broken. Neither
+agent caught the discrepancy in the *other* mutation either, where a total was reported as a
+category; it was only the prediction being specific enough to be provably wrong that made the
+zero legible at all.
+
+Three refinements came out of the re-run, none of them about sparklines:
+
+- **Predict the survivors, not just the kills.** `12118ab`'s fix reddened the shape it named
+  and left `no series at all` green — an empty array takes the component's early return, so
+  there is no frame to catch. Both halves had to hold: a fix that reddened *both* shapes would
+  have been firing for the wrong reason and nobody could have told. Same structure as the
+  `--warning-main` canary. **What must not fire is as load-bearing as what must.**
+- **Separate who predicts from who measures.** "Do not mutate a file you do not own" would not
+  have produced this finding on its own; the prediction *crossing the boundary* and coming back
+  with names is what produced it. Had the author run the mutation in the other's tree, they
+  would have seen four reds and moved on. The slow half is the half with teeth.
+- **The canary is the evidence; the end-to-end kill is the coincidence.** This inverts how both
+  agents had it. `12118ab`'s canary builds both DOMs *literally* — nothing, and an `<svg>` with
+  no polyline — and pins that the new predicate separates them where the old question cannot.
+  That is a property of the predicate and survives a total rewrite of `Sparkline`. The
+  end-to-end kill is a property of today's implementation and evaporates with it. A suite wants
+  both and should know which is which; the observed kill had been treated as the real result
+  and the canary as scaffolding, and it is the other way round.
