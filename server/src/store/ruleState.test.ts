@@ -21,7 +21,7 @@ const onDisk = () => {
  *  probe is failing. Used to prove the override reaches the engine. */
 const firing: ServiceSignal = {
   serviceId: 'jira',
-  vendor: { level: 'outage', platform: 'atlassian' },
+  vendor: { level: 'outage', platform: 'statuspage' },
   ours: { passing: 0, total: 1 },
 };
 
