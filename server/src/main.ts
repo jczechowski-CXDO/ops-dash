@@ -1,6 +1,8 @@
 import { createApp } from './index.js';
 import { createTokenSource } from './http/graphToken.js';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { graphConfigPath } from './http/graphToken.js';
 
 /**
@@ -17,6 +19,16 @@ import { graphConfigPath } from './http/graphToken.js';
  */
 
 const PORT = Number(process.env['PORT'] ?? 4000);
+/**
+ * Where the SQLite file lives.
+ *
+ * An absolute default, not a bare filename. `createApp`'s default is
+ * `'ops-dash.sqlite'`, which SQLite resolves against the process's working
+ * directory — so starting the server from a different directory silently
+ * creates a second, empty database and the dashboard comes up with no history
+ * and no explanation. Found by starting it from `/tmp`.
+ */
+const DB_PATH = process.env['OPS_DASH_DB'] ?? join(homedir(), '.local', 'share', 'ops-dash', 'ops-dash.sqlite');
 /** Loopback by default, and deliberately not `0.0.0.0`. The API has no auth —
  *  `/api/health` says `auth: { mode: 'none' }` out loud — so binding it to
  *  anything reachable would publish the estate's health to the network. The
@@ -82,7 +94,10 @@ async function main(): Promise<void> {
   const configured = existsSync(graphConfigPath());
   log(configured ? 'graph credential found' : 'no graph credential — m365 will read unconfigured');
 
-  const app = createApp(configured ? { tokens: createTokenSource() } : {});
+  // The directory may not exist on a first run, and SQLite will not create it.
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+  const app = createApp({ dbPath: DB_PATH, ...(configured ? { tokens: createTokenSource() } : {}) });
+  log(`store at ${DB_PATH}`);
 
   // Listen BEFORE polling. The first poll round takes a second or two against
   // seven real feeds, and a dashboard that refuses connections while it warms
