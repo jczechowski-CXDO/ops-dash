@@ -7,7 +7,7 @@ description: >
   one per view for Wave 3 (Overview, ServiceDetail+IncidentDetail, 
   Entra+Endpoints+Email, Settings) and for G3 divergence fixes. Owns only the 
   view files named in its dispatch prompt.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
 # View specialist
 

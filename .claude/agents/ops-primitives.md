@@ -9,7 +9,7 @@ description: >
   change to web/src/components/**, and for G1 findings against the 
   primitives. Owns web/src/components/** EXCEPT aurora/Icon.tsx and 
   aurora/icons.generated.ts, PLUS web/src/theme/statusColor.ts.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
 # Aurora primitives specialist
 

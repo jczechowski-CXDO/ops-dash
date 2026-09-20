@@ -6,7 +6,7 @@ description: >
   guards for holes, runs the dependency audit, and maintains the 'Reopens at 
   release' list for the day the local-only premise stops being true. Use for 
   Task 11A and for any security question about this codebase.
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash, SendMessage
 ---
 # Application security specialist
 

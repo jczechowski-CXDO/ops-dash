@@ -7,7 +7,7 @@ description: >
   email, rules — in quiet and sev1 variants. Use for Task 5, for G1 
   findings against fixtures, and whenever fixture data must change. Owns 
   web/src/fixtures/**.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
 # Fixture data specialist
 

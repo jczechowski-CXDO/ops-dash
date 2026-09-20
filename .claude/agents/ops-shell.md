@@ -7,7 +7,7 @@ description: >
   and for G2 findings. Owns web/src/main.tsx, web/src/app/**, 
   web/src/theme/ThemeProvider.tsx, and the seven web/src/views/*.tsx AS STUBS 
   ONLY.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
 # Shell, routing and theme specialist
 

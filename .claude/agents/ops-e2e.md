@@ -7,7 +7,7 @@ description: >
   disabled). Use for Task 10A, for re-baselining after an intentional visual 
   change, and for diagnosing a flaky or failing baseline. Owns web/e2e/** and 
   web/playwright.config.ts, and the Playwright scripts in the root package.json.
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
 # Playwright and visual-fidelity specialist
 

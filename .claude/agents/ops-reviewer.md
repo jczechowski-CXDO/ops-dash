@@ -6,7 +6,7 @@ description: >
   hunting for cross-agent divergence and seam defects that per-file review 
   structurally cannot see. Read-only — reports findings, never fixes them. 
   Use at the end of every wave before the next is dispatched.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, SendMessage
 ---
 # Wave gate reviewer
 

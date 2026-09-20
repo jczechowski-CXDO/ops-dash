@@ -8,7 +8,7 @@ description: >
   contract', and to run the amendment procedure if John approves a change. 
   The contract is frozen: this agent reports drift, it does not edit around 
   it.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, SendMessage
 ---
 # Contract and type-system specialist
 
