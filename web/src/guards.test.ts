@@ -415,6 +415,21 @@ describe('no credentials, ever', () => {
     }
     expect(fires('body.set(' + q + 'refresh_token' + q + ', cfg.refresh_token);')).toBe(false);
     expect(fires('if (!cfg.client_secret) return missing(' + q + 'client_secret' + q + ');')).toBe(false);
+    // The interpolation, which is the ONE honest way to write a credential into
+    // a request: read it off the config object into a template. It fired until
+    // `(?!${)` was added to match `INLINE_BEARER`, so the only way to satisfy
+    // the guard was to write around it — and a guard that refuses honest code
+    // is a guard somebody in a hurry switches off. Found by `m4-auth`.
+    //
+    // These two are here because I added that lookahead in 6e2ba41 WITHOUT
+    // them, which left a control set that could not tell the old pattern from
+    // the new one — the same name-vs-body drift that hid the JSON hole. A
+    // pattern change and its controls belong in the same commit; this is the
+    // second half arriving late.
+    const tick = String.fromCharCode(96);
+    for (const field of ['client_secret', 'refresh_token', 'api_key']) {
+      expect(fires(field + ': ' + tick + '${cfg.' + field + '}' + tick), field).toBe(false);
+    }
   });
 
   it('no certificate, thumbprint or tenant identifier — the Graph shapes', () => {
@@ -857,6 +872,17 @@ describe('HTML sinks', () => {
     ]) {
       expect(URL_ATTRIBUTE.test(innocent), innocent).toBe(false);
     }
+    // The `style` gap, closed as far as an assertion can close it. The
+    // attribute pattern cannot see `style={{ backgroundImage: url(...) }}`,
+    // and rather than teach it to parse CSS this pins the property that makes
+    // the gap theoretical: the CSS url() function appears nowhere in the tree.
+    // True today, measured, and it fails loudly the first time somebody adds
+    // one — which is the moment to look at it, not three commits later.
+    const cssUrl = 'url' + '(';
+    expect(urlScanned().filter((f) => read(f).includes(cssUrl)).map(rel)).toEqual([]);
+    // Assembled from two fragments so this file does not contain the literal it
+    // forbids — the rule it applies to every other pattern here.
+    expect(cssUrl).toHaveLength(4);
     // And the corpus the GUARD ITSELF reads is real — `urlScanned`, the same
     // call, not a second one that happens to agree.
     expect(urlScanned().length).toBeGreaterThan(20);
