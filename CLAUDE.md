@@ -118,11 +118,29 @@ three `ops-view`s with two dormant. A duplicate specialist is a reuse failure ma
 visible: the second one exists only because the first was not reused, and the two
 now hold divergent, partial pictures of the same files.
 
-Several instances of one type is correct while they are genuinely working in
-parallel — four `ops-view`s building four different views is what that type is for.
-It stops being correct the moment the parallel work ends: collapse back to one and
-give the follow-on task to the agent that owns the files, rather than leaving the
-others dormant and spawning a fresh one later.
+**Four tasks for one specialist is a queue, not four agents.** Send them to one
+`ops-view` and let it work through them. This is the default and the wave structure
+in the M1 plan — four views built in parallel — is the exception that has to justify
+itself.
+
+The reason is in this repo's own gate list. **G3 exists solely to catch divergence
+created by running four `ops-view`s at once**; its brief says the expected finding is
+"four agents quietly inventing four different versions of the same thing". That gate
+is a tax we levy on ourselves for the parallelism. One agent through four views
+cannot diverge from itself: by the fourth it is matching conventions it set in the
+first, rather than a reviewer finding three date formatters afterwards.
+
+Parallelism buys wall-clock and costs coherence, and on this project coherence has
+been the expensive one — every serious Milestone 3 defect was two agents each doing
+their half correctly and disagreeing about the join, and the same class recurred
+three times. Spend the parallelism where the tasks are genuinely independent and the
+seam between them is narrow and specified in both briefs. Do not spend it on four
+tasks that share a vocabulary.
+
+When several of one type ARE running in parallel, that stops being correct the moment
+the parallel work ends: collapse back to one and give the follow-on task to the agent
+that owns the files, rather than leaving the others dormant and spawning a fresh one
+later.
 
 A good check before dispatching: *if I spawn this, will there be two live agents of
 this type, and is the second one doing something the first genuinely cannot?* If the
