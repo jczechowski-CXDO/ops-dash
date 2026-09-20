@@ -743,23 +743,21 @@ describe('GET /api/entra mirrors the stored snapshot', () => {
     expect(result.degraded).toBe(true);
   });
 
-  it('a FIRST poll that is partial reaches the client with no data — a finding, not this route’s doing', async () => {
-    // Pinned because it is surprising and because the route is not the place to
-    // fix it. `store/db.ts:262` branches on `result.error` alone, so a result
-    // carrying BOTH a payload and an error is written as a failure and the
-    // payload is discarded. The Entra adapter's partial path returns exactly
-    // that shape.
+  it('a FIRST poll that is partial reaches the client with BOTH halves', async () => {
+    // **This test was the opposite assertion four commits ago, and its own
+    // comment said to rewrite it when the store changed. The store changed.**
     //
-    // Two consequences, both reported to the lead, `m4-entra`, `m4-store` and
-    // `m4-views` rather than absorbed here:
-    //   - a cold start whose first poll is partial serves an error with no data
-    //   - a later partial serves the last FULLY GOOD payload with the partial's
-    //     message attached, so the sentence "these counts are lower bounds"
-    //     describes numbers that are not the numbers on screen
+    // `store/db.ts` used to branch on `result.error` alone, so a result
+    // carrying a payload AND an error was written as a failure and the payload
+    // discarded — reported from here rather than absorbed, pinned as today's
+    // behaviour rather than blessed, and fixed by `m4-store` at `fdc671f` with
+    // a third `putPartial` branch. `m4-entra` then found the case that made it
+    // urgent: `pollEndpoints` takes the partial path on EVERY poll of the real
+    // estate, so the Endpoints screen would have been permanently blank.
     //
-    // If the store changes, this test goes red and should be rewritten to the
-    // new truth. That is the point of pinning it: today's behaviour is recorded
-    // as today's, not blessed.
+    // What the route does is unchanged in both worlds: it mirrors. That is the
+    // property worth having — the fix landed a layer down and this file needed
+    // no code edit, only a truer assertion.
     const store = memStore();
     store.putSnapshot('entra', {
       fetchedAt: '2026-09-20T09:00:00.000Z',
@@ -770,8 +768,13 @@ describe('GET /api/entra mirrors the stored snapshot', () => {
 
     const { body } = await get({ store }, '/api/entra');
     const { result } = body as { result: SourceResult<unknown> };
-    expect(result.data).toBeUndefined();
+    // Both halves, on a source that has never had a successful poll. The
+    // contract is explicit that these are not mutually exclusive: branch on
+    // `error` for the stale badge and on `data` for whether there is anything
+    // to draw, and never infer one from the other.
+    expect(result.data).toEqual({ stats: { guests: 514 } });
     expect(result.error?.code).toBe('entra_partial');
+    expect(result.degraded).toBe(true);
   });
 
   it('never sets empty — a snapshot is one object, not a list', async () => {
