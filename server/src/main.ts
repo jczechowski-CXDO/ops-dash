@@ -1,6 +1,6 @@
 import { createApp } from './index.js';
 import { createTokenSource } from './http/graphToken.js';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { graphConfigPath } from './http/graphToken.js';
@@ -96,7 +96,30 @@ async function main(): Promise<void> {
 
   // The directory may not exist on a first run, and SQLite will not create it.
   mkdirSync(dirname(DB_PATH), { recursive: true });
-  const app = createApp({ dbPath: DB_PATH, ...(configured ? { tokens: createTokenSource() } : {}) });
+  /**
+   * Read the certificate fresh on every health request, not once at startup.
+   *
+   * Swapping a cert that is about to expire is the normal operation here, and
+   * a value captured at boot would keep reporting the old expiry until somebody
+   * restarted — which is precisely the moment nobody is watching. Reading a
+   * small file per health request is cheap; being wrong about when our own
+   * credential dies is not.
+   *
+   * Returns `undefined` rather than throwing when there is no credential:
+   * unconfigured is not a failure, and must not render as one.
+   */
+  const graphCert = (): string | undefined => {
+    const path = graphConfigPath();
+    if (!existsSync(path)) return undefined;
+    const cfg = JSON.parse(readFileSync(path, 'utf8')) as { cert_pem?: unknown };
+    return typeof cfg.cert_pem === 'string' ? readFileSync(cfg.cert_pem, 'utf8') : undefined;
+  };
+
+  const app = createApp({
+    dbPath: DB_PATH,
+    graphCert,
+    ...(configured ? { tokens: createTokenSource() } : {}),
+  });
   log(`store at ${DB_PATH}`);
 
   // Listen BEFORE polling. The first poll round takes a second or two against

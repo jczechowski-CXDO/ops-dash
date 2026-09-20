@@ -71,6 +71,17 @@ export type AppOptions = {
    * repo can reach the real one by forgetting to stub something.
    */
   tokens?: TokenSource;
+  /**
+   * Reads the Graph certificate, so `/api/health` can report how long it has
+   * left. A FUNCTION, and called per request rather than once: this is the one
+   * credential whose entire purpose is to be replaced before it expires, and a
+   * value captured at boot would keep reporting the old expiry until someone
+   * restarted the process — which is exactly when nobody is looking.
+   *
+   * The composition root supplies it because the composition root is the only
+   * place that knows where the credential lives. `api/` never learns the path.
+   */
+  graphCert?: () => string | undefined;
 };
 
 export function createApp(opts: AppOptions = {}) {
@@ -209,7 +220,12 @@ export function createApp(opts: AppOptions = {}) {
 
   const sources: Source[] = [...vendorSources, probeSource, correlateSource, pruneSource];
   const schedule = createSchedule(sources);
-  const api = buildApi({ store, poller: schedule });
+  const api = buildApi({
+    store,
+    poller: schedule,
+    now: () => now(),
+    ...(opts.graphCert ? { graphCert: opts.graphCert } : {}),
+  });
 
   // `sources` is exported so the integration test can drive one deterministic
   // cycle. Running them through `start()` would make those assertions about
