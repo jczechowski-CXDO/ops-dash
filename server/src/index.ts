@@ -40,6 +40,9 @@ import type { ServiceSignal } from './engine/rules.js';
 import { buildApi, vendorSource, SERVICE_ORDER } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
 import { pollEntra } from './adapters/entra/index.js';
+import { pollEndpoints } from './adapters/endpoints/index.js';
+import type { EpcTokenSource } from './adapters/endpoints/token.js';
+import { ENDPOINTS_SOURCE } from './api/routes.js';
 import type { EntraSnapshot } from '@ops-dash/shared';
 
 
@@ -77,6 +80,15 @@ export const ENTRA_INTERVAL_MS = 15 * 60_000;
  *  and folding it into a vendor key would put a Graph failure on the m365 tile —
  *  which has its own feed, saying something else. */
 export const ENTRA_SOURCE = 'entra';
+
+/**
+ * Endpoint Central polls every fifteen minutes, like Entra and for the same
+ * kind of reason rather than by symmetry: a full read is several paged calls
+ * over 213 machines, patch compliance does not move in a minute, and the token
+ * mint limit is ten per ten minutes so a tighter loop spends its budget on
+ * nothing.
+ */
+export const ENDPOINTS_INTERVAL_MS = 15 * 60_000;
 
 /** The source name the synthetic probes write under. Not a `vendorSource`:
  *  probes are our half, and folding them into a vendor key would make a probe
@@ -116,6 +128,21 @@ export type AppOptions = {
    * place that knows where the credential lives. `api/` never learns the path.
    */
   graphCert?: () => string | undefined;
+  /**
+   * The Endpoint Central token source and its API base, supplied together
+   * because neither is useful alone.
+   *
+   * **Constructed ONCE by the caller, never per poll.** Zoho allows ten access
+   * tokens per refresh token per ten minutes, and that is a limit on *minting*
+   * rather than on requests — a source rebuilt each tick mints a fresh token
+   * each tick and dies on the eleventh, presenting as an auth failure rather
+   * than as a rate limit. Same lifetime as `tokens` above and for a sharper
+   * reason.
+   *
+   * `apiBase` travels beside it so `pollEndpoints` never learns where the
+   * credential file is, which is the same line `graphCert` draws.
+   */
+  epc?: { tokens: EpcTokenSource; apiBase: string };
 };
 
 export function createApp(opts: AppOptions = {}) {
@@ -220,6 +247,38 @@ export function createApp(opts: AppOptions = {}) {
       ]
     : [];
 
+  /* ------------------------------------------------------------- endpoints */
+
+  /**
+   * Registered only when a credential exists, exactly as Entra is. A source
+   * that cannot run is not a source that is failing, and `/api/endpoints`
+   * answers `endpoints_unconfigured` rather than `never_polled` because the
+   * composition root is the only place that can tell those two apart.
+   */
+  const endpointsSources: Source[] = opts.epc
+    ? [
+        {
+          name: ENDPOINTS_SOURCE,
+          intervalMs: ENDPOINTS_INTERVAL_MS,
+          run: async () => {
+            const result = await pollEndpoints({
+              tokens: opts.epc!.tokens,
+              apiBase: opts.epc!.apiBase,
+              ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+              now,
+            });
+            // Written whether it succeeded or not. `epc_partial` is registered
+            // in `PARTIAL_READ_CODES`, so a partial keeps its payload — which
+            // matters here more than anywhere: two of the 213 real machines
+            // have no agent installed and always will, so this source takes
+            // the partial path on a large share of polls rather than rarely.
+            store.putSnapshot(ENDPOINTS_SOURCE, result);
+            return result;
+          },
+        },
+      ]
+    : [];
+
   /* ---------------------------------------------------------- correlation */
 
   /**
@@ -316,13 +375,19 @@ export function createApp(opts: AppOptions = {}) {
     },
   };
 
-  const sources: Source[] = [...vendorSources, probeSource, ...entraSources, correlateSource, pruneSource];
+  const sources: Source[] = [...vendorSources, probeSource, ...entraSources, ...endpointsSources, correlateSource, pruneSource];
   const schedule = createSchedule(sources);
   const api = buildApi({
     store,
     poller: schedule,
     now: () => now(),
     ...(opts.graphCert ? { graphCert: opts.graphCert } : {}),
+    // Whether an EPC credential exists, so `/api/endpoints` can tell
+    // "nobody configured this" from "it has not polled yet". Derived from the
+    // same `opts.epc` that decides whether the source is registered at all, so
+    // the two cannot disagree — a route inferring "unconfigured" from its own
+    // second reading of the world is the seam this project keeps paying for.
+    endpointsConfigured: () => opts.epc !== undefined,
   });
 
   // `sources` is exported so the integration test can drive one deterministic

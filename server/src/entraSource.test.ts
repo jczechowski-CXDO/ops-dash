@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApp, ENTRA_SOURCE, ENTRA_INTERVAL_MS } from './index.js';
+import { createApp, ENTRA_SOURCE, ENTRA_INTERVAL_MS, ENDPOINTS_INTERVAL_MS } from './index.js';
+import { ENDPOINTS_SOURCE } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
 import type { EntraSnapshot } from '@ops-dash/shared';
 import { loadFixtures, routes, serve, NOW as STUB_NOW, goodToken } from './adapters/entra/__fixtures__/graphStub.js';
@@ -152,5 +153,55 @@ describe('the previous-snapshot round trip, through the real store', () => {
     const result = await failing.run();
     expect(result.error).toBeDefined();
     expect(result.data).toBeUndefined();
+  });
+});
+
+describe('the endpoints source is registered, and only when it can run', () => {
+  /** Obviously fake, like the Graph one. Constructed here per test because
+   *  these never poll; the production path builds ONE and reuses it, which is
+   *  the whole reason `epc` is an option rather than a config path. */
+  const epc = () => ({
+    tokens: { get: async () => ({ token: 'epc-stub' }), reset: () => {} } as never,
+    apiBase: 'https://endpointcentral.example.com',
+  });
+
+  it('is absent with no credential — and the route can then say so', () => {
+    const a = createApp({ dbPath: ':memory:', fetchImpl: never, now: () => NOW, probes: [] });
+    expect(a.sources.map((s) => s.name)).not.toContain(ENDPOINTS_SOURCE);
+  });
+
+  it('is present with a credential, at the measured fifteen-minute interval', () => {
+    const a = createApp({ dbPath: ':memory:', fetchImpl: never, now: () => NOW, probes: [], epc: epc() });
+    const src = a.sources.find((s) => s.name === ENDPOINTS_SOURCE);
+    expect(src).toBeDefined();
+    // Pinned as a literal, not read back off the constant: the interval is a
+    // measurement — several paged calls over 213 machines, and ten token mints
+    // per ten minutes — and a test reading the constant agrees with any value.
+    expect(src!.intervalMs).toBe(900_000);
+    expect(ENDPOINTS_INTERVAL_MS).toBe(900_000);
+  });
+
+  it('the configured predicate agrees with whether the source exists', async () => {
+    // THE SEAM. `/api/endpoints` distinguishes "nobody set this up" from "it
+    // has not polled yet" using `endpointsConfigured`, and the source list is
+    // built from the same `opts.epc`. If those two ever disagree the route
+    // reports a state the process is not in — a route taking its own second
+    // reading of the world is the defect this repo has counted three times.
+    //
+    // Asserted as an EQUIVALENCE across both worlds rather than as two facts
+    // about today, so a divergent copy fails even when it agrees on one input.
+    // Asserted through the ROUTE rather than an internal, because the route's
+    // answer is the thing an operator sees and the only definition that matters.
+    for (const opt of [undefined, epc()]) {
+      const a = createApp({ dbPath: ':memory:', fetchImpl: never, now: () => NOW, probes: [], ...(opt ? { epc: opt } : {}) });
+      const registered = a.sources.some((s) => s.name === ENDPOINTS_SOURCE);
+      const res = await a.api.inject({ method: 'GET', url: '/api/endpoints' });
+      const code = (JSON.parse(res.body) as { result: { error?: { code: string } } }).result.error?.code;
+      // Never polled either way — nothing has run. The question is WHICH
+      // absence the route names, and it must match whether the source exists.
+      expect(code === 'never_polled').toBe(registered);
+      expect(code === 'endpoints_unconfigured').toBe(!registered);
+      await a.api.close();
+    }
   });
 });
