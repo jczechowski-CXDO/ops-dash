@@ -64,9 +64,15 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   ever — fixtures are committed and pushed, so they leave the machine even though the
   app does not.
 - **A failed fetch must never render as green.** `unknown` is neutral grey, never counts
-  toward the all-clear, and never satisfies the vendor half of the Sev1 rule. `m365` is
-  permanently `unknown` until its adapter exists, so **"ALL SYSTEMS OPERATIONAL" is
-  unreachable in production** — that is correct, not a bug to fix.
+  toward the all-clear, and never satisfies the vendor half of the Sev1 rule.
+  **"ALL SYSTEMS OPERATIONAL" is unreachable in production** — that is correct, not a bug
+  to fix. Note the *reason* has moved and the old one is no longer true: `m365` has had an
+  adapter since M3 and reports a real vendor level. The all-clear now fails on the **ours**
+  half, because `allOperational` demands both halves be affirmatively `operational` and four
+  services have `ours.total === 0` — proofpoint, claude, openai and m365 have no synthetic
+  probe, so their `ours.level` is `unknown`, which is honest rather than broken. If the three
+  proposed probes are approved, **m365 becomes the sole holdout** and the all-clear is one
+  probe away from reachable. Decide that deliberately; do not let it happen as a side effect.
 - **Filter every vendor feed to the part of it that serves us.** Zendesk publishes every
   pod worldwide (`tenants` → `?subdomain=`, 17 incidents down to 10) and Hornetsecurity
   publishes ten datacentres (`locations` → `containers`, and a service can read
