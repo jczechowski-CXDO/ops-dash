@@ -152,18 +152,42 @@ describe('nothing reaches off-box', () => {
   const OTHER_CLIENTS = /XMLHttpRequest|new WebSocket|new EventSource|navigator\.sendBeacon|import\s*\(\s*['"]node:/;
 
   it('only web/src/live/client.ts may reach a network client', () => {
-    const offenders: string[] = [];
+    /**
+     * Stated as the POSITIVE SET, not as "no offenders".
+     *
+     * `expect(offenders).toEqual([])` is the natural way to write this and it is
+     * hollow: a rule that can see nothing reports nothing, and nothing is
+     * exactly what a clean run looks like. Blank every file, break `src()`,
+     * mis-join a path, or hand `stripComments` something it eats whole, and the
+     * empty-offenders form passes while certifying that no file in the SPA
+     * reaches the network. It is a security-relevant claim and it would be
+     * false.
+     *
+     * The API agent found this exact hole in their own import guard hours
+     * before this one was written, in `server/src/guards.test.ts`. It is in
+     * `docs/RESUME.md`: an absence-claim fails by matching nothing, so it has
+     * to be anchored to something it must find. Two files here MUST name a
+     * network client — the door, and the offline test that asserts on the
+     * absence of one — so the assertion names them and cannot survive their
+     * disappearance.
+     */
+    const namers: string[] = [];
     for (const file of src()) {
-      if (file === DOOR) continue;
-      // offline.test.tsx asserts ON fetch being absent, so it names it; the
-      // live tests stub the door's own interface and name no global.
-      if (file.endsWith('offline.test.tsx')) continue;
       const code = stripComments(read(file));
       if (BARE_GLOBAL.test(code) || VIA_GLOBAL.test(code) || OTHER_CLIENTS.test(code)) {
-        offenders.push(rel(file));
+        namers.push(rel(file));
       }
     }
-    expect(offenders).toEqual([]);
+    expect(namers.sort()).toEqual(['web/src/app/offline.test.tsx', 'web/src/live/client.ts']);
+  });
+
+  it('that guard is reading the tree — it cannot pass vacuously', () => {
+    // The anchor's own anchor. If `src()` ever returns a short list because a
+    // directory moved, the assertion above still fails (its two files vanish)
+    // — but this one says WHY in one line instead of leaving the next reader to
+    // work out whether two named files were deleted or the walk went blind.
+    expect(src().length).toBeGreaterThan(50);
+    expect(src().some((f) => f === DOOR)).toBe(true);
   });
 
   it('the one door opens onto our own origin only, with no credential', () => {
