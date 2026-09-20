@@ -2183,6 +2183,44 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## A defence that held for a reason nobody chose (2026-09-20)
+
+Two in one round, and the useful half of each is the agent working out *why* they were safe
+rather than being relieved that they were.
+
+**1. `rows.map(toIncident)` — the index went into the flags parameter.** `Array.map` passes
+`(value, index, array)`, so the second argument of `toIncident` received `0, 1, 2 …` where a
+`Record<string, IncidentFlags>` was expected. `tsc` refused it, and `m4-store` — who does not
+own the file — diagnosed it and sent the one-line fix rather than editing.
+
+**Why it did not ship is the part to keep.** `IncidentFlags` is an *object* type, so `number`
+had nothing in common with it and the compiler had to object. **Had that parameter been
+anything number-shaped, it would have compiled** and hydrated incident 0 with index 0, incident
+1 with index 1 — every acknowledgement and mute attached to the wrong incident, in a shape that
+looks entirely plausible on screen. In `m4-store`'s words: *that protection was free and I
+would not have predicted it.*
+
+So: **prefer an object-shaped parameter where a bare `number` or `string` would do**, in any
+position a callback might pass an index into. It costs a type alias and buys a compiler error
+in the one case that is otherwise silent and wrong.
+
+**2. "My defence is real, and here is the case it misses."** `m4-entra` audited their own
+mutation batteries against `m4-email`'s A/B/A finding, and found no false attribution — then
+worked out that this was **partly luck and partly a defence they had adopted for a different
+reason.** They predict specific test *names* and read the actual failing names, so a stranger's
+commit reddens a differently-named test rather than silently inflating a count. That is why
+they identified somebody else's anomaly as their own.
+
+**But they did not stop at "I was fine."** The gap they found: *if a stranger reddened a test I
+had predicted, I would credit it falsely and never know.* Name-prediction narrows the window; it
+does not close it. Their complement is cheaper than A/B/A where it applies — **scope the run to
+what the mutation can reach**, and reserve A/B/A for a wide blast radius, which is exactly the
+case `m4-email` hit when theirs crossed three suites.
+
+**The shared shape:** in both, the thing that saved them was not the thing they had reasoned
+about. A defence you did not choose is a defence you cannot rely on twice, and the only way to
+find out which you have is to ask why you were safe rather than noting that you were.
+
 ## What a test count is a property of (2026-09-20)
 
 `m4-email` found that a pinned count in a docblock goes stale when somebody else does the right
