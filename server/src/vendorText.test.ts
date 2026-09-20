@@ -217,6 +217,18 @@ export const importsVendorText = (code: string) =>
 const CONSUMERS = [
   'server/src/adapters/email/parse.ts',
   'server/src/adapters/endpoints/queries.ts',
+  // Added 2026-09-20T17:5xZ by the lead, as the adopter, which is what this
+  // list is for. `vendorstatus/` was the one adapter directory that did not
+  // import this helper — and the one whose text is authored furthest outside
+  // this company, since a status-page headline is written by a stranger at a
+  // vendor. Three call sites: two advisory titles and a maintenance title.
+  //
+  // The guard went red on the commit that added them, before anybody ran it
+  // deliberately, which is the design working: the reach claim in
+  // `vendorText.ts`'s docblock now covers five suites and somebody had to read
+  // it to say so.
+  'server/src/adapters/vendorstatus/statuspage.ts',
+  'server/src/adapters/vendorstatus/zendeskSsp.ts',
   'server/src/vendorText.test.ts',
 ];
 
