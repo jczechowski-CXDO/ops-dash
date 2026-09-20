@@ -181,11 +181,28 @@ export function createApp(opts: AppOptions = {}) {
             // yesterday's number. On a cold start this is `undefined` and the
             // adapter OMITS the signal rather than emitting a zero. The count
             // itself is never lost; it stays in `stats.mfaUnregistered`.
+            //
+            // FIXED. This read `!stored.error && stored.data !== undefined`, and
+            // the first condition threw away every partial. `pollEntra` returns
+            // `entra_partial` — data AND an error — whenever a row carries an
+            // unreadable timestamp, which on the live tenant is the ordinary
+            // case rather than an edge. So `previous` was never supplied, and
+            // **`mfa_gap` could never appear in production**: the cold-start
+            // omission was permanent and looked exactly like a quiet estate.
+            //
+            // It is the same defect `m4-store` fixed in `putSnapshot` — reading
+            // "has an error" as "has no usable payload" — committed one layer
+            // up by the person ruling on theirs. `data` and `error` are not
+            // mutually exclusive (amendment 9) and this is the third place that
+            // has had to learn it.
+            //
+            // Asking only about `data` is correct because the store has already
+            // done the judging: a payload only survives beside an error if its
+            // code is in `PARTIAL_READ_CODES`, and a synthesised placeholder
+            // from a failed vendor read never overwrites a good row. By the time
+            // it is here, a present `data` is a real reading.
             const stored = store.getSnapshot(ENTRA_SOURCE);
-            const previous =
-              stored && !stored.error && stored.data !== undefined
-                ? (stored.data as EntraSnapshot)
-                : undefined;
+            const previous = stored?.data !== undefined ? (stored.data as EntraSnapshot) : undefined;
 
             const result = await pollEntra({
               tokens: opts.tokens!,

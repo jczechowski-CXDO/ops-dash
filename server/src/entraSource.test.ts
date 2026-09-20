@@ -1,12 +1,21 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp, ENTRA_SOURCE, ENTRA_INTERVAL_MS } from './index.js';
 import type { FetchLike } from './http/fetchJson.js';
+import type { EntraSnapshot } from '@ops-dash/shared';
+import { loadFixtures, routes, serve, NOW as STUB_NOW, goodToken } from './adapters/entra/__fixtures__/graphStub.js';
+
+/** The shared Graph world, read from the adapter's own fixtures so both sides of
+ *  the seam see one set of payloads rather than two that agree today. */
+const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'adapters', 'entra', '__fixtures__');
 
 /** Obviously fake, like the integration suite's. No test in this repo can reach
  *  the real credential by forgetting to stub something: `createApp` has no token
  *  source unless it is handed one. */
 const stubTokens = { get: async () => ({ token: 'entra-source-stub' }), reset: () => {} } as never;
-const NOW = new Date('2026-09-20T12:00:00Z');
+const NOW = STUB_NOW;
 const never: FetchLike = async () => {
   throw new Error('no network in this suite');
 };
@@ -72,21 +81,76 @@ describe('a failed poll records the attempt without destroying the last good rea
   });
 });
 
-/*
- * NOT COVERED HERE, and said out loud rather than left as a silence.
- *
- * The full previous-snapshot round trip — poll, store, poll again, and the
- * second call receiving the first snapshot as `previous` — needs a fetch stub
- * that answers all thirteen Graph calls with correctly-shaped payloads. That
- * harness exists, as `routes()` and `serve()` in
- * `server/src/adapters/entra/index.test.ts`, and it is not exported.
- *
- * Writing a second one here is the duplication this project has paid for three
- * times: two definitions of one thing, each correct, drifting apart. So the
- * wiring above is tested for what it decides — registration, interval, envelope
- * handling — and the arithmetic that consumes `previous` is tested by the
- * adapter's own suite, including the cold-start omission of `mfa_gap`.
- *
- * The gap is the JOIN, which is precisely the place this project's defects live.
- * Closing it is a one-line export in a file I do not own; requested, not taken.
- */
+describe('the previous-snapshot round trip, through the real store', () => {
+  /**
+   * THE GAP THIS FILE RECORDED, NOW CLOSED — and the delay is the interesting part.
+   *
+   * This block used to be a comment saying the round trip was untested because
+   * the Graph stub lived unexported inside the adapter's own suite, and that
+   * writing a second one would be the duplication this project keeps paying
+   * for. `m4-entra` then extracted `__fixtures__/graphStub.ts` so both sides
+   * could read one world — and nobody wrote this test, so for several hours the
+   * shared module had **no consumer outside its own directory.**
+   *
+   * They found that by checking an assumption about their own file rather than
+   * assuming it was being used. The module was not unused because it was
+   * unnecessary; it was unused because the other end of the seam was never
+   * built. A stub extracted for a caller that never arrives looks, from the
+   * outside, exactly like a stub that is working.
+   *
+   * What this asserts that the adapter's own suite cannot: that the value
+   * `pollEntra` receives as `previous` is **the one the store actually kept**,
+   * not one a test handed it. Two independently-reachable definitions of "the
+   * previous snapshot" — the adapter's parameter and the store's row — compared
+   * against each other rather than either against itself.
+   */
+  const fixtures = loadFixtures((name) =>
+    JSON.parse(readFileSync(join(FIXTURE_DIR, name), 'utf8')) as unknown,
+  );
+
+  const app = (impl: FetchLike) =>
+    createApp({ dbPath: ':memory:', fetchImpl: impl, now: () => NOW, probes: [], tokens: goodToken() });
+
+  it('the second poll sees the first poll STORED, not a value a test supplied', async () => {
+    const { impl, misses } = serve(routes(fixtures));
+    const a = app(impl);
+    const entra = a.sources.find((s) => s.name === ENTRA_SOURCE)!;
+
+    await entra.run();
+    const stored = a.store.getSnapshot(ENTRA_SOURCE)!.data as EntraSnapshot;
+    // Cold start: no prior, so `mfa_gap` is omitted rather than emitted as zero.
+    expect(stored.signals.map((s) => s.key)).not.toContain('mfa_gap');
+
+    await entra.run();
+    const warm = a.store.getSnapshot(ENTRA_SOURCE)!.data as EntraSnapshot;
+    const gap = warm.signals.find((s) => s.key === 'mfa_gap');
+
+    // The signal appears ONLY because the store kept the first reading and the
+    // composition root handed it back. Nothing in this test passes `previous`.
+    expect(gap).toBeDefined();
+    expect(gap!.count).toBe(stored.stats.mfaUnregistered);
+
+    // A route that 404s turns a real assertion into an accidental test of the
+    // error path, so the world has to have answered every call it was asked.
+    expect(misses).toEqual([]);
+  });
+
+  it('a failed second poll does not destroy the first poll payload', async () => {
+    // The store's stale-with-last-good behaviour, exercised through the source
+    // rather than asserted about it — `putSnapshot` branches on `error`, and a
+    // pure failure must leave the good payload where it is.
+    const { impl } = serve(routes(fixtures));
+    const a = app(impl);
+    const entra = a.sources.find((s) => s.name === ENTRA_SOURCE)!;
+    await entra.run();
+    const good = a.store.getSnapshot(ENTRA_SOURCE)!.data as EntraSnapshot;
+    expect(good).toBeDefined();
+
+    const dead = serve([[() => true, { status: 503, body: 'upstream is unwell' }]]);
+    const b = createApp({ dbPath: ':memory:', fetchImpl: dead.impl, now: () => NOW, probes: [], tokens: goodToken() });
+    const failing = b.sources.find((s) => s.name === ENTRA_SOURCE)!;
+    const result = await failing.run();
+    expect(result.error).toBeDefined();
+    expect(result.data).toBeUndefined();
+  });
+});
