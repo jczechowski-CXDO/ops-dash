@@ -694,3 +694,35 @@ export function parseEndpoints(
     value: { servedAt, value: { stats, attention }, ...(resultError === null ? {} : { error: resultError }) },
   };
 }
+
+
+/* -------------------------------------------- POST /api/incidents/:id/<action> */
+
+/**
+ * What a write answered, so the screen can render what is now TRUE rather than
+ * refetching and racing its own write.
+ *
+ * The reply carries the resulting flags on purpose (`m4-auth`'s design), and
+ * this reads them with the same two helpers `incidentView` uses — one
+ * definition, so a flag cannot mean one thing when polled and another when
+ * written. That is the exact divergence this seam produced once already.
+ *
+ * `id` is validated and returned so a caller can refuse a reply about a
+ * different incident. Nothing here defaults a flag: an unreadable `ack` comes
+ * back absent, which renders as "not acknowledged" — the honest reading of a
+ * record we could not read, and visibly different from a name we invented.
+ */
+export function parseIncidentAction(
+  json: unknown,
+): Parsed<{ id: string; ack?: { by: string; at: string }; muted?: { by: string; until: string | null } }> {
+  if (!isRecord(json)) return bad('the response was not an object');
+  const id = str(json['id']);
+  if (id === null) return bad('the write answered without naming the incident');
+  const flags = isRecord(json['flags']) ? json['flags'] : {};
+  const ack = ackOf(flags['ack']);
+  const muted = mutedOf(flags['muted']);
+  return {
+    ok: true,
+    value: { id, ...(ack === null ? {} : { ack }), ...(muted === null ? {} : { muted }) },
+  };
+}

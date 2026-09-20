@@ -6,7 +6,8 @@ import { Panel } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Button } from '../components/aurora/Button.js';
-import { useDashboard } from '../live/DataSource.js';
+import { useDashboard, useIncidentWrites } from '../live/DataSource.js';
+import { RESOLVE_REOPEN_NOTE, RESOLVE_WARNING } from './Overview.js';
 import { panelStateFor } from '../live/model.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
@@ -148,6 +149,14 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
   const [ackedHere, setAckedHere] = useState(false);
   const [mutedHere, setMutedHere] = useState(false);
   const [resolvedHere, setResolvedHere] = useState(false);
+  /**
+   * The live half. `null` on the fixture path, where the flip above IS the
+   * whole behaviour and cannot fail.
+   *
+   * Called before the `!incident` early return because it is a hook. Nothing
+   * about it is conditional; only what the buttons do with it is.
+   */
+  const writes = useIncidentWrites();
 
   if (!incident) {
     // G3 HIGH-2. The Sidebar links straight here, so in the quiet world this is
@@ -184,9 +193,27 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
 
   const elapsedMinutes = Math.max(0, Math.round((Date.now() - new Date(incident.openedAt).getTime()) / 60_000));
 
-  const acked = ackedHere || incident.ack !== undefined;
-  const muted = mutedHere !== (incident.muted !== undefined);
-  const resolved = resolvedHere || incident.resolvedAt !== undefined;
+  /**
+   * Live and demo read the same three booleans from different evidence.
+   *
+   * On the live path nothing is anticipated: the server's reply wins where it
+   * exists, otherwise what the poll hydrated. `ackedHere` deliberately plays no
+   * part — an optimistic tick over a write that 401'd tells the operator the
+   * alert is handled when it is not, which is the most direct wrong-green this
+   * screen can produce.
+   */
+  const write = writes === null ? undefined : writes.writeFor(incident.id);
+  const acked =
+    writes === null ? ackedHere || incident.ack !== undefined : Boolean(write?.ack ?? incident.ack);
+  const muted =
+    writes === null
+      ? mutedHere !== (incident.muted !== undefined)
+      : Boolean(write?.muted ?? incident.muted);
+  const resolved =
+    writes === null
+      ? resolvedHere || incident.resolvedAt !== undefined
+      : write?.resolved === true || incident.resolvedAt !== undefined;
+  const pending = write?.pending === true;
 
   /**
    * M-4. `ack.at` was carried by the contract and dropped on the floor, so the
@@ -211,10 +238,16 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
       : `Acknowledged by ${ack.by} · ${age} ago`;
   };
 
+  // The reply's flags outrank the polled ones for the same reason as the
+  // Overview row: a live ack is true here up to 30 seconds before the poll
+  // carries it, and crediting only `incident.ack` would print "Acknowledged by
+  // you" for an action the server attributed to a named session.
+  const ackFlag = write?.ack ?? incident.ack;
+  const mutedFlag = write?.muted ?? incident.muted;
   const credits: string[] = [];
-  if (incident.ack) credits.push(ackCredit(incident.ack));
+  if (ackFlag) credits.push(ackCredit(ackFlag));
   else if (ackedHere) credits.push('Acknowledged by you');
-  if (incident.muted) credits.push(muteCredit(incident.muted, 'you'));
+  if (mutedFlag) credits.push(muteCredit(mutedFlag, 'you'));
   else if (mutedHere) credits.push(muteCredit(undefined, 'you'));
 
   return (
@@ -248,18 +281,57 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
           ) : null}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="contained" disabled={acked} onClick={() => setAckedHere(true)}>
+            <Button
+              variant="contained"
+              disabled={acked || pending}
+              onClick={() => (writes === null ? setAckedHere(true) : writes.run('ack', incident.id))}
+            >
               {/* 'by you' only when it WAS you. An ack that arrived on the
                   record is credited to its actor on the line above. */}
               {ackedHere ? 'Acknowledged by you' : acked ? 'Acknowledged' : 'Acknowledge'}
             </Button>
-            <Button variant="outlined" color="neutral" onClick={() => setMutedHere((m) => !m)}>
+            <Button
+              variant="outlined"
+              color="neutral"
+              disabled={pending}
+              onClick={() =>
+                writes === null
+                  ? setMutedHere((m) => !m)
+                  : writes.run(muted ? 'unmute' : 'mute', incident.id)
+              }
+            >
               {muted ? 'Unmute service' : 'Mute service'}
             </Button>
-            <Button variant="outlined" color="success" disabled={resolved} onClick={() => setResolvedHere(true)}>
+            <Button
+              variant="outlined"
+              color="success"
+              disabled={resolved || pending}
+              onClick={() => (writes === null ? setResolvedHere(true) : writes.run('resolve', incident.id))}
+            >
               {resolved ? 'Resolved' : 'Mark resolved'}
             </Button>
           </div>
+
+          {/* Live only, and only about OUR write. A failure must never leave
+              this hero looking as though the action took. */}
+          {write?.error === undefined ? null : (
+            <div
+              data-testid="write-error"
+              role="alert"
+              style={{ fontSize: 12, color: blastTextColor('error') }}
+            >
+              {`That did not save — ${write.error.message}`}
+            </div>
+          )}
+          {write?.resolved === true ? (
+            <div data-testid="resolve-note" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {RESOLVE_REOPEN_NOTE}
+            </div>
+          ) : writes === null || resolved ? null : (
+            <div data-testid="resolve-warning" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {RESOLVE_WARNING}
+            </div>
+          )}
         </div>
       </Card>
 

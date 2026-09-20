@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { Incident, StatusLevel } from '@ops-dash/shared';
-import { useDashboard } from '../live/DataSource.js';
+import { useDashboard, useIncidentWrites, type IncidentWrite } from '../live/DataSource.js';
 import {
   feedMarker,
   latencyText,
@@ -18,15 +18,7 @@ import { Sparkline } from '../components/Sparkline.js';
 import { Button } from '../components/aurora/Button.js';
 import { Icon } from '../components/aurora/Icon.js';
 import { Table, type Column } from '../components/aurora/Table.js';
-import {
-  allOperational,
-  isAffirmed,
-  severityColor,
-  severityFillColor,
-  severityLabel,
-  severityOnFillColor,
-  statusColor,
-} from '../theme/statusColor.js';
+import { allOperational, blastTextColor, isAffirmed, severityColor, severityFillColor, severityLabel, severityOnFillColor, statusColor } from '../theme/statusColor.js';
 import { srOnly } from '../theme/srOnly.js';
 import type { HistoryRow } from '../fixtures/index.js';
 // The repository's one HH:MM formatter, already used by ServiceDetail and
@@ -451,15 +443,48 @@ type RowState = { ack: boolean; muted: boolean; resolved: boolean };
  *  white 11px/700; a 13.5px/700 clickable title over an 11.5px meta line; three
  *  small Buttons. Acknowledged/muted/resolved rows drop to opacity 0.45 and the
  *  row stays in place. */
+/**
+ * What Resolve actually does, in two places, because the operator who needs it
+ * most has already clicked.
+ *
+ * **A manual resolve cannot make a live condition false.** If the rule is still
+ * firing, the next correlation tick reopens the incident with the same id and
+ * the acknowledgement intact. That is the detector working — `m4-auth`'s route
+ * is a 200 that declines to pretend otherwise, deliberately, rather than
+ * suppressing the engine at the route — but an operator who clicks Resolve and
+ * watches the row come back within a minute will read it as a bug unless
+ * something says so.
+ *
+ * Split deliberately. **Before the click**: the one fact that changes the
+ * decision, once at the section rather than on every row, because N copies of a
+ * caution is noise and noise is how a caution stops being read. **After the
+ * reopen**: all three facts, at the row, where somebody is actively confused —
+ * and including that the ack survived, which is the part that makes it
+ * tolerable and the part a short tooltip would drop.
+ *
+ * Both are live-only. The demo world has no engine to reopen anything, saying
+ * so there would be false, and every one of the 152 baselines photographs that
+ * world.
+ */
+export const RESOLVE_WARNING =
+  'Resolving records the action and clears the alert now. A condition that is still firing will reopen it.';
+
+export const RESOLVE_REOPEN_NOTE =
+  'Resolved. If this condition is still firing the incident will reopen with the same id — your acknowledgement is kept.';
+
 function AlertRow({
   incident,
   state,
+  write,
   onAck,
   onMute,
   onResolve,
 }: {
   incident: Incident;
   state: RowState;
+  /** What OUR last write to this incident did. `undefined` on the fixture
+   *  path, where a click cannot fail and there is nothing to report. */
+  write?: IncidentWrite;
   onAck: () => void;
   onMute: () => void;
   onResolve: () => void;
@@ -488,11 +513,27 @@ function AlertRow({
    * acknowledgement — but a muted row can also be acknowledged, so the mute
    * credit is additive rather than part of the same chain.
    */
+  /**
+   * The flags OUR write returned outrank the polled ones, and that is not a
+   * nicety.
+   *
+   * A live ack sets `state.ack` from the reply immediately, while
+   * `incident.ack` stays undefined until the next poll up to 30 seconds later.
+   * Crediting `incident.ack` alone therefore fell through to `?? ACTOR` — the
+   * hard-coded demo name — and printed "Acknowledged by John H." for an action
+   * the server attributed to whoever was actually signed in. A wrong name on an
+   * audit line is worse than no name, and it would have been wrong only in the
+   * live world and only for half a minute, which is exactly the window nobody
+   * screenshots.
+   */
+  const ack = write?.ack ?? incident.ack;
+  const mutedFlag = write?.muted ?? incident.muted;
   const credits: string[] = [];
   if (state.resolved) credits.push(`Resolved by ${ACTOR}`);
-  else if (state.ack) credits.push(ackCredit(incident.ack, ACTOR));
-  if (state.muted) credits.push(muteCredit(incident.muted, ACTOR));
+  else if (state.ack) credits.push(ackCredit(ack, ACTOR));
+  if (state.muted) credits.push(muteCredit(mutedFlag, ACTOR));
   const meta = [...credits, ...incident.metaParts];
+  const pending = write?.pending === true;
 
   return (
     <Card
@@ -553,16 +594,51 @@ function AlertRow({
             rgb(0,128,190) — measured from its own DOM, not read off the image.
             The plan's Task 7 text names the variants and not the colours, so
             neutral was a reasonable default and the prototype overrules it. */}
-        <Button size="small" variant="outlined" color="primary" onClick={onAck} disabled={state.ack}>
+        <Button
+          size="small"
+          variant="outlined"
+          color="primary"
+          onClick={onAck}
+          // Disabled while a write is in flight so a second click cannot queue a
+          // second request against a row whose state nobody knows yet.
+          disabled={state.ack || pending}
+        >
           {state.ack ? 'Acknowledged' : 'Acknowledge'}
         </Button>
-        <Button size="small" variant="text" color="primary" onClick={onMute}>
+        <Button size="small" variant="text" color="primary" onClick={onMute} disabled={pending}>
           {state.muted ? 'Unmute' : 'Mute'}
         </Button>
-        <Button size="small" variant="text" color="success" onClick={onResolve} disabled={state.resolved}>
+        <Button
+          size="small"
+          variant="text"
+          color="success"
+          onClick={onResolve}
+          disabled={state.resolved || pending}
+        >
           {state.resolved ? 'Resolved' : 'Resolve'}
         </Button>
       </div>
+
+      {/* What OUR write did, and only ever on the live path. A failure must
+          never leave the row looking as though the action took: the state above
+          is unchanged, and this says why. */}
+      {write?.error === undefined ? null : (
+        <div
+          data-testid="write-error"
+          role="alert"
+          style={{ flexBasis: '100%', fontSize: 11.5, color: blastTextColor('error') }}
+        >
+          {`That did not save — ${write.error.message}`}
+        </div>
+      )}
+      {write?.resolved === true ? (
+        <div
+          data-testid="resolve-note"
+          style={{ flexBasis: '100%', fontSize: 11.5, color: 'var(--text-secondary)' }}
+        >
+          {RESOLVE_REOPEN_NOTE}
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -600,8 +676,34 @@ export default function Overview() {
    * renders in no world today and only the click path is covered by a test.
    */
   const [actions, setActions] = useState<Record<string, RowState>>({});
-  const stateOf = (i: Incident): RowState =>
-    actions[i.id] ?? { ack: Boolean(i.ack), muted: Boolean(i.muted), resolved: Boolean(i.resolvedAt) };
+  /**
+   * The write half, or `null` on the fixture path.
+   *
+   * **The two paths are genuinely different and must not be unified.** A demo
+   * click cannot fail, so flipping a local boolean is right there and it is
+   * what the 152 baselines photograph. A live click CAN fail — 401 when a
+   * session lapsed, 404 for an incident the engine closed underneath us, or the
+   * API simply being down — and an optimistic "Acknowledged" over a write that
+   * never happened is the most direct wrong-green this product can produce: the
+   * operator believes the alert is handled and it is not.
+   *
+   * So on the live path nothing is anticipated. The row reports pending while
+   * the request is in flight and applies only what came back.
+   */
+  const writes = useIncidentWrites();
+  const stateOf = (i: Incident): RowState => {
+    if (writes !== null) {
+      const w = writes.writeFor(i.id);
+      // The server's answer wins where it exists; otherwise what the poll
+      // hydrated. Never a local guess.
+      return {
+        ack: Boolean(w.ack ?? i.ack),
+        muted: Boolean(w.muted ?? i.muted),
+        resolved: w.resolved === true || Boolean(i.resolvedAt),
+      };
+    }
+    return actions[i.id] ?? { ack: Boolean(i.ack), muted: Boolean(i.muted), resolved: Boolean(i.resolvedAt) };
+  };
   const update = (i: Incident, patch: Partial<RowState>) =>
     setActions((prev) => ({ ...prev, [i.id]: { ...stateOf(i), ...patch } }));
 
@@ -680,6 +782,18 @@ export default function Overview() {
           >
             Active incidents
           </SectionHeading>
+          {/* Once, under the heading — not on every row. N copies of a caution
+              is noise, and noise is how a caution stops being read. Live only:
+              the demo world has no engine to reopen anything, so saying it
+              there would be false, and every baseline photographs that world. */}
+          {writes === null || open.length === 0 ? null : (
+            <p
+              data-testid="resolve-warning"
+              style={{ margin: 0, fontSize: 11.5, color: 'var(--text-secondary)' }}
+            >
+              {RESOLVE_WARNING}
+            </p>
+          )}
           <Panel state={incidentsState}>
             {open.map((incident) => {
               const state = stateOf(incident);
@@ -688,11 +802,24 @@ export default function Overview() {
                   key={incident.id}
                   incident={incident}
                   state={state}
-                  onAck={() => update(incident, { ack: true })}
-                  onMute={() => update(incident, { muted: !state.muted })}
+                  {...(writes === null ? {} : { write: writes.writeFor(incident.id) })}
+                  onAck={() =>
+                    writes === null ? update(incident, { ack: true }) : writes.run('ack', incident.id)
+                  }
+                  onMute={() =>
+                    writes === null
+                      ? update(incident, { muted: !state.muted })
+                      : writes.run(state.muted ? 'unmute' : 'mute', incident.id)
+                  }
                   // Resolving also acknowledges: you cannot resolve something
-                  // nobody picked up.
-                  onResolve={() => update(incident, { ack: true, resolved: true })}
+                  // nobody picked up. On the live path the server decides that,
+                  // not this line — `resolveIncident` records the actor and the
+                  // reply says what is now true.
+                  onResolve={() =>
+                    writes === null
+                      ? update(incident, { ack: true, resolved: true })
+                      : writes.run('resolve', incident.id)
+                  }
                 />
               );
             })}

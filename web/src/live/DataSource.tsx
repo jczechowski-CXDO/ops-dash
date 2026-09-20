@@ -1,10 +1,18 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import type { FixtureBundle, HistoryRow } from '../fixtures/index.js';
 import type { CheckRun, EndpointSnapshot, EntraSnapshot } from '@ops-dash/shared';
 import { isServiceId } from '../lib/serviceNames.js';
-import { apiClient, type ApiClient, type ApiPath, type Fetched } from './client.js';
-import { parseChecks, parseEndpoints, parseEntra, parseIncidents, parseServices, type Parsed } from './parse.js';
+import { apiClient, type ApiClient, type ApiPath, type Fetched, type IncidentAction } from './client.js';
+import {
+  parseChecks,
+  parseEndpoints,
+  parseEntra,
+  parseIncidentAction,
+  parseIncidents,
+  parseServices,
+  type Parsed,
+} from './parse.js';
 import { ready, serviceViewOf, type IncidentView, type Load, type ServiceView } from './model.js';
 
 /**
@@ -301,6 +309,113 @@ export function useEndpoints(): Load<EndpointSnapshot> | null {
     source?.intervalMs ?? REFRESH_MS,
   );
   return client === null ? null : load;
+}
+
+/* ------------------------------------------------------------ the four writes */
+
+/**
+ * What we know about one incident because WE changed it.
+ *
+ * `flags` is what the server said is now true, applied immediately so the row
+ * reflects the write without waiting up to 30 seconds for the next poll — and
+ * without refetching, which would race the write that caused it.
+ */
+export type IncidentWrite = {
+  pending: boolean;
+  error?: { code: string; message: string };
+  ack?: { by: string; at: string };
+  muted?: { by: string; until: string | null };
+  /** A resolve that the server accepted. The incident leaves `open` on the next
+   *  poll; until then the row says so itself. */
+  resolved?: boolean;
+  /** The server accepted a resolve AND the condition is still firing, so the
+   *  engine will reopen it. Set by the caller, never inferred here. */
+  reopened?: boolean;
+};
+
+const NO_WRITE: IncidentWrite = { pending: false };
+
+/**
+ * The write half, or `null` on the fixture path.
+ *
+ * ## The one rule this hook exists to enforce: no optimistic update
+ *
+ * The demo screens flip a local boolean on click, which is right for a world
+ * where the click cannot fail. Over the wire it can — 401 when a session
+ * lapsed, 404 for an incident the engine closed underneath us, 403 for a
+ * cross-origin request, or the API simply being down — and an optimistic
+ * "Acknowledged" over a write that never happened is a wrong-green of the most
+ * direct kind this product has: the operator believes the alert is handled, and
+ * it is not.
+ *
+ * So nothing here anticipates the server. The button reports **pending** while
+ * the request is in flight and applies only what came back. A failure leaves
+ * the row exactly as it was and says why — the same rule as every panel on
+ * this dashboard, at the smallest scale it appears.
+ */
+export function useIncidentWrites(): {
+  writeFor: (incidentId: string) => IncidentWrite;
+  run: (action: IncidentAction, incidentId: string, body?: { until?: string | null }) => void;
+} | null {
+  const source = useContext(SourceCtx);
+  const [writes, setWrites] = useState<Record<string, IncidentWrite>>({});
+  const client = source === null ? null : source.client;
+
+  const run = useCallback(
+    (action: IncidentAction, incidentId: string, body?: { until?: string | null }) => {
+      if (client === null) return;
+      setWrites((prev) => ({ ...prev, [incidentId]: { ...(prev[incidentId] ?? NO_WRITE), pending: true } }));
+      void (async () => {
+        const got = await client.act(action, incidentId, body);
+        if (!got.ok) {
+          const { error } = got;
+          // The previous state is KEPT. A failed write changes nothing, and a
+          // row that reverts to a different shape than it had would be a second
+          // lie on top of the first.
+          setWrites((prev) => ({ ...prev, [incidentId]: { ...(prev[incidentId] ?? NO_WRITE), pending: false, error } }));
+          return;
+        }
+        const parsed = parseIncidentAction(got.json);
+        if (!parsed.ok) {
+          const { error } = parsed;
+          setWrites((prev) => ({ ...prev, [incidentId]: { ...(prev[incidentId] ?? NO_WRITE), pending: false, error } }));
+          return;
+        }
+        if (parsed.value.id !== incidentId) {
+          // A reply about a different incident is not a success we can apply to
+          // this row. Refused rather than rendered against the wrong id.
+          setWrites((prev) => ({
+            ...prev,
+            [incidentId]: {
+              ...(prev[incidentId] ?? NO_WRITE),
+              pending: false,
+              error: { code: 'wrong_incident', message: `the write answered about ${parsed.value.id}` },
+            },
+          }));
+          return;
+        }
+        const { ack, muted } = parsed.value;
+        // Built from the REPLY, not merged over the previous write: the server
+        // has just told us the whole truth about this incident's flags, and an
+        // unmute that leaves a stale `muted` behind is the bug that merging
+        // creates.
+        setWrites((prev) => ({
+          ...prev,
+          [incidentId]: {
+            pending: false,
+            ...(ack === undefined ? {} : { ack }),
+            ...(muted === undefined ? {} : { muted }),
+            ...(action === 'resolve' ? { resolved: true, reopened: prev[incidentId]?.reopened ?? false } : {}),
+          },
+        }));
+      })();
+    },
+    [client],
+  );
+
+  const writeFor = useCallback((incidentId: string) => writes[incidentId] ?? NO_WRITE, [writes]);
+
+  return client === null ? null : { writeFor, run };
 }
 
 export function LiveDataProvider({
