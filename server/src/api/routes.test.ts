@@ -1,4 +1,9 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, beforeAll, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { X509Certificate } from 'node:crypto';
 import type { CheckRun, SourceResult } from '@ops-dash/shared';
 import { openStore, type Store } from '../store/db.js';
 import { createApp } from '../index.js';
@@ -8,6 +13,7 @@ import {
   apiRoutes,
   vendorSource,
   SERVICE_ORDER,
+  type ApiDeps,
   type ApiStore,
   type ApiPoller,
   type ServicesResponse,
@@ -77,7 +83,7 @@ const brokenStore = (): ApiStore => ({
   },
 });
 
-const get = async (deps: { store: ApiStore; poller?: ApiPoller }, url: string) => {
+const get = async (deps: ApiDeps, url: string) => {
   const app = buildApi(deps);
   try {
     const res = await app.inject({ method: 'GET', url });
@@ -637,9 +643,22 @@ describe('GET /api/incidents', () => {
 /* -------------------------------------------------------------- /api/health */
 
 describe('GET /api/health reports the store and the poller separately', () => {
+  /**
+   * Thirty seconds after `statusOf()`'s last success, so those sources are
+   * genuinely fresh against a 60-second cadence.
+   *
+   * These two tests did not name a clock and did not need to, until freshness
+   * became part of `healthy`: `lastOkAt` at noon read as healthy at any hour of
+   * any day, which is the bug — a `lastOkAt` is only healthy relative to a
+   * cadence and an instant. They went red the moment the rule landed, which is
+   * the right way round.
+   */
+  const NOW = new Date('2026-09-19T12:00:30.000Z');
+  const clock = () => NOW;
+
   it('a broken store with a healthy poller: store not ok, poller ok', async () => {
     const { statusCode, body } = await get(
-      { store: brokenStore(), poller: pollerWith({ 'vendor:jira': statusOf() }) },
+      { store: brokenStore(), poller: pollerWith({ 'vendor:jira': statusOf() }), now: clock },
       '/api/health',
     );
     const health = body as HealthResponse;
@@ -660,6 +679,7 @@ describe('GET /api/health reports the store and the poller separately', () => {
           'vendor:jira': statusOf(),
           'probes': statusOf({ lastError: 'threw: probeFn is not a function' }),
         }),
+        now: clock,
       },
       '/api/health',
     );
@@ -690,6 +710,276 @@ describe('GET /api/health reports the store and the poller separately', () => {
     const store = memStore();
     const { body } = await get({ store }, '/api/health');
     expect((body as HealthResponse).auth.mode).toBe('none');
+  });
+});
+
+/* ------------------------------------------- /api/health: the stopped timer */
+
+describe('GET /api/health does not call a source healthy because it stopped complaining', () => {
+  /** Noon, and `statusOf()` succeeded at noon. Every age below is stated as a
+   *  distance from this instant rather than from the wall clock, because the
+   *  whole rule is arithmetic between the two. */
+  const NOW = new Date('2026-09-19T12:00:00.000Z');
+  const clock = () => NOW;
+  const secondsAgo = (n: number) => new Date(NOW.getTime() - n * 1000).toISOString();
+
+  const health = async (sources: Record<string, SourceStatus>) => {
+    const { body } = await get({ store: memStore(), poller: pollerWith(sources), now: clock }, '/api/health');
+    return body as HealthResponse;
+  };
+
+  it('a source whose timer stopped is stale, and is NOT in healthy', async () => {
+    // The defect, stated as a fixture: nothing is erroring, a poll succeeded,
+    // and the poller has been dead for ten minutes. 600s against a 60s cadence
+    // is well past 3x, and until now this was `healthy` — the last place in the
+    // chain where something broken read calm.
+    const h = await health({ 'vendor:jira': statusOf({ lastOkAt: secondsAgo(600), lastRunAt: secondsAgo(600) }) });
+
+    expect(h.poller.stale).toEqual(['vendor:jira']);
+    expect(h.poller.healthy).toEqual([]);
+    expect(h.poller.ok).toBe(false);
+    expect(h.poller.staleness['vendor:jira']).toEqual({
+      stale: true,
+      reason: 'silent',
+      ageMs: 600_000,
+      thresholdMs: 180_000,
+    });
+  });
+
+  it('a source answering inside its cadence is healthy and says how fresh', async () => {
+    // The world where the candidates differ: same shape, 30 seconds instead of
+    // 600. Without this the test above would pass against a rule that called
+    // everything stale.
+    const h = await health({ 'vendor:jira': statusOf({ lastOkAt: secondsAgo(30), lastRunAt: secondsAgo(30) }) });
+
+    expect(h.poller.healthy).toEqual(['vendor:jira']);
+    expect(h.poller.stale).toEqual([]);
+    expect(h.poller.ok).toBe(true);
+    expect(h.poller.staleness['vendor:jira']).toEqual({
+      stale: false,
+      reason: 'fresh',
+      ageMs: 30_000,
+      thresholdMs: 180_000,
+    });
+  });
+
+  it('judges each source against ITS OWN cadence, not one shared threshold', async () => {
+    // Four minutes old. Stale for a 60-second source, fresh for a 15-minute
+    // one, and a single global threshold cannot say both.
+    const h = await health({
+      fast: statusOf({ intervalMs: 60_000, lastOkAt: secondsAgo(240) }),
+      slow: statusOf({ intervalMs: 900_000, lastOkAt: secondsAgo(240) }),
+    });
+
+    expect(h.poller.stale).toEqual(['fast']);
+    expect(h.poller.healthy).toEqual(['slow']);
+    expect(h.poller.staleness['fast']!.thresholdMs).toBe(180_000);
+    expect(h.poller.staleness['slow']!.thresholdMs).toBe(2_700_000);
+  });
+
+  it('separates a wedged source from a silent one, because the remedies differ', async () => {
+    // Still ticking, still skipping: the run never settles. The timer is alive
+    // and the upstream is hung.
+    const h = await health({
+      wedged: statusOf({ lastOkAt: secondsAgo(600), lastSkipAt: secondsAgo(5), skipped: 9 }),
+      silent: statusOf({ lastOkAt: secondsAgo(600) }),
+    });
+
+    expect(h.poller.staleness['wedged']!.reason).toBe('wedged');
+    expect(h.poller.staleness['silent']!.reason).toBe('silent');
+    // Both are stale. The reason changes what you go and look at, not whether
+    // the number in front of you can be trusted.
+    expect(h.poller.stale.sort()).toEqual(['silent', 'wedged']);
+  });
+
+  it('reports an erroring source as failing, not as stale, however old it is', async () => {
+    // `stale` is narrow on purpose. A feed that has 503'd for an hour is
+    // overdue too, and saying so adds nothing: `failing` is already the more
+    // specific fact and is the one with a different remedy.
+    const h = await health({
+      'vendor:jira': statusOf({ lastOkAt: secondsAgo(3600), lastError: 'http_503: 503 Service Unavailable' }),
+    });
+
+    expect(h.poller.failing).toEqual(['vendor:jira']);
+    expect(h.poller.stale).toEqual([]);
+    // …and the staleness is still visible in the evidence, so nothing is lost.
+    expect(h.poller.staleness['vendor:jira']!.stale).toBe(true);
+    expect(h.poller.staleness['vendor:jira']!.ageMs).toBe(3_600_000);
+  });
+
+  it('reports a never-succeeded source as that, not as stale', async () => {
+    // Built by omission rather than by `lastOkAt: undefined`:
+    // `exactOptionalPropertyTypes` is on, and "the key is absent" is a
+    // different type from "the key holds undefined" — which is the distinction
+    // the field is carrying, so the fixture has to honour it.
+    const { lastOkAt: _neverSucceeded, ...neverOk } = statusOf();
+    const h = await health({ 'vendor:m365': neverOk });
+
+    expect(h.poller.neverSucceeded).toEqual(['vendor:m365']);
+    expect(h.poller.stale).toEqual([]);
+    expect(h.poller.healthy).toEqual([]);
+    // No age, because "never" has none. Zero would be the freshest possible
+    // value for the least fresh possible state.
+    expect(h.poller.staleness['vendor:m365']).toEqual({
+      stale: true,
+      reason: 'never-succeeded',
+      thresholdMs: 180_000,
+    });
+  });
+
+  it('measures staleness from the injected clock, not the wall clock', async () => {
+    // Same status, two clocks, different answers. The fixture is fresh at the
+    // injected instant and hours stale against the real one.
+    const status = { 'vendor:jira': statusOf({ lastOkAt: secondsAgo(30), lastRunAt: secondsAgo(30) }) };
+    const injected = await health(status);
+    expect(injected.poller.healthy).toEqual(['vendor:jira']);
+    // The evidence map as well as the buckets. They are computed by two
+    // different calls, so a clock fixed in one and not the other is a real
+    // possibility — and was, until this line: the mutation that pointed the map
+    // at `new Date()` left every other assertion here green.
+    expect(injected.poller.staleness['vendor:jira']!.ageMs).toBe(30_000);
+
+    const { body } = await get({ store: memStore(), poller: pollerWith(status) }, '/api/health');
+    expect((body as HealthResponse).poller.healthy).toEqual([]);
+    expect((body as HealthResponse).poller.stale).toEqual(['vendor:jira']);
+  });
+});
+
+/* ------------------------------------ /api/health: the credential's own life */
+
+describe('GET /api/health watches the credential this process authenticates with', () => {
+  /**
+   * A throwaway certificate, generated at runtime into a temp directory.
+   *
+   * The same approach as `store/certExpiry.test.ts` and for the same reason:
+   * the guards forbid a certificate block anywhere in source, so a committed
+   * fixture would mean either weakening a guard or keeping a certificate in git
+   * history forever. It is a real X.509 structure, so the dates come out of a
+   * parser rather than out of a stub that agrees with the code.
+   */
+  let DIR: string;
+  let PEM: string;
+  let NOT_AFTER: number;
+
+  beforeAll(() => {
+    DIR = mkdtempSync(join(tmpdir(), 'ops-dash-api-cert-'));
+    const keyPath = join(DIR, 'graph.key');
+    const certPath = join(DIR, 'graph.crt');
+    const stamp = (offsetDays: number) =>
+      new Date(Date.now() + offsetDays * 86_400_000).toISOString().replace(/[-:T]/g, '').replace(/\.\d+Z$/, 'Z');
+    execFileSync(
+      'openssl',
+      ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certPath,
+        '-not_before', stamp(0), '-not_after', stamp(400), '-subj', '/CN=ops-dash-api-health-test'],
+      { stdio: 'ignore' },
+    );
+    // Key and certificate concatenated, which is the shape of the real file.
+    PEM = readFileSync(keyPath, 'utf8') + readFileSync(certPath, 'utf8');
+    // Read independently of the code under test, so no assertion below reaches
+    // the date by the same path the route did.
+    NOT_AFTER = Date.parse(new X509Certificate(PEM).validTo);
+  });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+
+  const graph = async (deps: Partial<ApiDeps>, now: Date) => {
+    const { body } = await get({ store: memStore(), now: () => now, ...deps }, '/api/health');
+    return (body as HealthResponse).credential.graph;
+  };
+  const DAY = 86_400_000;
+
+  it('reports no credential as unconfigured, which is not a failure', async () => {
+    // The default state of a machine nobody has given a credential to. It must
+    // not read as expired, and it must not read as needing attention — the same
+    // rule as "no probe data is not 100% uptime", pointed the other way.
+    expect(await graph({}, new Date())).toEqual({
+      configured: false,
+      note: 'no Graph credential is configured for this process',
+    });
+  });
+
+  it('reports a supplier that returns nothing as unconfigured too, not as unreadable', async () => {
+    expect(await graph({ graphCert: () => undefined }, new Date())).toEqual({
+      configured: false,
+      note: 'no Graph credential is configured for this process',
+    });
+  });
+
+  it('reports days remaining, counted from the certificate’s own notAfter', async () => {
+    const health = await graph({ graphCert: () => PEM }, new Date(NOT_AFTER - 200 * DAY - 1000));
+    expect(health).toMatchObject({
+      configured: true,
+      level: 'ok',
+      needsAttention: false,
+      daysLeft: 200,
+      notAfter: new Date(NOT_AFTER).toISOString(),
+    });
+  });
+
+  it('warns inside ninety days and escalates inside thirty', async () => {
+    // Two instants, one certificate: the battery run where the answers differ.
+    const warn = await graph({ graphCert: () => PEM }, new Date(NOT_AFTER - 60 * DAY));
+    const critical = await graph({ graphCert: () => PEM }, new Date(NOT_AFTER - 10 * DAY));
+    expect([warn, critical].map((c) => (c.configured ? [c.level, c.needsAttention] : ['unconfigured']))).toEqual([
+      ['warn', true],
+      ['critical', true],
+    ]);
+  });
+
+  it('reports an expired certificate as expired, and needing attention', async () => {
+    const health = await graph({ graphCert: () => PEM }, new Date(NOT_AFTER + DAY));
+    expect(health).toMatchObject({ configured: true, level: 'expired', needsAttention: true });
+  });
+
+  it('reports a supplier that throws as unreadable, carrying the reason, and does not 500', async () => {
+    // Reading the file is the caller's job and it can fail. "We cannot read our
+    // own credential" is exactly what this field exists to surface, and a
+    // health route that dies on it has taken away the page that explains it.
+    const { statusCode, body } = await get(
+      {
+        store: memStore(),
+        graphCert: () => {
+          throw new Error('ENOENT: no such file or directory');
+        },
+      },
+      '/api/health',
+    );
+    expect(statusCode).toBe(200);
+    expect((body as HealthResponse).credential.graph).toEqual({
+      configured: true,
+      needsAttention: true,
+      level: 'unreadable',
+      reason: 'ENOENT: no such file or directory',
+    });
+  });
+
+  it('reports rubbish as unreadable rather than parsing it leniently', async () => {
+    const health = await graph({ graphCert: () => 'not a certificate' }, new Date());
+    expect(health.configured).toBe(true);
+    expect(health.configured && health.level).toBe('unreadable');
+  });
+
+  it('measures the credential against the injected clock', async () => {
+    // Fresh against the real clock, expired against the injected one. Without
+    // two clocks that disagree, a route reading `new Date()` would pass every
+    // assertion above.
+    const wall = await graph({ graphCert: () => PEM }, new Date());
+    const future = await graph({ graphCert: () => PEM }, new Date(NOT_AFTER + DAY));
+    expect([wall.configured && wall.level, future.configured && future.level]).toEqual(['ok', 'expired']);
+  });
+
+  it('asks the supplier on every request, so a swapped certificate is picked up', async () => {
+    // A function and not a string, so the file can be replaced without a
+    // restart — the one credential whose whole purpose is to be replaced.
+    let calls = 0;
+    const deps = { store: memStore(), graphCert: () => { calls += 1; return PEM; } };
+    const app = buildApi(deps);
+    try {
+      await app.inject({ method: 'GET', url: '/api/health' });
+      await app.inject({ method: 'GET', url: '/api/health' });
+    } finally {
+      await app.close();
+    }
+    expect(calls).toBe(2);
   });
 });
 

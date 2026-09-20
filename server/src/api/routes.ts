@@ -7,7 +7,12 @@ import type { SourceStatus } from '../poller/schedule.js';
 // would agree right up until the day they did not.
 import { vendorLevel } from '../store/currentLevel.js';
 import { buildTile, type ServiceTile, type TileStore } from './tile.js';
-import { SERVICE_PLATFORM } from './platforms.js';
+import { SERVICE_PLATFORM } from '../services.js';
+import { sourceStaleness, type Staleness } from '../store/staleness.js';
+import { certExpiry, certNeedsAttention, type CertExpiry } from '../store/certExpiry.js';
+// Type-only. The route never constructs one and never reads a file: the PEM
+// arrives as a parameter, and `store/certExpiry.ts` says why that is absolute.
+import type { X509Certificate } from 'node:crypto';
 
 /**
  * The read-only API.
@@ -93,6 +98,30 @@ export type ApiDeps = {
    *  reported as `configured: false, ok: false` — a poller that is not running
    *  is not a healthy poller. */
   poller?: ApiPoller;
+  /**
+   * The Graph certificate, as PEM text or an already-parsed certificate.
+   *
+   * **A function, and the route never learns where the file is.** The
+   * composition root holds the config it loaded from `OPS_DASH_GRAPH_CONFIG`
+   * and is the only thing that should know the path; `server/src/guards.test.ts`
+   * and `web/src/guards.test.ts` between them forbid a credential path, a PEM
+   * block or a thumbprint anywhere in source, and this signature is what makes
+   * obeying that the easy path rather than the remembered one.
+   *
+   * A function rather than a string so it is read per request: a certificate
+   * swapped on disk is picked up without a restart, which matters for the one
+   * credential whose whole purpose here is to be replaced before it expires.
+   *
+   * Three absences, deliberately distinguished:
+   *   - the dep is absent        → `unconfigured`
+   *   - it returns `undefined`   → `unconfigured`
+   *   - it throws                → `unreadable`, carrying the reason
+   *
+   * `unconfigured` is NOT a failure. There is no credential yet on a machine
+   * that has not been given one, and rendering that as an expiry problem would
+   * be the same lie as rendering a missing probe as 100% uptime.
+   */
+  graphCert?: () => string | X509Certificate | undefined;
 };
 
 /* ------------------------------------------------------------ source names */
@@ -222,8 +251,32 @@ export type HealthResponse = {
    *  and the two have entirely different remedies. */
   store: { ok: boolean; error?: string };
   poller: PollerHealth;
+  /** The credential this process authenticates with, and how long it has left.
+   *  Reported here because a monitor whose own credential dies quietly is this
+   *  product's thesis turned on itself — the M365 tile would go `unknown` with
+   *  an auth error, and nobody watches the tile that says the watcher is
+   *  broken. */
+  credential: { graph: CertHealth };
   auth: { mode: 'none'; note: string };
 };
+
+/**
+ * The Graph certificate's health.
+ *
+ * `configured` is the discriminant and it comes first on purpose: a reader who
+ * branches on `level` alone has no case for "there is no certificate", and
+ * would have to invent one — most likely by treating the absence as a problem,
+ * which it is not.
+ */
+export type CertHealth =
+  | { configured: false; note: string }
+  | ({
+      configured: true;
+      /** `certNeedsAttention`, carried rather than recomputed: the line between
+       *  "fine" and "somebody has to do something" is owned by one function, so
+       *  a client cannot draw it somewhere else. */
+      needsAttention: boolean;
+    } & CertExpiry);
 
 /**
  * The poller's health, as four named populations and one positive list.
@@ -271,14 +324,36 @@ export type PollerHealth = {
   /** Configured and has not run once. Almost always `start()` was never
    *  called — which the old `poller.ok` reported as healthy. */
   neverRun: string[];
+  /**
+   * Has succeeded before, is not erroring now, and is nonetheless overdue.
+   *
+   * The last place in the chain where something broken read calm. A source
+   * whose timer stopped keeps the `lastOkAt` it died with, and `lastOkAt`
+   * twenty minutes ago is indistinguishable from twenty seconds ago unless you
+   * know the cadence — so every one of these was in `healthy` until now.
+   *
+   * A FOURTH population and not a flavour of `failing`, because the operator
+   * does something different about each: `failing` is a vendor to wait for,
+   * `stale` is our own process to go and look at. Narrow by construction — a
+   * source that is erroring, or has never succeeded, is reported as that
+   * instead, since both are more specific and both already say the data is not
+   * moving. Those are still judged in `staleness` below.
+   */
+  stale: string[];
+  /**
+   * Every source's freshness judgement, including the fresh ones: age of the
+   * last success, the threshold it was judged against, and the reason. The
+   * lists above are a reading of this; this is the evidence, and a reader who
+   * wants "how old is the number in front of me" needs it for the healthy
+   * sources too.
+   */
+  staleness: Record<string, Staleness>;
   /** Every source's full status, mirrored and not summarised. The lists above
    *  are a reading of this; this is the evidence. */
   sources: Record<string, SourceStatus>;
 };
 
 /* ---------------------------------------------------------------- helpers */
-
-const now = () => new Date().toISOString();
 
 const message = (cause: unknown) => String((cause as Error)?.message ?? cause);
 
@@ -317,7 +392,10 @@ export const THREW_PREFIX = 'threw: ';
 /** One source's population. Order matters: a source that has never run cannot
  *  also be failing, and a `lastError` outranks a stale `lastOkAt` because it
  *  describes the most recent attempt. */
-function classify(status: SourceStatus): keyof Omit<PollerHealth, 'ok' | 'configured' | 'sources'> {
+function classify(
+  status: SourceStatus,
+  now: Date,
+): keyof Omit<PollerHealth, 'ok' | 'configured' | 'sources' | 'staleness'> {
   if (status.runs === 0) return 'neverRun';
   if (status.lastError !== undefined) {
     return status.lastError.startsWith(THREW_PREFIX) ? 'broken' : 'failing';
@@ -326,7 +404,12 @@ function classify(status: SourceStatus): keyof Omit<PollerHealth, 'ok' | 'config
   // a complaint. Without the `lastOkAt` check, a status object that has run and
   // recorded nothing at all would read healthy — which is how the field this
   // replaces came to be empty by construction.
-  return status.lastOkAt === undefined ? 'neverSucceeded' : 'healthy';
+  if (status.lastOkAt === undefined) return 'neverSucceeded';
+  // …and positive evidence of a RECENT success. The absence of a complaint is
+  // exactly what a stopped timer produces: nothing complains, because nothing
+  // is running. `sourceStaleness` owns the arithmetic and the cadence; this
+  // only decides which list the answer lands in.
+  return sourceStaleness(status, now).stale ? 'stale' : 'healthy';
 }
 
 /**
@@ -372,6 +455,41 @@ function toIncident(row: Record<string, unknown>): ApiIncident {
     ...(typeof resolvedAt === 'string' ? { resolvedAt } : {}),
     summary: String(row['summary']),
   };
+}
+
+/**
+ * The Graph certificate's health, from a supplier the caller owns.
+ *
+ * Every branch here is a different fact and none of them may be confused with
+ * another:
+ *
+ *   - no supplier, or a supplier returning nothing → `configured: false`. There
+ *     is no credential on this machine. That is a state to report, not a
+ *     failure to raise, and it must not read as an expiry.
+ *   - the supplier threw → `unreadable`, with the reason. Reading the file is
+ *     the caller's job and it can fail — deleted, unreadable, permissions —
+ *     and "we cannot read our own credential" is precisely the thing this
+ *     field exists to surface.
+ *   - anything else → `certExpiry`'s own verdict, verbatim.
+ *
+ * Nothing here throws. A health route that 500s because the credential is odd
+ * has taken away the page that would have explained it.
+ */
+export function graphHealth(supplier: ApiDeps['graphCert'], now: Date): CertHealth {
+  if (supplier === undefined) {
+    return { configured: false, note: 'no Graph credential is configured for this process' };
+  }
+  let pem: string | X509Certificate | undefined;
+  try {
+    pem = supplier();
+  } catch (cause) {
+    return { configured: true, needsAttention: true, level: 'unreadable', reason: message(cause) };
+  }
+  if (pem === undefined) {
+    return { configured: false, note: 'no Graph credential is configured for this process' };
+  }
+  const expiry = certExpiry(pem, now);
+  return { configured: true, needsAttention: certNeedsAttention(expiry), ...expiry };
 }
 
 /* ----------------------------------------------------------------- routes */
@@ -428,7 +546,10 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
   });
 
   app.get('/api/incidents', async (): Promise<IncidentsResponse> => {
-    const servedAt = now();
+    // `clock()`, like the other two. One route reading the wall clock while its
+    // neighbours read an injected one is how a test comes to pass against a
+    // clock it did not choose.
+    const servedAt = clock().toISOString();
     try {
       const rows = store.openIncidents();
       return {
@@ -451,7 +572,8 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
   });
 
   app.get('/api/health', async (): Promise<HealthResponse> => {
-    const servedAt = now();
+    const at = clock();
+    const servedAt = at.toISOString();
 
     // An actual read, not a flag someone set at boot: a flag would go on
     // reporting ok long after the database was closed underneath it.
@@ -465,10 +587,11 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
 
     const sources = poller ? poller.allStatus() : {};
     const entries = Object.entries(sources);
-    const bucket = (want: string) => entries.filter(([, st]) => classify(st) === want).map(([name]) => name);
+    const bucket = (want: string) => entries.filter(([, st]) => classify(st, at) === want).map(([name]) => name);
     const healthy = bucket('healthy');
     // Overlaps `broken`/`failing` on purpose — a different question.
     const neverSucceeded = entries.filter(([, st]) => st.runs > 0 && st.lastOkAt === undefined).map(([n]) => n);
+    const staleness = Object.fromEntries(entries.map(([name, st]) => [name, sourceStaleness(st, at)]));
 
     return {
       servedAt,
@@ -483,8 +606,11 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
         failing: bucket('failing'),
         neverSucceeded,
         neverRun: bucket('neverRun'),
+        stale: bucket('stale'),
+        staleness,
         sources,
       },
+      credential: { graph: graphHealth(deps.graphCert, at) },
       auth: {
         mode: 'none',
         note: 'No authentication. Milestone 4 fills this seam, with the mutating routes that need it.',
