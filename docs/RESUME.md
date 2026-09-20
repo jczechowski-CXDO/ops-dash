@@ -1461,3 +1461,51 @@ invited exactly that.
 And the third defence is mechanical rather than documentary — a guard restricting who may
 import `publishedLevel`. A third paragraph of documentation was the obvious alternative and
 would have been the third time that failed.
+
+
+## A guard that asserts "no offenders" passes when it can see nothing (2026-09-20)
+
+The sharpest version of this project's standing rule so far, found by the API agent while
+writing the `publishedLevel` import guard — the guard whose whole job was to stop this seam
+failing a third time.
+
+Its first draft asserted `expect(offenders).toEqual([])`. Blanking every file's contents
+left it **green**. A rule that can see nothing reports nothing, and "nothing" is exactly
+what a clean run looks like.
+
+The form that shipped asserts **the positive set**: *exactly these three files name this
+symbol*. That cannot pass when the legitimate users vanish, so a blind directory walk, a
+broken `stripComments`, or a mis-joined path fails loudly instead of silently certifying the
+repository.
+
+This generalises the corollary already in this file — *assert what a value must be, never
+what it must not be* — to guards specifically, where the temptation is strongest because an
+empty offender list is so obviously what success looks like:
+
+**A guard must assert what it CAN see, not only what it did not find.**
+
+Two further details from the same guard, both worth copying:
+
+- It refuses a surviving alias. `export const currentLevel = publishedLevel` satisfies every
+  other assertion in the file and restores the original trap in full — two names, both
+  sounding like the answer, one of them wrong.
+- It does **not** fire on a prose mention in a comment. A rule that punishes the comment
+  explaining the rule teaches people to stop writing the comment.
+
+## WAL growth on the long run was not a defect (2026-09-20)
+
+Recorded because it looked like one and the arithmetic is the answer, not more watching.
+
+The WAL grew monotonically — 193 KB to 1.1 MB over twelve minutes — with no checkpoint. That
+is `wal_autocheckpoint = 1000` pages at a 4096-byte page size: SQLite checkpoints at about
+**4.1 MB**, and the file had not reached it. The main database sitting at 4096 bytes is the
+same fact from the other side; everything is in the WAL until the first checkpoint.
+
+The `journal_size_limit = -1` I measured alongside it was my error, not a missing pragma:
+it is a per-connection setting and I read it from a fresh read-only connection. `schema.sql`
+sets it to 64 MB on the connection that matters.
+
+**Still open and genuinely unexplained: RSS.** 74 MB to 89 MB over fourteen minutes, growth
+decelerating but not flat. At a sustained 1 MB/minute that is 1.4 GB/day, which would be a
+leak; early Node growth from JIT and connection pools is also normal and does plateau. Only
+a longer run separates the two, which is the entire reason the long run exists.
