@@ -10,6 +10,7 @@ import { Table, type Column } from '../components/aurora/Table.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { useChecks, useDashboard } from '../live/DataSource.js';
 import {
+  NO_VALUE,
   countText,
   holesPhrase,
   lastSeenLine,
@@ -17,11 +18,11 @@ import {
   panelStateFor,
   percentileText,
   sparkSamples,
-  NO_VALUE,
   staleReason,
-  uptimeText,
   type Load,
   type ServiceView,
+  type VendorAdvisory,
+  uptimeText,
 } from '../live/model.js';
 import { checkRunsFor } from '../fixtures/index.js';
 // clockOf is the repository's one HH:MM formatter — the fixtures' wall-clock
@@ -249,6 +250,82 @@ export function uptimeCoverage(service: {
   return `only ${minutes}m observed, not 30 days`;
 }
 
+/**
+ * The vendor's own advisories, which reached no screen until now.
+ *
+ * Amendment 2 added `incidentsSince` — *"everything published since our last
+ * SUCCESSFUL poll"* — four adapters populate it, the store keeps it, the API
+ * mirrors it, and `parse.ts` dropped the array, so the feature the frozen
+ * contract was amended for did nothing for a whole milestone.
+ *
+ * ## The first `href` in `web/src`, argued rather than inherited
+ *
+ * `guards.test.ts` asserts that this tree contains **no** URL-bearing attribute
+ * and ships with an empty allowlist, precisely so the first one is a
+ * conversation instead of a diff nobody reads. This is that conversation.
+ *
+ *   - **The URL is vendor-supplied**, so it is attacker-adjacent: whoever writes
+ *     a status page writes this string. `safeTarget.ts` vets every URL the
+ *     SERVER opens and does not run in the browser, so the browser needs its own
+ *     check — and it has one, `lib/safeUrl.ts`, written in Milestone 1 naming
+ *     this exact field and never called until today.
+ *   - **The check runs in `parse.ts`, not here.** At the boundary where the
+ *     value stops being something a vendor said and becomes something this app
+ *     holds, so no later caller can reach the raw string by accident. By the
+ *     time it arrives here it is https or absent.
+ *   - **`rel="noreferrer noopener"`** — `noopener` because a `target="_blank"`
+ *     link hands the opened page a handle to ours, which can navigate it
+ *     elsewhere (reverse tabnabbing); `noreferrer` because a vendor does not
+ *     need to be told which of our pages an operator was on.
+ *   - **`target="_blank"`** because losing the dashboard to a vendor status page
+ *     mid-incident is its own small outage.
+ *   - **No `title`, no interpolation into any style**, and the text is a React
+ *     child, so markup in an advisory headline renders as the characters it is.
+ *
+ * The residual, stated rather than hidden: React escapes markup and does nothing
+ * about bidi or zero-width characters, so a U+202E in a headline still reorders
+ * what an operator reads. The treatment is `server/src/vendorText.ts`'s
+ * `safeText`, already used by the email and endpoints adapters, and
+ * `adapters/vendorstatus/statuspage.ts` sets `title` with a bare `asString`. It
+ * belongs beside its two siblings at that adapter, not as a second
+ * implementation here — reported, not duplicated.
+ */
+function VendorAdvisories({ advisories }: { advisories: VendorAdvisory[] }) {
+  if (advisories.length === 0) return null;
+  return (
+    <div data-testid="vendor-advisories" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {advisories.map((a) => (
+        <div key={`${a.startedAt}:${a.title}`} style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+          <span style={{ color: statusTextColor(a.level), fontWeight: 700 }}>{severityWord(a.level)}</span>
+          {' · '}
+          {/* A span when there is no vetted link, so the DOM shape does not
+              change with whether a URL passed `safeUrl` — the only difference
+              an operator or a test should be able to see is the link itself. */}
+          {a.url === undefined ? (
+            <span>{a.title}</span>
+          ) : (
+            <a
+              href={a.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {a.title}
+            </a>
+          )}
+          {' · '}
+          {a.resolvedAt === null ? `opened ${ago(a.startedAt)}` : `resolved ${ago(a.resolvedAt)}`}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The level as a word, so the colour is never the only carrier — the ruling
+ *  that made the Overview strip pill accessible applies here too. */
+const severityWord = (level: VendorAdvisory['level']): string =>
+  level === 'operational' ? 'Resolved' : level.charAt(0).toUpperCase() + level.slice(1);
+
 export default function ServiceDetail({
   service: injectedService,
   runs: injectedRuns,
@@ -362,6 +439,7 @@ export default function ServiceDetail({
                   {`Derived from our own evidence, not published by the vendor: ${service.vendor.inferred.basis}.`}
                 </div>
               )}
+              <VendorAdvisories advisories={service.feed.data?.incidentsSince ?? []} />
             </>
           }
         />

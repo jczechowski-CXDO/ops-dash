@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ServiceId } from '@ops-dash/shared';
 import { loadKind } from './model.js';
-import { decodeSeverity, incidentView, isStatusLevel, levelLabel, parseChecks, parseIncidents, parseServices, serviceEntryView } from './parse.js';
+import { decodeSeverity, incidentView, isStatusLevel, levelLabel, parseChecks, parseIncidents, parseServices, serviceEntryView, vendorAdvisories } from './parse.js';
 
 /**
  * A `/api/services` entry, shaped exactly as `server/src/api/routes.ts`
@@ -69,7 +69,7 @@ describe('the colour never comes from the stored payload', () => {
     expect(stale.vendor.level).toBe('unknown');
     expect(stale.vendor.label).toBe('Unknown');
     // And the history is kept, in the one place it is allowed to live.
-    expect(stale.feed.data).toEqual({ level: 'operational', label: 'Operational' });
+    expect(stale.feed.data).toEqual({ level: 'operational', label: 'Operational', incidentsSince: [] });
     expect(loadKind(stale.feed)).toBe('stale');
     expect(stale.feed.error?.message).toBe('the feed answered HTTP 503');
   });
@@ -622,5 +622,88 @@ describe('incidentView hydrates the operator\'s own actions', () => {
       by: 'ops@example.com',
       at: 't',
     });
+  });
+});
+
+
+describe('vendorAdvisories — amendment 2 finally reaching a screen', () => {
+  const advisory = (over: Record<string, unknown> = {}) => ({
+    title: 'Elevated API error rates',
+    level: 'degraded',
+    startedAt: '2026-09-20T09:00:00.000Z',
+    resolvedAt: null,
+    url: 'https://status.example.com/incidents/abc123',
+    ...over,
+  });
+
+  it('carries what four adapters populate and this parser used to drop', () => {
+    // `incidentsSince` is REQUIRED on the contract, so neither open-loop guard
+    // could see it going nowhere: one scans optional fields a fixture carries,
+    // the other scans optional fields. It reached no screen for a milestone.
+    const out = vendorAdvisories([advisory()]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.title).toBe('Elevated API error rates');
+    expect(out[0]?.level).toBe('degraded');
+    expect(out[0]?.startedAt).toBe('2026-09-20T09:00:00.000Z');
+    expect(out[0]?.resolvedAt).toBeNull();
+  });
+
+  it('drops a vendor URL that is not https, rather than sanitising it', () => {
+    // `safeUrl` was written in Milestone 1 naming this exact field and had never
+    // been called. A `javascript:` URL in an href executes on click, and a
+    // local-only app is still a browser. Dropped, not cleaned: "sanitise" is how
+    // these bugs come back.
+    for (const url of [
+      'javascript:alert(1)',
+      'JavaScript:alert(1)',
+      'data:text/html;base64,PHNjcmlwdD4=',
+      'http://status.example.com/x',
+      'vbscript:msgbox(1)',
+      'not a url at all',
+      '//status.example.com/x',
+    ]) {
+      const out = vendorAdvisories([advisory({ url })]);
+      // The ROW survives — an advisory we will not link to is still an advisory
+      // the operator should read.
+      expect(out, url).toHaveLength(1);
+      expect(out[0] && 'url' in out[0], url).toBe(false);
+      expect(out[0]?.title, url).toBe('Elevated API error rates');
+    }
+    // The control: an https URL IS kept, so the refusals above are not a
+    // function that drops every link.
+    expect(vendorAdvisories([advisory()])[0]?.url).toBe('https://status.example.com/incidents/abc123');
+  });
+
+  it('drops a row it cannot read rather than blanking the whole service', () => {
+    // The opposite rule to `signals` and `attention`, deliberately: those ARE
+    // the panel, this is a supplementary list beside a level the operator still
+    // needs. One malformed advisory must not blank a tile.
+    const out = vendorAdvisories([
+      advisory(),
+      { level: 'outage' },
+      'not an object',
+      advisory({ title: 7 }),
+      advisory({ startedAt: undefined }),
+      advisory({ title: 'Second real one' }),
+    ]);
+    expect(out.map((a) => a.title)).toEqual(['Elevated API error rates', 'Second real one']);
+  });
+
+  it('reads an unrecognised level as unknown, never as operational', () => {
+    expect(vendorAdvisories([advisory({ level: 'fine' })])[0]?.level).toBe('unknown');
+    expect(vendorAdvisories([advisory({ level: undefined })])[0]?.level).toBe('unknown');
+  });
+
+  it('shows an unreadable resolution as still open, which is the visible error', () => {
+    // An advisory wrongly shown as OPEN is visible and gets corrected. One
+    // wrongly shown as resolved is not, and disappears.
+    expect(vendorAdvisories([advisory({ resolvedAt: 12345 })])[0]?.resolvedAt).toBeNull();
+    expect(vendorAdvisories([advisory({ resolvedAt: '2026-09-20T10:00:00.000Z' })])[0]?.resolvedAt).toBe(
+      '2026-09-20T10:00:00.000Z',
+    );
+  });
+
+  it('is an empty list, never a crash, for anything that is not an array', () => {
+    for (const raw of [undefined, null, 'x', 7, {}]) expect(vendorAdvisories(raw)).toEqual([]);
   });
 });

@@ -753,7 +753,19 @@ describe('HTML sinks', () => {
    *
    * An entry here is a decision, like `ALLOWED_DOMAINS` above: `path => reason`.
    */
-  const ALLOWED_URL_ATTRIBUTES: Record<string, string> = {};
+  const ALLOWED_URL_ATTRIBUTES: Record<string, string> = {
+    'web/src/views/ServiceDetail.tsx':
+      'The vendor advisory link — `VendorIncident.url`, amendment 2. The FIRST href in web/src, ' +
+      'and the entry this empty allowlist existed to make somebody argue for. The URL is ' +
+      'vendor-supplied and therefore attacker-adjacent; `http/safeTarget.ts` vets what the SERVER ' +
+      'opens and does not run in a browser, so the browser has its own check — `lib/safeUrl.ts`, ' +
+      'written in M1 naming this exact field and never called until now. It runs in `parse.ts`, at ' +
+      'the boundary where the value stops being something a vendor said, so no later caller can ' +
+      'reach the raw string; anything not https is DROPPED rather than sanitised. The anchor ' +
+      'carries rel="noreferrer noopener" (reverse tabnabbing, and a vendor need not learn which of ' +
+      'our pages an operator was on) and target="_blank" (losing the dashboard mid-incident is its ' +
+      'own small outage).',
+  };
 
   /**
    * The files this guard reads: every non-test source file under `web/src`.
@@ -840,6 +852,30 @@ describe('HTML sinks', () => {
       ).toBe(true);
       expect(reason.length, `${path} carries no reason`).toBeGreaterThan(20);
     }
+  });
+
+  it('a vendor URL never becomes an href without going through safeUrl', () => {
+    // The companion the allowlist needs. An entry records an ARGUMENT, and an
+    // argument is not a mechanism — the moment one exists, the check it rests on
+    // has to be wired rather than merely written. `safeUrl` sat unused from
+    // Milestone 1 until the first link needed it, which is exactly how a defence
+    // comes to be present and inert.
+    //
+    // Deliberately NOT an attempt to trace the value: a grep that tried to prove
+    // THIS href came from THAT call would acquire a semantic opinion it will be
+    // wrong about in the permissive direction. It asserts the narrower, true
+    // thing — with a URL attribute in the tree, the vetting is called somewhere
+    // outside its own module and its own tests.
+    if (Object.keys(ALLOWED_URL_ATTRIBUTES).length === 0) return;
+    const callers = src()
+      .filter((f) => !/safeUrl\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+      .filter((f) => /\bsafeUrl\s*\(/.test(stripComments(read(f))))
+      .map(rel);
+    expect(callers, 'a URL attribute is allowlisted but safeUrl is called nowhere').not.toEqual([]);
+    // And it is called where the value ARRIVES, not only where it is drawn: the
+    // parser is the boundary, and a check applied at the render site leaves the
+    // raw string reachable by the next caller.
+    expect(callers).toContain('web/src/live/parse.ts');
   });
 
   it('that guard can fail — the pattern fires on every shape it claims to catch', () => {

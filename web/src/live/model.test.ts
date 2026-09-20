@@ -203,7 +203,11 @@ describe('sparkSamples keeps the holes countable', () => {
 
 describe('a tile says when its own vendor feed is not current', () => {
   const NOW = Date.parse('2026-09-19T12:00:00Z');
-  const seen = { level: 'operational' as const, label: 'Operational' };
+  // `incidentsSince` is REQUIRED on `feed.data`, not optional, so every
+  // construction site has to answer the question. An optional field here would
+  // let a parser that silently dropped the array typecheck — which is exactly
+  // the defect that made this field reach no screen for a milestone.
+  const seen = { level: 'operational' as const, label: 'Operational', incidentsSince: [] };
 
   it('says nothing at all while the feed is current', () => {
     expect(feedMarker(ready(seen, '2026-09-19T11:59:00Z'), NOW)).toBeNull();

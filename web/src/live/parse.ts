@@ -1,6 +1,7 @@
 import type { AuditEvent, BlastMetric, CheckRun, EndpointIssue, EndpointSnapshot, EntraSignal, EntraSnapshot, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
 import { SERVICE_NAMES, serviceLabel } from '../lib/serviceNames.js';
-import { firstSentence, type IncidentView, type Load, type ServiceView } from './model.js';
+import { firstSentence, type IncidentView, type Load, type ServiceView, type VendorAdvisory } from './model.js';
+import { safeUrl } from '../lib/safeUrl.js';
 
 /**
  * Everything arriving from `/api/*` is parsed, never cast.
@@ -87,6 +88,67 @@ function errorOf(v: unknown): { code: string; message: string } | null {
  * It IS read, once, into `feed.data` — the past tense, rendered as the past
  * tense.
  */
+/**
+ * The vendor's own advisories, which this parser used to drop entirely.
+ *
+ * Amendment 2 added `incidentsSince` — *"everything published since our last
+ * SUCCESSFUL poll"* — four adapters populate it, the store keeps it, the API
+ * mirrors the snapshot wholesale so it never even names the field, and **this
+ * function did not exist**, so the array died here and no vendor advisory
+ * reached a screen for an entire milestone. The contract was amended for a
+ * feature that then did nothing.
+ *
+ * Neither guard could see it: the fixture-gated one scans optional fields that a
+ * fixture carries, the parser-side one scans optional fields, and
+ * `incidentsSince` is REQUIRED. A required field dropped by a parser still has
+ * nothing watching it, which is recorded rather than papered over.
+ *
+ * **`url` goes through `safeUrl` here rather than at the render site.** That is
+ * deliberate: the check belongs where the value crosses from "something a vendor
+ * said" into "something this app holds", so no later caller can reach the raw
+ * string by accident. `safeUrl` drops anything that is not https rather than
+ * sanitising it — a `javascript:` URL in an href executes on click, and a
+ * local-only app is still a browser. It was written in Milestone 1 naming this
+ * exact field and had never been called.
+ *
+ * **`title` is NOT escaped here, and that is a decision with an owner.** It is
+ * vendor-authored free text; React escapes it as markup, but React does nothing
+ * about bidi and zero-width characters, and a U+202E in an advisory headline
+ * reorders what an operator reads about an outage. The treatment for that is
+ * `server/src/vendorText.ts`'s `safeText`, already used by the email and
+ * endpoints adapters — and `adapters/vendorstatus/statuspage.ts:179` sets
+ * `title` with a bare `asString`. It belongs at that adapter, beside its two
+ * siblings, not as a second implementation in `web/`. Reported; not duplicated.
+ *
+ * A row we cannot read is DROPPED rather than refusing the whole service: one
+ * malformed advisory must not blank a tile. That is the opposite of the rule for
+ * `signals` and `attention`, and the difference is that those ARE the panel
+ * while this is a supplementary list beside a level the operator still needs.
+ */
+export function vendorAdvisories(raw: unknown): VendorAdvisory[] {
+  if (!Array.isArray(raw)) return [];
+  const out: VendorAdvisory[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const title = str(entry['title']);
+    const startedAt = str(entry['startedAt']);
+    if (title === null || startedAt === null) continue;
+    const url = safeUrl(str(entry['url']) ?? undefined);
+    out.push({
+      title,
+      level: level(entry['level']),
+      startedAt,
+      // `null` is "still open", which is a different fact from "we could not
+      // read when it closed" — and the contract has no third state, so an
+      // unreadable value reads as open. An advisory wrongly shown as open is
+      // visible; one wrongly shown as resolved is not.
+      resolvedAt: str(entry['resolvedAt']),
+      ...(url === undefined ? {} : { url }),
+    });
+  }
+  return out;
+}
+
 export function serviceEntryView(raw: unknown): ServiceView | null {
   if (!isRecord(raw)) return null;
   const id = str(raw['id']);
@@ -101,8 +163,16 @@ export function serviceEntryView(raw: unknown): ServiceView | null {
   // say must not be read as one that said "fine".
   const current = level(raw['currentLevel']);
 
-  const feed: Load<{ level: StatusLevel; label: string }> = {
-    ...(data === null ? {} : { data: { level: level(data['level']), label: LEVEL_LABEL[level(data['level'])] } }),
+  const feed: Load<{ level: StatusLevel; label: string; incidentsSince: VendorAdvisory[] }> = {
+    ...(data === null
+      ? {}
+      : {
+          data: {
+            level: level(data['level']),
+            label: LEVEL_LABEL[level(data['level'])],
+            incidentsSince: vendorAdvisories(data['incidentsSince']),
+          },
+        }),
     ...(fetchedAt === null ? {} : { servedAt: fetchedAt }),
     ...(feedError === null ? {} : { error: feedError }),
   };

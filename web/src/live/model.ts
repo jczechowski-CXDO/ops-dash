@@ -1,6 +1,7 @@
 import type { Incident, ServiceStatus, StatusLevel } from '@ops-dash/shared';
 import type { PanelState } from '../components/Panel.js';
 import { ago } from '../theme/ago.js';
+import { safeUrl } from '../lib/safeUrl.js';
 
 /**
  * The web's envelope, and it is deliberately the same shape as the server's
@@ -186,7 +187,29 @@ export type ServiceView = {
    * `data` is what the vendor last SAID, for the "was Operational, 3h ago"
    * line. Nothing may colour anything with it.
    */
-  feed: Load<{ level: StatusLevel; label: string }>;
+  feed: Load<{ level: StatusLevel; label: string; incidentsSince: VendorAdvisory[] }>;
+};
+
+/**
+ * One vendor advisory, as the detail page needs it.
+ *
+ * Amendment 2 added `incidentsSince` — *"everything published since our last
+ * SUCCESSFUL poll"* — four adapters populate it, the store keeps it and the API
+ * mirrors it. **`parse.ts` dropped the whole array**, so the feature the
+ * contract was amended for reached no screen at all. This is the shape that
+ * survives the parse.
+ *
+ * `url` is `string | undefined` because it has been through `safeUrl`: a
+ * vendor-supplied URL that is not https is DROPPED rather than sanitised, so an
+ * absent url here means "we will not link to that", not "there was no link".
+ */
+export type VendorAdvisory = {
+  title: string;
+  level: StatusLevel;
+  startedAt: string;
+  resolvedAt: string | null;
+  /** https only, already vetted. Never the raw vendor string. */
+  url?: string;
 };
 
 /** Coverage for the fixture world: a full window, comfortably sampled. The
@@ -220,7 +243,21 @@ export function serviceViewOf(s: ServiceStatus): ServiceView {
     incidents90d: s.incidents90d,
     lastStateChange: s.lastStateChange,
     feed: ready(
-      { level: s.vendor.level, label: s.vendor.label },
+      // Fixture advisories go through the same shape as live ones, including
+      // `safeUrl`: a demo path that skipped the check would be a demo path
+      // exercising different code, which is how the two worlds start to differ
+      // in the one place it matters.
+      {
+        level: s.vendor.level,
+        label: s.vendor.label,
+        incidentsSince: s.vendor.incidentsSince.map((i) => ({
+          title: i.title,
+          level: i.level,
+          startedAt: i.startedAt,
+          resolvedAt: i.resolvedAt ?? null,
+          ...(safeUrl(i.url) === undefined ? {} : { url: safeUrl(i.url) as string }),
+        })),
+      },
       s.vendor.lastSuccessfulPoll,
     ),
   };
