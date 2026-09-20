@@ -118,18 +118,66 @@ vocabulary, which is the case where parallelism costs more than it buys. **Defau
 
 The adapters are a different matter and genuinely independent.
 
-### Task 4: Entra adapter (agent `m4-graph`)
-### Task 5: Endpoints adapter (same agent, queued)
+### Task 4: Entra adapter (agent `m4-entra`) — **DONE**, `b5dc9f2`, live
 
-Both are Graph reads against the certificate credential already in place at
-`~/.config/ops-dash/graph.json`. The app has broad read-only permission; that is a reason
-to be *narrower* in code, not wider. Request only what the screen renders, and record which
-scopes each adapter actually uses, because "the toolbox app can do it" is how a read-only
-premise erodes.
+A Graph read against the certificate credential at `~/.config/ops-dash/graph.json`. The app
+has broad read-only permission; that is a reason to be *narrower* in code, not wider. Request
+only what the screen renders, and record which scopes each call uses, because "the toolbox app
+can do it" is how a read-only premise erodes.
 
-`~612 endpoints` and `~512 users` are the real cardinalities. Paging is not optional and
-the fixture cannot prove it works — the first adapter that quietly returns page one and
-calls it the estate is a lie that looks exactly like data.
+### Task 5: Endpoints adapter — **BLOCKED, and this plan had the source wrong**
+
+**CORRECTED 2026-09-20. The sentence here used to read "Both are Graph reads." That was my
+error and it contradicted two standing records:** `docs/RESUME.md:833` — *"Endpoints page comes
+from **Endpoint Central, not Intune**"* — and `DATA_CONTRACTS.md:304`, the contract of record:
+*"Source: ManageEngine Endpoint Central Cloud, Zoho OAuth self-client, read-only."* A decided
+line and the spec both said EPC; the plan drifted off them in a single clause, and that clause
+was load-bearing.
+
+**What it would have shipped, measured on the live tenant before a line was written:**
+
+| source | devices | fills the contract? |
+|---|---|---|
+| Intune `deviceManagement/managedDevices` | **16** | no. Sixteen, not 612 |
+| Entra `/devices` | 1203 registrations | no — 991 are BYOD `Workplace`, no BitLocker, no patch data |
+| Endpoint Central | the real estate | **yes**, and there is no credential for it on this box |
+
+Sixteen is not a paging or permission artefact: `managedDeviceOverview` independently reports
+`enrolledDeviceCount: 16`. Two separately-reachable definitions, same answer. **A Graph-backed
+Endpoints adapter would have rendered `total: 16` on a page whose fixture says 612** — a number
+that is plausible, precise, internally consistent and off by 38x. Worse than the v1.0 sign-in
+undercount, because 4535-vs-153 at least both described sign-ins; 16 describes a pilot.
+
+**Entra `/devices` is not a fallback, recorded so nobody reaches for it later.** 1026 Windows
+objects look temptingly close to 612 until you read the composition: 991 `trustType: Workplace`,
+only 186 domain-joined, and just 385 signed in within 30 days. It is a registration registry,
+not an inventory — and it carries no `isEncrypted` and no patch data, so three of the contract's
+five stats and two of its four `issueKind`s are simply unreachable.
+
+**Blocked on John: there is no EPC credential on this machine.** `~/.config/ops-dash/` holds
+only `graph.json` and `graph-key.pem`; no `OPS_DASH_EPC` env var. `RESUME.md` records
+`C:\secure\.epc\config.json` on the deploy server — a Windows path, and this is not that
+machine.
+
+**And it is a different adapter shape, so the "same agent, queued" argument is weaker than it
+looked.** EPC is Zoho OAuth with a refresh token, not certificate JWT, and `RESUME.md` records
+two traps to build against: **errors arrive as HTTP 200** (the reason `fetchJson`'s
+`non_json_2xx` rule exists at all), and **10 access tokens per refresh token per 10 minutes** —
+a hard limit on token minting, not on requests. None of that reuses `graphToken.ts`. What does
+transfer is the paging, throttling and shape-validation work in `paged.ts`.
+
+**A trap to pin wherever this lands:** `@odata.count` on `managedDevices` reports the **page**
+size, not the collection total — `1` at `$top=1`, `16` at `$top=1000`. An adapter asking for one
+row to read a cheap total would report `total: 1` and never page.
+
+**Do not ship an honestly-scoped 16-device Intune panel as a consolation.** It fills a screen
+labelled "Endpoints" with a number no operator would recognise, which is the permanently-wrong-
+tile failure wearing a new hat.
+
+**Cardinalities: measure, never inherit.** `~512 users` turned out to be enabled members (470)
+against a directory of 1658 plus 514 guests and 1473 app registrations. `~612 endpoints` is from
+the same source and is unverified against EPC. The rule this milestone earned: **a figure in a
+brief is a hypothesis; the first thing an adapter does is test it.**
 
 ### Task 6: Email adapter (same agent, queued) — **the security-critical one**
 
