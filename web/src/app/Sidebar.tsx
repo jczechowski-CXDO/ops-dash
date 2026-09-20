@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router';
 import { Icon } from '../components/aurora/Icon.js';
 import { useDemoMode, DEMO_TOGGLE_VISIBLE } from './DemoModeProvider.js';
 import { NAV, navHref, isNavCurrent, type NavBadge } from './routes.js';
+import { useDashboard } from '../live/DataSource.js';
 import { severityFillColor, severityOnFillColor } from '../theme/statusColor.js';
 import type { Severity } from '@ops-dash/shared';
 import type { DemoMode } from '../fixtures/index.js';
@@ -25,14 +26,20 @@ const BADGE_SEVERITY: Record<NavBadge, Severity> = {
 };
 
 export function Sidebar() {
-  const { mode, setMode, bundle } = useDemoMode();
+  const { mode, setMode } = useDemoMode();
+  const dashboard = useDashboard();
   const { pathname } = useLocation();
 
-  // Both counts are read off the bundle on every render. An incident is open
+  // Both counts are read off the dashboard on every render. An incident is open
   // while it has no resolvedAt — that is the contract's definition, not a
   // property of today's fixture, so the badges keep telling the truth when a
   // resolved incident lands in the list.
-  const open = bundle.incidents.filter((i) => !i.resolvedAt);
+  // From the same source the pages render, not from the fixtures underneath
+  // it: a badge reading 5 over a live Overview showing none is two components
+  // disagreeing about the same record. With no answer yet there is nothing to
+  // count and the badge is absent — a nav badge is a count, and 0 is rendered
+  // as no badge already.
+  const open = (dashboard.incidents.data ?? []).filter((i) => !i.resolvedAt);
   const counts: Record<NavBadge, number> = {
     openIncidents: open.length,
     openSev1s: open.filter((i) => i.severity === 1).length,
@@ -85,7 +92,7 @@ export function Sidebar() {
       <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: 10 }}>
         {NAV.map((item) => {
           const count = item.badge ? counts[item.badge] : 0;
-          const href = navHref(item, bundle.incidents);
+          const href = navHref(item, dashboard.incidents.data ?? []);
           // Computed rather than taken from NavLink's isActive, which can only
           // compare against `to`. Two entries were current at once on '/' in
           // quiet, and the Incident entry was NOT current on an incident page

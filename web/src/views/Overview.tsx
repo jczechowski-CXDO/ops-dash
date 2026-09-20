@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import type { Incident, ServiceStatus, StatusLevel } from '@ops-dash/shared';
-import { useDemoMode } from '../app/DemoModeProvider.js';
+import type { Incident, StatusLevel } from '@ops-dash/shared';
+import { useDashboard } from '../live/DataSource.js';
+import {
+  feedMarker,
+  latencyText,
+  panelStateFor,
+  sparkSamples,
+  staleReason,
+  type IncidentView,
+  type ServiceView,
+} from '../live/model.js';
+import { StaleReason } from '../live/StaleReason.js';
 import { Card } from '../components/Card.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
@@ -60,7 +70,7 @@ const RANK: Record<StatusLevel, number> = {
   outage: 4,
 };
 
-export function tileLevel(service: ServiceStatus): StatusLevel {
+export function tileLevel(service: ServiceView): StatusLevel {
   return RANK[service.vendor.level] >= RANK[service.ours.level]
     ? service.vendor.level
     : service.ours.level;
@@ -97,7 +107,7 @@ export function statusPhrase(level: StatusLevel): string {
  * strip has to name; whatever is left is `other` (degraded, outage, announced
  * maintenance), so the three buckets always partition the list.
  */
-export function statusTally(services: ServiceStatus[]): {
+export function statusTally(services: ServiceView[]): {
   affirmed: number;
   unknown: number;
   other: number;
@@ -118,7 +128,7 @@ export function statusTally(services: ServiceStatus[]): {
  * only when `allOperational` says so, and otherwise the strip states the split
  * it can actually evidence. The overline is never rendered over a grey dot.
  */
-export function stripOverline(services: ServiceStatus[]): string {
+export function stripOverline(services: ServiceView[]): string {
   if (allOperational(services)) return 'ALL SYSTEMS OPERATIONAL';
   const { affirmed, unknown, other } = statusTally(services);
   const parts = [`${affirmed} AFFIRMED`];
@@ -134,7 +144,7 @@ export function stripOverline(services: ServiceStatus[]): string {
  * inline, a hard-coded string that happens to match today's five incidents
  * passes every test in this file. `Overview.test.tsx` runs it over four slices.
  */
-export function alertSummary(open: Incident[]): string {
+export function alertSummary(open: IncidentView[]): string {
   const sev = (s: 1 | 2 | 3) => open.filter((i) => i.severity === s).length;
   return `${open.length} open · ${sev(1)} Sev1 · ${sev(2)} Sev2 · ${sev(3)} Sev3`;
 }
@@ -213,7 +223,7 @@ const title = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
  * cannot be, in this world or any other. Zero open incidents does not license
  * the claim, so the count is named and every number here is derived.
  */
-function emptyStateLine(services: ServiceStatus[], lastClosed: string | undefined): string {
+function emptyStateLine(services: ServiceView[], lastClosed: string | undefined): string {
   const { affirmed } = statusTally(services);
   const unaffirmed = services.length - affirmed;
   const health =
@@ -244,7 +254,7 @@ const DOT = (size: number, color: string) => ({
  *  sev1 list, m365 is vendor-`unknown` with our probes failing, which is exactly
  *  the pair that separates them. A mutation announcing only `s.vendor.level`
  *  survived the whole suite until this existed. */
-export function StatusStrip({ services }: { services: ServiceStatus[] }) {
+export function StatusStrip({ services }: { services: ServiceView[] }) {
   return (
     <Card
       data-testid="status-strip"
@@ -320,10 +330,50 @@ export function StatusStrip({ services }: { services: ServiceStatus[] }) {
  *  padding 10px 12px, gap 6px; row 1 a 7px dot, a 12.5px/700 name and a
  *  right-aligned 11px tabular-nums latency; row 2 the 26px sparkline; row 3 the
  *  two half-labels at 10.5px --text-secondary. */
-function ServiceTile({ service }: { service: ServiceStatus }) {
+/**
+ * The tile's 26px chart, or what we show when there is nothing to chart.
+ *
+ * Three cases and they are three different facts:
+ *
+ *   - `spark === null`: no probe has ever run. A line would be a fabrication,
+ *     so the row says so in words and keeps the tile the same height.
+ *   - holes in the series: those probes did not answer. `Sparkline` takes
+ *     `number[]` and cannot break a line at a gap, so the answered samples are
+ *     drawn and the holes are COUNTED in a label — never dropped silently
+ *     (which leaves a shorter, healthier-looking line) and never zeroed (which
+ *     dives the line to instantaneous: an outage drawn as the best news on the
+ *     page). Requested: `Sparkline` accepting `Array<number | null>`.
+ *   - a clean series: exactly Milestone 1's chart, unchanged.
+ */
+function TileSpark({ spark, color }: { spark: Array<number | null> | null; color: string }) {
+  const { values, missing } = sparkSamples(spark);
+  if (values.length === 0) {
+    return (
+      <div
+        data-testid="tile-no-spark"
+        style={{ height: 26, display: 'flex', alignItems: 'center', fontSize: 10.5, color: 'var(--text-secondary)' }}
+      >
+        {spark === null ? 'No probe samples' : 'No probe answered'}
+      </div>
+    );
+  }
+  return (
+    <>
+      <Sparkline values={values} color={color} height={26} viewBoxHeight={26} />
+      {missing === 0 ? null : (
+        <div data-testid="tile-spark-holes" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
+          {`${missing} of ${values.length + missing} probes did not answer`}
+        </div>
+      )}
+    </>
+  );
+}
+
+function ServiceTile({ service }: { service: ServiceView }) {
   const color = statusColor(tileLevel(service));
   const navigate = useNavigate();
   const href = `/services/${service.id}`;
+  const marker = feedMarker(service.feed);
   return (
     // The hook is on the Card itself (ops-primitives added `data-testid` at
     // 37cea35). It used to be on a wrapper <div>, which made the WRAPPER the grid
@@ -369,14 +419,24 @@ function ServiceTile({ service }: { service: ServiceStatus }) {
             color: 'var(--text-secondary)',
           }}
         >
-          {service.latencyMs} ms
+          {/* An em dash, never `null ms` and never `0 ms`. Zero would be the
+              fastest probe ever recorded; five of the seven services have no
+              probe at all, so this is the common path rather than the edge. */}
+          {latencyText(service.latencyMs)}
         </span>
       </div>
-      <Sparkline values={service.spark} color={color} height={26} viewBoxHeight={26} />
+      <TileSpark spark={service.spark} color={color} />
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
         <span>Vendor: {service.vendor.label}</span>
         <span>Ours: {service.ours.label}</span>
       </div>
+      {/* Null in every demo world, so no baseline moves. In live mode this is
+          the line that says the grey dot above is OUR failure to look. */}
+      {marker === null ? null : (
+        <div data-testid="tile-feed-marker" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
+          {marker}
+        </div>
+      )}
     </Card>
   );
 }
@@ -521,13 +581,15 @@ const HISTORY_COLUMNS: Column<HistoryRow>[] = [
 // ------------------------------------------------------------------- the view
 
 export default function Overview() {
-  const { bundle } = useDemoMode();
-  const services = bundle.services;
+  const dashboard = useDashboard();
+  const services = dashboard.services.data ?? [];
 
   // An incident is open while it has no resolvedAt — the contract's definition,
-  // the same one the sidebar badge uses. `bundle.incidents` already arrives
-  // sorted severity-then-newest, which is the order this list renders.
-  const open = bundle.incidents.filter((i) => !i.resolvedAt);
+  // the same one the sidebar badge uses. The fixtures arrive sorted
+  // severity-then-newest, which is the order this list renders; the API serves
+  // only open incidents, so the filter is a no-op there rather than a second
+  // definition of open.
+  const open = (dashboard.incidents.data ?? []).filter((i) => !i.resolvedAt);
 
   /**
    * Ack/mute/resolve are local state in this milestone; Milestone 4 makes them
@@ -542,13 +604,36 @@ export default function Overview() {
   const update = (i: Incident, patch: Partial<RowState>) =>
     setActions((prev) => ({ ...prev, [i.id]: { ...stateOf(i), ...patch } }));
 
-  const quiet = open.length === 0;
+  /**
+   * The quiet screen is claimed ONLY on evidence.
+   *
+   * `open.length === 0` alone is the wrong test the moment the data can fail:
+   * a dead `/api/incidents` produces an empty list, which would render the
+   * calm strip and "No active incidents" over a system nobody can see. So the
+   * calm layout requires a load we actually completed. Loading, stale-without-
+   * data and failed all keep the expanded layout, where the incidents Panel
+   * says what happened.
+   *
+   * In both demo worlds the incidents load is always ready, so this is exactly
+   * `open.length === 0` there and the baselines cannot move.
+   */
+  const incidentsAnswered = dashboard.incidents.data !== undefined;
+  const quiet = incidentsAnswered && open.length === 0;
+
+  const statusState = panelStateFor(dashboard.services, 'Service status', {
+    when: (list: ServiceView[]) => list.length === 0,
+    message: 'No service status has been collected yet.',
+  });
+  const incidentsState = panelStateFor(dashboard.incidents, 'Incidents');
+  const statusStale = staleReason(dashboard.services);
+  const incidentsStale = staleReason(dashboard.incidents);
 
   return (
     <div data-testid="view-overview" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Status: the compressed strip when nothing is running, the expanded
           tile grid when something is. */}
-      <Panel state={listState(services.length, 'No service status has been collected yet.')}>
+      <Panel state={statusState}>
+        <StaleReason reason={statusStale} testId="services-stale-reason" />
         {quiet ? (
           <StatusStrip services={services} />
         ) : (
@@ -582,45 +667,61 @@ export default function Overview() {
               textWrap: 'pretty',
             }}
           >
-            {emptyStateLine(services, bundle.recentHistory[0]?.closed)}
+            {emptyStateLine(services, dashboard.history?.[0]?.closed)}
           </div>
         </Card>
       ) : (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionHeading
             meta={
-              <span data-testid="alert-summary">{alertSummary(open)}</span>
+              // The summary counts the rows below it. With no answer there are
+              // no rows to count, and "0 open · 0 Sev1 · 0 Sev2 · 0 Sev3" over a
+              // failed fetch is the all-clear this product exists to refuse.
+              incidentsAnswered ? <span data-testid="alert-summary">{alertSummary(open)}</span> : undefined
             }
           >
             Active incidents
           </SectionHeading>
-          {open.map((incident) => {
-            const state = stateOf(incident);
-            return (
-              <AlertRow
-                key={incident.id}
-                incident={incident}
-                state={state}
-                onAck={() => update(incident, { ack: true })}
-                onMute={() => update(incident, { muted: !state.muted })}
-                // Resolving also acknowledges: you cannot resolve something
-                // nobody picked up.
-                onResolve={() => update(incident, { ack: true, resolved: true })}
-              />
-            );
-          })}
+          <Panel state={incidentsState}>
+            <StaleReason reason={incidentsStale} testId="incidents-stale-reason" />
+            {open.map((incident) => {
+              const state = stateOf(incident);
+              return (
+                <AlertRow
+                  key={incident.id}
+                  incident={incident}
+                  state={state}
+                  onAck={() => update(incident, { ack: true })}
+                  onMute={() => update(incident, { muted: !state.muted })}
+                  // Resolving also acknowledges: you cannot resolve something
+                  // nobody picked up.
+                  onResolve={() => update(incident, { ack: true, resolved: true })}
+                />
+              );
+            })}
+          </Panel>
         </section>
       )}
 
       {quiet ? (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionHeading>Recent history</SectionHeading>
-          <Panel state={listState(bundle.recentHistory.length, 'No incidents have closed in the last 30 days.')}>
+          {/* `null` history is not an empty history. The API serves open
+              incidents and keeps no closed-incident list, so saying "nothing
+              closed in the last 30 days" over it would be a claim about a
+              record we do not have. Two absences, two sentences. */}
+          <Panel
+            state={
+              dashboard.history === null
+                ? { kind: 'empty', message: 'Closed-incident history is not served by the API yet.' }
+                : listState(dashboard.history.length, 'No incidents have closed in the last 30 days.')
+            }
+          >
             <Card padding="0" style={{ overflow: 'hidden' }}>
               <Table
                 dense
                 columns={HISTORY_COLUMNS}
-                rows={bundle.recentHistory}
+                rows={dashboard.history ?? []}
                 getRowKey={(row) => row.id}
               />
             </Card>

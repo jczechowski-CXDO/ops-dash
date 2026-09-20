@@ -27,6 +27,7 @@ import Overview, {
   stripOverline,
   tileLevel,
 } from './Overview.js';
+import { serviceViewOf, type ServiceView } from '../live/model.js';
 
 /**
  * PLAN DEFECT (Task 7 Step 1). The plan's helper renders `<Overview />` alone and
@@ -65,12 +66,20 @@ const allAffirmed: ServiceStatus[] = quiet.services.map((s) => ({
   vendor: { ...s.vendor, level: 'operational' as const, label: 'Operational' },
   ours: { ...s.ours, level: 'operational' as const, label: 'Passing' },
 }));
-const shapes: { name: string; services: ServiceStatus[] }[] = [
-  { name: 'quiet', services: quiet.services },
-  { name: 'sev1', services: sev1.services },
-  { name: 'constructed all-affirmed', services: allAffirmed },
+/** Every shape goes through `serviceViewOf`, the same widening the app applies
+ *  to a fixture bundle. Built here as `ServiceStatus` and converted, rather than
+ *  hand-written as views: a hand-written view could carry a combination the
+ *  adapter never produces, and the relationship assertions below would then be
+ *  about a shape that does not exist. */
+const views = (list: ServiceStatus[]) => list.map(serviceViewOf);
+const shapes: { name: string; services: ServiceView[] }[] = [
+  { name: 'quiet', services: views(quiet.services) },
+  { name: 'sev1', services: views(sev1.services) },
+  { name: 'constructed all-affirmed', services: views(allAffirmed) },
   { name: 'empty', services: [] },
 ];
+const quietViews = views(quiet.services);
+const sev1Views = views(sev1.services);
 
 describe('Overview — sev1 (the default)', () => {
   it('renders one tile per verified service', () => {
@@ -189,11 +198,11 @@ describe('the strip overline and the health verdict cannot diverge', () => {
   });
 
   it('spells the split the strip actually shows, from the quiet fixture', () => {
-    expect(stripOverline(quiet.services)).toBe('5 AFFIRMED · 2 UNKNOWN');
+    expect(stripOverline(quietViews)).toBe('5 AFFIRMED · 2 UNKNOWN');
   });
 
   it('reaches the all-clear only in a world where every service is affirmed', () => {
-    expect(stripOverline(allAffirmed)).toBe('ALL SYSTEMS OPERATIONAL');
+    expect(stripOverline(views(allAffirmed))).toBe('ALL SYSTEMS OPERATIONAL');
   });
 });
 
@@ -344,7 +353,7 @@ describe('a strip pill announces its status, not just its name', () => {
     // Every pill, derived — not the two interesting ones. A pill whose dot said
     // one thing and whose text said another would fail here.
     pills.forEach((pill, i) => {
-      const s = quiet.services[i]!;
+      const s = quietViews[i]!;
       expect(pill).toHaveTextContent(`${s.short}, ${statusPhrase(tileLevel(s))}`);
     });
   });
@@ -357,7 +366,7 @@ describe('a strip pill announces its status, not just its name', () => {
       .getAllByTestId('service-pill')
       .filter((p) => p.textContent?.includes('status unknown'));
     expect(unknown.map((p) => p.getAttribute('href'))).toEqual(['/services/m365', '/services/zendesk']);
-    expect(unknown).toHaveLength(statusTally(quiet.services).unknown);
+    expect(unknown).toHaveLength(statusTally(quietViews).unknown);
   });
 
   it('puts the status in text, not in the dot, and leaves the dot --main', () => {
@@ -412,7 +421,7 @@ describe('the announced phrase cannot drift from the colour beside it', () => {
   it('announces the worse of the two halves, rendered over the sev1 list', () => {
     render(
       <MemoryRouter>
-        <StatusStrip services={sev1.services} />
+        <StatusStrip services={sev1Views} />
       </MemoryRouter>,
     );
     const pills = screen.getAllByTestId('service-pill');
@@ -426,7 +435,7 @@ describe('the announced phrase cannot drift from the colour beside it', () => {
   it('announces the same phrases the quiet page renders, over the quiet list', () => {
     render(
       <MemoryRouter>
-        <StatusStrip services={quiet.services} />
+        <StatusStrip services={quietViews} />
       </MemoryRouter>,
     );
     // Quiet differs from sev1 on exactly the four services whose halves differ.
@@ -569,7 +578,7 @@ describe('the testid hangs on the Card itself, not on a wrapper', () => {
         // 10, not the recipe's 12 — the documented tile/alert-row override.
         borderRadius: '10px',
         background: 'var(--background-paper)',
-        borderLeft: `3px solid ${statusColor(tileLevel(sev1.services[i]!))}`,
+        borderLeft: `3px solid ${statusColor(tileLevel(sev1Views[i]!))}`,
       });
     });
     expect(screen.getAllByTestId('alert-row')[0]).toHaveStyle({ borderRadius: '10px' });

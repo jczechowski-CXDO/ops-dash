@@ -110,16 +110,106 @@ describe('nothing reaches off-box', () => {
     expect(offenders.map(rel)).toEqual([]);
   });
 
-  it('no network client anywhere in web/src', () => {
+  /**
+   * ## The one-door rule, and why this guard changed in Milestone 3
+   *
+   * Through Milestones 1 and 2 this guard read "no network client anywhere in
+   * web/src", full stop, and that was right: the scaffold was offline and
+   * nothing in it had any business opening a socket. Milestone 3 connects the
+   * dashboard to our OWN API, so the absolute form could not survive — and it
+   * was not weakened to a hole. It became the rule the server has lived under
+   * since Milestone 2: **exactly one file may name a network client**, and
+   * everything about the call is checked at that one door.
+   *
+   * The regexes are the server guard's own, so the three ways the old grep was
+   * blind — `const f = fetch`, `globalThis.fetch`, `function p(impl = fetch)`
+   * — fail everywhere else here too. Two conditions are added that the server
+   * does not need, because the web has a CSP to keep faith with: the door may
+   * name no absolute URL, and may send no credential.
+   *
+   * There is no marker-comment exemption, deliberately. The server's guard has
+   * one and it had to grow a second test proving a marker elsewhere in a file
+   * does not license a bare `fetch` further down. An allowlist of one path,
+   * spelled here, cannot be opened by anything written in another file.
+   */
+  const DOOR = join(WEB, 'src', 'live', 'client.ts');
+  /**
+   * `fetch` as a bare identifier USED AS A VALUE: the call, the alias, the
+   * default parameter, and passing it as an argument.
+   *
+   * The lookbehind excludes `fetchJson`, `x.fetch` and `fetchImpl`, as the
+   * server's copy does. The lookahead is the part the server's copy does not
+   * need and this one does: the web tree is full of English prose and probe
+   * names — "never renders children as if real when the fetch failed", and a
+   * Zendesk probe literally called 'Help centre fetch' — and the server's
+   * pattern flags both. A guard that fires on a sentence gets weakened by the
+   * next person who hits it, so it is narrowed HERE, deliberately and once, to
+   * the punctuation that can follow a value: `(`, `,`, `;`, `)`, `]`, `}` or
+   * end of line. The control test below runs both lists through it.
+   */
+  const BARE_GLOBAL = /(?<![.\w$])fetch\s*(?=[(,;)\]}]|$)/m;
+  const VIA_GLOBAL = /\b(?:globalThis|window|self)\s*\.\s*fetch\b/;
+  const OTHER_CLIENTS = /XMLHttpRequest|new WebSocket|new EventSource|navigator\.sendBeacon|import\s*\(\s*['"]node:/;
+
+  it('only web/src/live/client.ts may reach a network client', () => {
     const offenders: string[] = [];
     for (const file of src()) {
-      // offline.test.tsx asserts ON fetch being absent, so it names it.
+      if (file === DOOR) continue;
+      // offline.test.tsx asserts ON fetch being absent, so it names it; the
+      // live tests stub the door's own interface and name no global.
       if (file.endsWith('offline.test.tsx')) continue;
-      if (/\bfetch\s*\(|XMLHttpRequest|new WebSocket|new EventSource|navigator\.sendBeacon/.test(read(file))) {
+      const code = stripComments(read(file));
+      if (BARE_GLOBAL.test(code) || VIA_GLOBAL.test(code) || OTHER_CLIENTS.test(code)) {
         offenders.push(rel(file));
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('the one door opens onto our own origin only, with no credential', () => {
+    const code = stripComments(read(DOOR));
+    // Same-origin paths, spelled as literals in a union type. An absolute URL
+    // or a protocol-relative one in this file would be a target outside the
+    // CSP's `connect-src 'self'` and outside anything we control.
+    expect(code).not.toMatch(/https?:\/\/|(^|[^:])\/\/[a-z0-9.-]+\.[a-z]{2,}/i);
+    // Positive, not merely the absence of a bad thing: the door must SAY it
+    // sends no credential. A missing option defaults to 'same-origin'.
+    expect(code).toMatch(/credentials:\s*'omit'/);
+    expect(code).not.toMatch(/Authorization|credentials:\s*'(include|same-origin)'/i);
+  });
+
+  it('the guard above can fail — the patterns are not inert', () => {
+    // The control. Every assertion here is "no offender found", which passes
+    // identically against a regex that matches nothing. These are the strings
+    // the rule is meant to catch, checked against the same patterns.
+    const caught = [
+      'await fetch(url)',
+      'const f = fetch;',
+      'function p(impl = fetch) {}',
+      'const go = globalThis.fetch;',
+      'new XMLHttpRequest().open("GET", "/x")',
+      'navigator.sendBeacon("/x")',
+    ];
+    for (const line of caught) {
+      expect(
+        BARE_GLOBAL.test(line) || VIA_GLOBAL.test(line) || OTHER_CLIENTS.test(line),
+        `pattern missed: ${line}`,
+      ).toBe(true);
+    }
+    const allowed = [
+      'const r = await getJson("/api/services");',
+      'client.get(path)',
+      'fetchedAt: row.at',
+      // Prose and data, which the server's copy of this pattern would flag.
+      'it("renders when the fetch failed with nothing cached", () => {',
+      "  zendesk: ['API /users/me', 'Help centre fetch', 'Portal HTTP 200'],",
+    ];
+    for (const line of allowed) {
+      expect(
+        BARE_GLOBAL.test(line) || VIA_GLOBAL.test(line) || OTHER_CLIENTS.test(line),
+        `false positive: ${line}`,
+      ).toBe(false);
+    }
   });
 });
 

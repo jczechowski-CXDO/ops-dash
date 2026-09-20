@@ -6,8 +6,8 @@ import { Panel } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Button } from '../components/aurora/Button.js';
-import { useDemoMode } from '../app/DemoModeProvider.js';
-import { incidentById, serviceById } from '../fixtures/index.js';
+import { useDashboard } from '../live/DataSource.js';
+import { panelStateFor } from '../live/model.js';
 // One HH:MM formatter and one elapsed-span formatter for the whole repository;
 // see ServiceDetail.tsx for the note on where they live.
 import { span } from '../fixtures/time.js';
@@ -61,8 +61,13 @@ function SeverityChip({ incident }: { incident: Incident }) {
  * operator to Service detail's not-found panel.
  */
 function AffectedService({ serviceId }: { serviceId: string }) {
-  const { mode } = useDemoMode();
-  const service = serviceById(mode, serviceId);
+  const { services } = useDashboard();
+  // Only a service we are actually showing gets a link. A list that has not
+  // loaded yields none, which renders the id as text — the same treatment as an
+  // incident belonging to a product source that is not one of the seven tiles,
+  // and the right one: a link to a page that will say "not a monitored service"
+  // is worse than no link.
+  const service = services.data?.find((s) => s.id === serviceId);
 
   if (!service) {
     return (
@@ -129,8 +134,9 @@ function TimelineRow({ entry, last }: { entry: TimelineEntry; last: boolean }) {
  */
 export default function IncidentDetail({ incident: injected }: { incident?: Incident } = {}) {
   const { id } = useParams();
-  const { mode, bundle } = useDemoMode();
-  const incident = injected ?? incidentById(mode, id ?? '');
+  const dashboard = useDashboard();
+  const incidents = dashboard.incidents;
+  const incident = injected ?? incidents.data?.find((i) => i.id === id);
 
   // M-4. Seeded FROM THE CONTRACT, not from false: INC-2286 arrives already
   // acknowledged and INC-2288 already muted, and a hero that offers
@@ -150,16 +156,25 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
     // failure and renders a red alert; an id that is not open is neither a
     // failure nor a surprise. Empty state, and copy that says what is true:
     // when nothing is open, nothing being found is the good outcome.
-    const nothingOpen = bundle.incidents.length === 0;
+    // And before either of those: if the LIST has not answered, the state of
+    // this page is the state of the list. "No incidents are open, that is the
+    // good outcome" over a dead API is the wrong-green this product exists to
+    // refuse, one screen further along than anyone has looked for it.
+    const list = incidents.data;
+    const nothingOpen = list !== undefined && list.length === 0;
     return (
       <div data-testid="view-incident">
         <Panel
-          state={{
-            kind: 'empty',
-            message: nothingOpen
-              ? `No incidents are open, so there is nothing to show for ${id ?? ''}. That is the good outcome.`
-              : `There is no open incident ${id ?? ''}. It may already be resolved, or the id may be wrong.`,
-          }}
+          state={
+            list === undefined
+              ? panelStateFor(incidents, 'Incidents')
+              : {
+                  kind: 'empty',
+                  message: nothingOpen
+                    ? `No incidents are open, so there is nothing to show for ${id ?? ''}. That is the good outcome.`
+                    : `There is no open incident ${id ?? ''}. It may already be resolved, or the id may be wrong.`,
+                }
+          }
         >
           {null}
         </Panel>
@@ -249,6 +264,18 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
       </Card>
 
       <SectionHeading meta="what this incident is costing us right now">Blast radius</SectionHeading>
+      {/* An empty blast radius is a designed state, not a blank strip. The
+          engine computes these metrics and the `incidents` table has no column
+          for them, so every live incident arrives with none — which is a fact
+          about our store and is said as one, rather than rendered as a gap
+          between two headings. */}
+      <Panel
+        state={
+          incident.blastRadius.length === 0
+            ? { kind: 'empty', message: 'No blast-radius metrics are recorded for this incident.' }
+            : { kind: 'ready' }
+        }
+      >
       {/* README § 3: repeat(auto-fit, minmax(170px, 1fr)), gap 12, values 24px/700. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
         {incident.blastRadius.map((metric) => (
@@ -263,6 +290,7 @@ export default function IncidentDetail({ incident: injected }: { incident?: Inci
           </div>
         ))}
       </div>
+      </Panel>
 
       <Card>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

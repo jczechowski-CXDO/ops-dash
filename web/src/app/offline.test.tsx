@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from './DemoModeProvider.js';
 import { App } from './App.js';
+import { LiveDataProvider } from '../live/DataSource.js';
 
 /**
  * The test that keeps Milestone 1's central promise from eroding while
  * Milestones 2-4 are built. It is deliberately NOT the same claim as
- * `guards.test.ts`'s grep for `fetch(`, nor the same as the Playwright offline
+ * `guards.test.ts`'s one-door rule, nor the same as the Playwright offline
  * proof, and all three are worth having:
  *
- *   guards.test.ts   our SOURCE contains no network client
+ *   guards.test.ts   only `live/client.ts` NAMES a network client
  *   this file        our COMPONENTS call no network client when rendered
  *   e2e/security     the PAGE issues no off-origin request, including ones we
  *                    never wrote — a stylesheet @import, a font, a favicon
@@ -19,6 +20,20 @@ import { App } from './App.js';
  * The middle one is the only one that would catch a dependency reaching for the
  * network from inside a render, which is how this promise is most likely to be
  * broken by accident rather than by anyone writing `fetch`.
+ *
+ * ## What Milestone 3 changed about this claim, and what it did not
+ *
+ * The app can now read our own API, so "renders without touching the network"
+ * is no longer true of every tree — it is true of the FIXTURE tree, which is
+ * the one these routes mount and the one all 152 visual baselines photograph.
+ * That is the claim worth keeping and it is exactly the claim tested here:
+ * `<App/>` with no live provider above it fetches nothing, ever, on any route,
+ * in either world.
+ *
+ * Narrowing a claim silently is how a guard becomes decoration, so the last
+ * test in this file is the other half: mount the live provider and the very
+ * same tree DOES fetch. Without it, this file would keep passing if the data
+ * layer were deleted.
  */
 describe('the scaffold is offline', () => {
   const reject = () => Promise.reject(new Error('network is disabled in Milestone 1'));
@@ -71,6 +86,28 @@ describe('the scaffold is offline', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(xhrOpen).not.toHaveBeenCalled();
     expect(beacon).not.toHaveBeenCalled();
+  });
+
+  it('the live provider, mounted on the same tree, really does reach the network', async () => {
+    // The control for the narrowed claim above. The fixture path is offline
+    // BECAUSE nothing mounts the live provider — not because the data layer
+    // cannot fetch. Delete `LiveDataProvider`'s poll and this test fails while
+    // every assertion above stays green.
+    await act(async () => {
+      render(
+        <MemoryRouter initialEntries={['/']}>
+          <ThemeProvider><DemoModeProvider>
+            <LiveDataProvider intervalMs={1_000_000}><App /></LiveDataProvider>
+          </DemoModeProvider></ThemeProvider>
+        </MemoryRouter>,
+      );
+    });
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    // Same-origin paths only, which is the CSP's `connect-src 'self'` restated
+    // as a runtime fact rather than a promise about the source.
+    for (const call of fetchSpy.mock.calls) {
+      expect(String((call as unknown[])[0])).toMatch(/^\/api\//);
+    }
   });
 
   it('the spies would catch a call — they are not inert', () => {

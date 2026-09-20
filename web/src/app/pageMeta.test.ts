@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { fixtures } from '../fixtures/index.js';
 import { allOperational } from '../theme/statusColor.js';
-import { affirmedCount, pageMeta } from './pageMeta.js';
+import { affirmedCount, metaSourceOf, pageMeta } from './pageMeta.js';
+import { fixtureDashboard } from '../live/DataSource.js';
+import type { FixtureBundle } from '../fixtures/index.js';
+
+/**
+ * A fixture bundle as the header's data source, through the SAME two functions
+ * the running app uses — `fixtureDashboard` then `metaSourceOf`. Not a literal
+ * built here: a hand-made source would let this file keep passing while the
+ * adapter the app actually calls stopped producing what it asserts.
+ */
+const metaOf = (bundle: FixtureBundle) => metaSourceOf(fixtureDashboard(bundle), bundle);
 
 import type { ServiceStatus, StatusLevel } from '@ops-dash/shared';
 
@@ -74,7 +84,7 @@ describe('affirmedCount', () => {
 
 describe('pageMeta', () => {
   it('never asserts health over a service it cannot see', () => {
-    const { subtitle } = pageMeta('/', fixtures.quiet);
+    const { subtitle } = pageMeta('/', metaOf(fixtures.quiet));
     expect(fixtures.quiet.incidents).toHaveLength(0);
     expect(subtitle).not.toMatch(/All \d+ monitored services healthy/);
     expect(subtitle).toBe('5 of 7 monitored services affirmed healthy · 2 unknown · 512 users, 612 endpoints');
@@ -92,33 +102,33 @@ describe('pageMeta', () => {
         ours: { ...s.ours, level: 'operational' as const },
       })),
     };
-    expect(pageMeta('/', allGreen).subtitle).toBe('All 7 monitored services healthy · 512 users, 612 endpoints');
+    expect(pageMeta('/', metaOf(allGreen)).subtitle).toBe('All 7 monitored services healthy · 512 users, 612 endpoints');
   });
 
   it('counts the open incidents of the world it is given', () => {
-    expect(pageMeta('/', fixtures.sev1).subtitle).toBe(
+    expect(pageMeta('/', metaOf(fixtures.sev1)).subtitle).toBe(
       `${fixtures.sev1.incidents.length} open incidents across 7 monitored services`,
     );
   });
 
   it('titles a service page from the service and an incident page from the incident', () => {
-    expect(pageMeta('/services/m365', fixtures.sev1).title).toBe('Microsoft 365 / Entra ID');
-    expect(pageMeta('/services/nope', fixtures.sev1).title).toBe('Service detail');
-    expect(pageMeta('/incidents/INC-2291', fixtures.sev1)).toEqual({
+    expect(pageMeta('/services/m365', metaOf(fixtures.sev1)).title).toBe('Microsoft 365 / Entra ID');
+    expect(pageMeta('/services/nope', metaOf(fixtures.sev1)).title).toBe('Service detail');
+    expect(pageMeta('/incidents/INC-2291', metaOf(fixtures.sev1))).toEqual({
       title: 'INC-2291',
       subtitle: fixtures.sev1.incidents.find((i) => i.id === 'INC-2291')!.title,
     });
     // Amended at G3 HIGH-2: the subtitle no longer reads "Incident not found".
     // The page beneath it renders a calm empty state, and a header that says
     // "not found" over it is the same red-over-healthy defect one element up.
-    expect(pageMeta('/incidents/INC-0000', fixtures.sev1)).toEqual({
+    expect(pageMeta('/incidents/INC-0000', metaOf(fixtures.sev1))).toEqual({
       title: 'Incident',
       subtitle: 'That incident is not open',
     });
   });
 
   it('takes the endpoint population from the snapshot, not from the copy deck', () => {
-    expect(pageMeta('/endpoints', fixtures.sev1).subtitle).toBe(
+    expect(pageMeta('/endpoints', metaOf(fixtures.sev1)).subtitle).toBe(
       `${fixtures.sev1.endpoints.stats.total} managed endpoints · Endpoint Central`,
     );
   });
@@ -130,7 +140,7 @@ describe('the incident header never contradicts the page beneath it (G3 HIGH-2)'
   // one element up: red-flavoured copy over a healthy system.
   it('never says "not found", in either world', () => {
     for (const mode of ['quiet', 'sev1'] as const) {
-      const meta = pageMeta('/incidents/INC-9999', fixtures[mode]);
+      const meta = pageMeta('/incidents/INC-9999', metaOf(fixtures[mode]));
       expect(meta.subtitle).not.toMatch(/not found/i);
     }
   });
@@ -141,13 +151,13 @@ describe('the incident header never contradicts the page beneath it (G3 HIGH-2)'
     // even though one of the two strings would still render.
     for (const mode of ['quiet', 'sev1'] as const) {
       const bundle = fixtures[mode];
-      const { subtitle } = pageMeta('/incidents/INC-9999', bundle);
+      const { subtitle } = pageMeta('/incidents/INC-9999', metaOf(bundle));
       expect(subtitle === 'No incidents are open').toBe(bundle.incidents.length === 0);
       expect(subtitle === 'That incident is not open').toBe(bundle.incidents.length > 0);
     }
   });
 
   it('still names a real incident when there is one', () => {
-    expect(pageMeta('/incidents/INC-2292', fixtures.sev1).title).toBe('INC-2292');
+    expect(pageMeta('/incidents/INC-2292', metaOf(fixtures.sev1)).title).toBe('INC-2292');
   });
 });

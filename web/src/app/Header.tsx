@@ -4,7 +4,8 @@ import { Icon } from '../components/aurora/Icon.js';
 import { IconButton } from '../components/aurora/IconButton.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 import { useDemoMode } from './DemoModeProvider.js';
-import { pageMeta } from './pageMeta.js';
+import { useDashboard } from '../live/DataSource.js';
+import { metaSourceOf, pageMeta } from './pageMeta.js';
 
 const REFRESH_SECONDS = 30;
 
@@ -28,7 +29,11 @@ export function Header() {
     return () => clearInterval(id);
   }, []);
 
-  const { title, subtitle } = pageMeta(pathname, bundle);
+  // The header counts the same services and incidents the page below it
+  // renders. Reading the fixture bundle here while the view read the API is how
+  // a header comes to say "5 of 7 affirmed" over seven live tiles that say
+  // something else.
+  const { title, subtitle } = pageMeta(pathname, metaSourceOf(useDashboard(), bundle));
   const dark = theme === 'dark';
 
   return (

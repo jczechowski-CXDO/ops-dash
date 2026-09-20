@@ -6,12 +6,30 @@ import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { CheckRun, ServiceStatus } from '@ops-dash/shared';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
 import ServiceDetail from './ServiceDetail.js';
+import { serviceViewOf } from '../live/model.js';
 
-const at = (id: string, mode: DemoMode = 'sev1', props: { service?: ServiceStatus; runs?: CheckRun[] } = {}) =>
+/** The injected service goes in as a `ServiceStatus` and is widened by the same
+ *  adapter the app uses. A hand-built `ServiceView` here would let the test pass
+ *  over a shape `serviceViewOf` does not produce. */
+const at = (
+  id: string,
+  mode: DemoMode = 'sev1',
+  props: { service?: ServiceStatus; runs?: CheckRun[] } = {},
+) =>
   render(
     <MemoryRouter initialEntries={[`/services/${id}?demo=${mode}`]}>
       <ThemeProvider><DemoModeProvider>
-        <Routes><Route path="/services/:id" element={<ServiceDetail {...props} />} /></Routes>
+        <Routes>
+          <Route
+            path="/services/:id"
+            element={
+              <ServiceDetail
+                {...(props.service ? { service: serviceViewOf(props.service) } : {})}
+                {...(props.runs ? { runs: props.runs } : {})}
+              />
+            }
+          />
+        </Routes>
       </DemoModeProvider></ThemeProvider>
     </MemoryRouter>,
   );

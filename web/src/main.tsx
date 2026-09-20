@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { ThemeProvider } from './theme/ThemeProvider.js';
 import { DemoModeProvider } from './app/DemoModeProvider.js';
 import { App } from './app/App.js';
+import { DataSourceSwitch } from './live/DataSourceSwitch.js';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found');
@@ -16,7 +17,13 @@ createRoot(root).render(
           needs router context to do it. */}
       <BrowserRouter>
         <DemoModeProvider>
-          <App />
+          {/* The ONE place the app decides between the API and the fixtures.
+              Inside the router because it reads `?demo=`; outside `App` so that
+              every test which renders `<App/>` keeps the offline path with no
+              change to the test. */}
+          <DataSourceSwitch>
+            <App />
+          </DataSourceSwitch>
         </DemoModeProvider>
       </BrowserRouter>
     </ThemeProvider>

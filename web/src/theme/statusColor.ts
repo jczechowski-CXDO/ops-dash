@@ -1,7 +1,6 @@
 import type {
   BlastMetric,
   Integration,
-  ServiceStatus,
   Severity,
   StatusLevel,
   TimelineEntry,
@@ -207,6 +206,17 @@ export function timelineColor(kind: TimelineEntry['kind']): string {
 }
 
 /**
+ * The two halves, and nothing else — the only fields the predicate reads.
+ *
+ * Structural rather than `ServiceStatus` because Milestone 3 renders a
+ * `ServiceView` too: the same two levels, with every MEASUREMENT widened to
+ * admit "no number". Widening the parameter keeps ONE definition of affirmed
+ * health across the fixture path and the live path. A second copy for the live
+ * types is exactly how the header comes to say 7 of 7 while the strip says 5.
+ */
+export type Halves = { vendor: { level: StatusLevel }; ours: { level: StatusLevel } };
+
+/**
  * Is this ONE service affirmatively healthy?
  *
  * The single definition of affirmed health. Exported because "is this service
@@ -226,7 +236,7 @@ export function timelineColor(kind: TimelineEntry['kind']): string {
  * information and is the reason the amendment exists. 'degraded' and 'outage'
  * speak for themselves. Widening this predicate by one member is the whole bug.
  */
-export function isAffirmed(service: ServiceStatus): boolean {
+export function isAffirmed(service: Halves): boolean {
   return service.vendor.level === 'operational' && service.ours.level === 'operational';
 }
 
@@ -242,7 +252,7 @@ export function isAffirmed(service: ServiceStatus): boolean {
  * "NOT an assertion of health. Never infer 'operational' from it." Same rule
  * here — health is asserted only over evidence that exists.
  */
-export function allOperational(services: ServiceStatus[]): boolean {
+export function allOperational(services: Halves[]): boolean {
   if (services.length === 0) return false;
   return services.every(isAffirmed);
 }
