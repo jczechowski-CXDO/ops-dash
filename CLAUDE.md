@@ -155,6 +155,36 @@ because this project has counted four accurate comments that failed to prevent t
 described:
 
 - `git add -A` / `git add .` — captures another agent's in-flight work under your message.
+
+**And staging by path is NOT enough. Commit by path.**
+
+```bash
+git commit -m "…" -- path/one.ts path/two.ts     # takes ONLY these
+```
+
+`git add` and `git commit` share one index across every agent on this checkout. So
+`git add mine.ts && git commit` commits **everything currently staged**, including files
+another agent staged thirty seconds ago and has not committed yet. You never typed `-A` and
+you take their work anyway.
+
+Measured, in a scratch repo:
+
+```
+their file staged, then:  git add mine.txt && git commit   ->  2 files changed  (took theirs)
+their file staged, then:  git commit -- mine.txt           ->  1 file changed   (theirs still staged)
+```
+
+This has now happened **three times**: `1fbd2a8`, `m4-auth`'s four `/api/entra` files landing
+inside somebody else's commit, and `fb5ed18` — **the commit that added this very rule, which
+swept four of `m4-email`'s files in under a message about documentation.** The rule and its
+violation are the same commit object, which is the least arguable evidence this file contains
+for why these belong at the permission layer rather than in prose.
+
+Twice of the three were **docs commits**. A docs commit feels safe to stage broadly in a way a
+code commit does not, and that feeling is the whole mechanism.
+
+`git commit -- <paths>` bypasses the index entirely, so it is immune to the race and needs no
+discipline about *when* you stage. Prefer it always; it costs nothing when you are alone.
 - `git stash` — removes other agents' uncommitted files from the shared tree.
 - `git checkout -- <file>` / `git restore` — restores to **HEAD, not to your edit**, and the
   suite goes green afterwards because green was also the state you just lost. Cost one agent
