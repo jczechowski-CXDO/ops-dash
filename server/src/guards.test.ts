@@ -234,3 +234,103 @@ describe('only its own module may read the vendor’s published level', () => {
     expect(files).toContain('server/src/store/currentLevel.ts');
   });
 });
+
+/* --------------------------------------------- the engine reads no operator action */
+
+/**
+ * **Detection that changes because somebody clicked a button is not detection.**
+ *
+ * `Incident.ack` and `Incident.muted` exist and are real from Milestone 4 — the
+ * store folds an append-only log into them and the API serves them. The engine
+ * must never read either. An acknowledged incident must be incapable of
+ * behaving differently from an identical unacknowledged one, or the thing we
+ * call detection is partly a function of who was at their desk.
+ *
+ * Same principle as `ServiceSignal` being deliberately narrower than
+ * `ServiceStatus`, one domain out: a rule handed more than it needs eventually
+ * becomes a function of it.
+ *
+ * **Why this is a guard and not the docblock that was here first.** The ruling
+ * spent a few hours defended by a comment in `index.ts`, and this repo has now
+ * counted three accurate comments in one day that did not prevent the thing
+ * they described — `support.ts` naming its own clock race, `index.ts` calling
+ * two error codes one thing while the rule treated them as two, and the
+ * blackout rationale arguing the cold-start case without naming it. An accurate
+ * comment reads as a handled case. Prose is the third defence and it keeps
+ * losing.
+ *
+ * **Why an import guard alone would be decoration**, which is the part that is
+ * easy to get wrong: `correlate` is handed `Incident[]`, and `Incident` carries
+ * `ack?` and `muted?` from the FROZEN contract. The engine can read `prior.ack`
+ * today without importing anything from `store/`. So the teeth are on the
+ * property access, not on the import — the import rule is here only to catch
+ * the other route in.
+ *
+ * Found and verified by `m4-store`, who owned neither this file nor the
+ * directory it constrains and therefore sent it rather than writing it.
+ */
+const ENGINE_MUST_NOT_READ = [
+  // the store's action surface, by name
+  'foldActions', 'incidentFlags', 'allIncidentFlags', 'actionsFor',
+  'recordAction', 'acknowledge', 'unmute', 'IncidentFlags', 'incidentActions',
+];
+
+/**
+ * Exactly one file, and it is a test that asserts the OPPOSITE of the rule.
+ *
+ * `correlate.test.ts` plants an ack on a prior and checks the engine hands it
+ * back untouched across a carry-forward. **Carrying a value through opaquely is
+ * required; branching on it is forbidden**, and no regex distinguishes
+ * `{ ...rest }` from `if (prior.ack)` in the general case.
+ *
+ * That is precisely why this is an allowlist and not a cleverer pattern. A
+ * guard that tried to judge intent would get it wrong in the PERMISSIVE
+ * direction, which is the only direction that matters. Adding a second entry is
+ * a decision somebody defends in review rather than a diff nobody reads.
+ */
+const MAY_NAME_OPERATOR_ACTIONS = ['server/src/engine/correlate.test.ts'];
+
+const engineFiles = () => sources().filter((f) => rel(f.path).startsWith('server/src/engine/'));
+
+/** Reads of `.ack` / `.muted` as PROPERTIES. Comments are already stripped by
+ *  `sources()`, which matters more than it sounds: `correlate.ts`'s own docblock
+ *  names ack and mute in the very sentence describing correct behaviour, so a
+ *  guard without that would fire on the comment documenting its own compliance. */
+const readsOperatorAction = (code: string) =>
+  /\.\s*(ack|muted)\b/.test(code) || ENGINE_MUST_NOT_READ.some((n) => new RegExp(`\\b${n}\\b`).test(code));
+
+describe('the engine reads no operator action', () => {
+  it('scans the engine, and is not passing because it found nothing to scan', () => {
+    // NON-VACUITY, positive form. Every assertion below is "no match found",
+    // which an empty walk satisfies perfectly. A moved directory or a broken
+    // path would make this whole block green while reading zero files.
+    const names = engineFiles().map((f) => rel(f.path)).sort();
+    expect(names).toEqual([
+      'server/src/engine/correlate.test.ts',
+      'server/src/engine/correlate.ts',
+      'server/src/engine/rules.test.ts',
+      'server/src/engine/rules.ts',
+    ]);
+  });
+
+  it('no engine file reads ack or muted, or names the store action surface', () => {
+    const offenders = engineFiles()
+      .filter((f) => !MAY_NAME_OPERATOR_ACTIONS.includes(rel(f.path)))
+      .filter((f) => readsOperatorAction(f.code))
+      .map((f) => rel(f.path));
+    expect(offenders).toEqual([]);
+  });
+
+  it('catches a planted property read, a planted import, and is not fooled by prose', () => {
+    // The controls, run against text rather than against a file, so the guard
+    // is proven able to fail without anybody writing a broken engine.
+    expect(readsOperatorAction('if (prior.ack) return carryForward(prior);')).toBe(true);
+    expect(readsOperatorAction('if (prior.muted) continue;')).toBe(true);
+    expect(readsOperatorAction("import { foldActions } from '../store/incidentActions.js';")).toBe(true);
+
+    // Must NOT fire: the docblock sentence that describes correct behaviour,
+    // and the spread that implements it.
+    expect(readsOperatorAction(stripComments('/** ack and mute are carried across untouched. */'))).toBe(false);
+    expect(readsOperatorAction('const { resolvedAt, ...rest } = prior;')).toBe(false);
+  });
+});
