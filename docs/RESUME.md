@@ -1770,3 +1770,21 @@ while another agent is committing.** A build-and-preview run reads the tree for 
 anything landing inside that window is a torn read.
 
 If `nav item · dark` fails again, capture the delta first. It is not new.
+
+### The same failure again, twenty minutes later, by the person who wrote this section
+
+Running a mutation control, the lead's first pass reported `1 failed | 697 passed` — and the
+command grepped only for the `Tests` summary line, so the failing test's **name was never
+captured**. Three clean runs since, so it was a one-off; but there is now no way to know
+whether it was the `nav item · dark` capture, something in the unit suite, or a torn read
+from a commit landing mid-run.
+
+Two instances an hour apart, by two different people, says the failure is structural rather
+than careless — and it sharpens the rule. "Read the diff count before re-running" is not
+quite it, because in the second instance **the grep was the destructive action, not the
+re-run.** The output was on screen and was filtered out before anyone read it.
+
+**Capture the failure's identity in the same command that produces it.** Grepping a test run
+for a count, while a name is going past, is watching the number and discarding the only
+thing that would make the number mean something.
+
