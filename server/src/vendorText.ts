@@ -56,23 +56,38 @@
  *
  * Three mutations, predictions written down before running, all three matched:
  *
- * | mutation | red |
+ * | mutation | red, in this module's own suite |
  * |---|---|
- * | `escapeInvisible` made the identity | **5** |
+ * | `escapeInvisible` made the identity | 4 |
  * | the bidi-isolate range deleted from the table | 2 |
  * | length measured before escaping instead of after | 1 |
  *
- * **The first one is the only evidence that matters, and it is the cross-file
- * red.** Making `escapeInvisible` the identity reddens four tests in
- * `vendorText.test.ts` — *makes a right-to-left override visible*, *covers
- * every range in the table*, *escapes on the way through*, *measures the
- * length AFTER escaping* — **and one in
- * `adapters/email/parse.test.ts`**: *escapes an unmapped reason too*. That
- * fifth red is the whole point of publishing this. It is what proves the email
- * adapter genuinely routes through this module rather than keeping a private
- * copy that would drift the first time either premise moved. A refactor of
- * this shape is otherwise indistinguishable from one that left a duplicate
- * behind, and both suites pass either way.
+ * **But the reds that matter are the ones in OTHER suites, and they are not
+ * counted above on purpose.** Making `escapeInvisible` the identity also
+ * reddens at least one test in every consumer:
+ *
+ * ```
+ *   adapters/email/parse.test.ts       escapes an unmapped reason too
+ *   adapters/endpoints/queries.test.ts escapes an invisible codepoint in a
+ *                                      name, a user and an OS string
+ *                                      reaches the attention rows, not just
+ *                                      the helpers
+ * ```
+ *
+ * That is the whole point of publishing this module. A cross-file red is what
+ * proves a consumer genuinely routes through here rather than keeping a
+ * private copy that would drift the first time either premise moved — and a
+ * refactor of this shape is otherwise **indistinguishable** from one that left
+ * a duplicate behind, because every suite passes either way.
+ *
+ * **The total is deliberately not pinned, and the reason is a small lesson.**
+ * It was pinned at "5" for exactly one commit, and the next adopter made that
+ * number wrong without touching this file or its tests — a claim that goes
+ * stale when somebody else does the right thing is a claim that will be
+ * silently false. What is durable is the property: *breaking this function
+ * must redden something in every suite that imports it.* Count the consumers,
+ * not the assertions. If a new consumer can be added and nothing outside its
+ * own directory goes red, it is not really using this.
  *
  * Deleting the `[0x2066, 0x2069]` row reddens *covers every range in the
  * table* and *includes both ends of every range* — the two tests that exist
