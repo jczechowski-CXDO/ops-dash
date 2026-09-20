@@ -2133,6 +2133,56 @@ worth fixing.** "Wrong in the store" was always sufficient to justify `600fdea`;
 mechanism, not carelessness — *reaching for the worst consequence is how a true finding
 acquires a false sentence.*
 
+## A backlog figure and an alert threshold are different quantities (2026-09-20)
+
+Section 7 documents seven rules; the engine had three. Wiring the missing four to the Entra
+signals already being produced would have made **three of the four permanently-firing alarms** —
+and `m4-entra` found it by measuring the quantity each *threshold* names rather than the one the
+*signal* offered.
+
+| rule | threshold says | the signal in hand | measured | naive result |
+|---|---|---|---|---|
+| `spray` | >500 failures in **15 min** | `failedSignIns24h` = 4535 | busiest 15-min bucket in 6h = **68**, median 36, none over 500 | fires forever |
+| `secrets` | expiring **within 14 days** | `expiring_credentials` = 20 | 19 within 14d, **all already expired**; genuinely future = **0** | fires forever |
+| `legacy` | a **successful** legacy sign-in | `legacy_auth` = 11 | successes = **0**; all 11 were blocked attempts | fires forever |
+| `risky` | any confirmed compromised | `riskyConfirmedCompromised` | 0 | the one clean match |
+
+**Each signal is a near-miss of the quantity its rule needs, and every near-miss errs toward
+always-on.** Three instances in one sitting is a shape, not a coincidence: it is what happens
+when you reach for the number already in your hand. The signals are not wrong — an expired
+secret genuinely *is* the problem having happened, and a blocked legacy attempt genuinely *is*
+worth showing — they are right for a standing backlog and catastrophic as a trigger.
+
+Two countermeasures, both mechanical rather than documentary:
+
+- **The window travels with the number.** `{ count, windowMs }` and `{ count, horizonDays }`,
+  with each rule asserting the window it requires. A caller handing over a 24-hour count gets a
+  loud refusal instead of a silent permanent Sev2. This is what turns "if the data cannot answer
+  the question the threshold asks, say so and stop" from an instruction into an enforced check.
+- **A field name that refuses the near-miss costs nothing.** `successfulLegacySignIns`, never
+  `legacyAuth`.
+
+And the test rule this makes unavoidable: **today's data is the world where a wrong `spray` and
+a right `spray` are indistinguishable** — both stay quiet if you only read the 15-minute number,
+and both fire if you only read the 24-hour one. Run the battery against the world where the
+candidates *differ*, or it proves nothing.
+
+## Not firing clears an incident; not looking must not (2026-09-20)
+
+`correlate`'s resolution loop resolved **any** prior that was not in the firing set. With the
+Entra source polling every fifteen minutes and correlation running every sixty seconds, every
+identity incident would have been resolved fourteen times an hour — each one writing a timeline
+entry saying the condition cleared. **It had not. We had stopped looking.**
+
+This is the cold-start defect from the opposite direction. There, absence of data *manufactured*
+an incident (`INC-119d4dc7`, and the `ourside` rule would have repeated it). Here, absence of
+data *destroys* one. Same root — treating "no reading" as a reading — and this direction is
+worse, because a resolution writes a human-readable sentence that is false.
+
+The fix is an `evaluable` set: a rule that was **not evaluated** carries its open incidents
+forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
+not evaluated.
+
 ## Three ways a restore or a retry lies (2026-09-20)
 
 All three found inside one afternoon, all three by the instrument rather than by the work.
