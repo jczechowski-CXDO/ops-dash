@@ -1,5 +1,6 @@
 import type { SourceResult, StatusLevel, VendorIncident } from '@ops-dash/shared';
 import { fetchJson, type FetchLike } from '../../http/fetchJson.js';
+import { safeText } from '../../vendorText.js';
 import {
   asRecord,
   asString,
@@ -176,7 +177,13 @@ function toVendorIncident(incident: Record<string, unknown>): VendorIncident {
   const url = asString(incident.shortlink);
   return {
     id: asString(incident.id) ?? 'unknown',
-    title: asString(incident.name) ?? 'Untitled incident',
+    // Vendor-authored, and the last stop before a browser. `safeText` renders a
+    // bidi override as `[U+202E]` rather than stripping it: React escapes markup
+    // and does nothing about direction, so a U+202E in a status-page headline
+    // reorders what an operator reads about an outage while every character is
+    // individually innocent. Made visible, never removed — the hostility is the
+    // finding, and defanging it hides it from the only person who can act.
+    title: safeText(incident.name, 'Untitled incident'),
     level: mapImpact(incident.impact),
     startedAt: asString(incident.started_at) ?? asString(incident.created_at) ?? '',
     ...(resolvedAt === undefined ? {} : { resolvedAt }),
@@ -191,7 +198,7 @@ function firstMaintenance(maintenances: unknown[]): Vendor['maintenance'] {
     const scheduledFor = asString(m.scheduled_for);
     const scheduledUntil = asString(m.scheduled_until);
     if (scheduledFor === undefined || scheduledUntil === undefined) continue;
-    return { title: asString(m.name) ?? 'Scheduled maintenance', scheduledFor, scheduledUntil };
+    return { title: safeText(m.name, 'Scheduled maintenance'), scheduledFor, scheduledUntil };
   }
   return undefined;
 }

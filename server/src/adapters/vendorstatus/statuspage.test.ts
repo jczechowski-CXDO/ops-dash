@@ -326,3 +326,45 @@ describe('incidents and maintenance', () => {
     expect(vendorOf(result).incidentsSince).toEqual([]);
   });
 });
+
+describe('a vendor headline is text, not a rendering instruction', () => {
+  /**
+   * Every title here is written by a stranger and lands on an operator's screen.
+   *
+   * `safeText` renders a bidi override as `[U+202E]` rather than stripping it.
+   * React escapes markup and does **nothing** about direction — no markup is
+   * involved — so a right-to-left override inside a status-page headline
+   * reorders what an operator reads about an outage while every character in it
+   * is individually innocent.
+   *
+   * **Made visible, never removed.** The hostility is the finding, and defanging
+   * it hides it from the only person who can act on it. The homoglyph case is
+   * asserted as a deliberate limit rather than left as an oversight somebody
+   * later "fixes".
+   *
+   * Found by `m4-views` while wiring advisories to the screen: `safeText` had
+   * been hoisted to `server/src/vendorText.ts` and adopted by two adapters, and
+   * `vendorstatus/` — whose text is authored furthest outside this company —
+   * did not import it at all. They stated the residual in their own code rather
+   * than copying the helper into `web/` to cover one call site.
+   */
+  const RLO = '\u202E';
+
+  const bodyWith = (name: string) => JSON.stringify({
+    components: [{ id: 'c1', name: 'API', status: 'operational' }],
+    incidents: [{ id: 'i1', name, impact: 'minor', status: 'investigating', created_at: '2026-09-20T00:00:00Z' }],
+  });
+
+  it('makes a direction override visible instead of obeying it', async () => {
+    const result = await pollStatuspage(JIRA, serving(bodyWith(`Degraded ${RLO}gnv.exe`)));
+    const [advisory] = vendorOf(result).incidentsSince;
+    expect(advisory!.title).toContain('[U+202E]');
+    expect(advisory!.title).not.toContain(RLO);
+  });
+
+  it('leaves a homoglyph exactly as the vendor sent it', async () => {
+    const result = await pollStatuspage(JIRA, serving(bodyWith('Outage at exarnple.com')));
+    const [advisory] = vendorOf(result).incidentsSince;
+    expect(advisory!.title).toBe('Outage at exarnple.com');
+  });
+});

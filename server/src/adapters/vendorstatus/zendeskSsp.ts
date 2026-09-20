@@ -1,5 +1,6 @@
 import type { SourceResult, StatusLevel, VendorIncident } from '@ops-dash/shared';
 import { fetchJson, type FetchLike } from '../../http/fetchJson.js';
+import { safeText } from '../../vendorText.js';
 import {
   asRecord,
   asString,
@@ -116,7 +117,7 @@ function readIncidents(body: unknown): SspIncident[] | null {
     return [
       {
         id: asString(row.id) ?? 'unknown',
-        name: asString(attrs.name) ?? 'Untitled incident',
+        name: safeText(attrs.name, 'Untitled incident'),
         level: incidentLevel(attrs),
         startedAt: asString(attrs.startedAt) ?? '',
         // `resolvedAt`, NOT `status`. Zendesk leaves `status` stale: incident
