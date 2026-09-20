@@ -33,14 +33,30 @@ const PAD = 2;
  * How MANY holes there were is a sentence for the view to render beside the
  * chart. A primitive does not know what page it is on.
  *
- * ## What is not proven about the dot
+ * ## What is proven about the dot, and how
  *
  * That a zero-length subpath paints at all depends on `stroke-linecap` being
- * round, and jsdom cannot tell you whether anything painted — the unit tests
- * assert the markup, the points and the cap, and no more than that. No visual
+ * round, and **jsdom cannot tell you whether anything painted** — the unit
+ * tests reach the markup, the points and the cap, and no further. No visual
  * baseline reaches it either: no fixture spark contains a hole, so the dot
- * renders on no photographed screen. **Asserted in markup, unverified on
- * screen.** An island sample only occurs under live data.
+ * renders on no photographed screen. An island sample only occurs under live
+ * data.
+ *
+ * So it was measured directly instead. Rasterised in real Chromium, this
+ * construction inside `viewBox="0 0 100 30"` with `preserveAspectRatio="none"`:
+ *
+ *     polyline points="50.0,13.0 50.0,13.0"
+ *       boundingBox : 2x2 px    painted : 4 non-transparent pixels
+ *
+ * 2x2 is the stroke's own width, not a distorted ellipse — which is the point
+ * of the non-scaling stroke. Under `preserveAspectRatio="none"` the x scale
+ * differs by roughly five times between the 26px tile and the 120/30 detail
+ * chart, so a `<circle>` would have been a differently-squashed ellipse on each
+ * screen. This is the same dot on both.
+ *
+ * Do not let that measurement decay into a claim: it is a one-off observation,
+ * not a check. Nothing in the suite re-runs it, so a future change to the cap
+ * or the stroke could make it false silently.
  */
 export function Sparkline({
   values,
