@@ -229,6 +229,20 @@ measurement.** Three runs instead of two, sixty seconds, and it separates *my mu
 from *the tree moved* without any inference. **On a shared branch a control has a shelf life
 measured in seconds.**
 
+**And the cheap alternative does not work: you cannot substitute `git log`.** The obvious
+saving is to skip the second control and check afterwards whether anyone committed between the
+first one and the measurement. It fails, because **vitest reads the working tree and not HEAD**.
+An edit affects every agent's run from the moment it is *saved*; the commit that contains it may
+arrive minutes later or never. A commit timestamp is an upper bound on when a change started
+breaking your control, not the moment it did.
+
+That is not hypothetical — it is what actually happened here. The lead excluded their own
+`static.ts` edit as the cause of a 17:15:53Z red because they committed it at 17:16:08Z. The
+edit had been sitting in the shared tree the whole time, and it *was* the cause. **Anyone
+reconstructing that afternoon from the history would have reached the same wrong conclusion**,
+because the thing that invalidated the control was invisible in `git log` by construction. Only
+an adjacent second control catches it.
+
 What a real coupling looks like, from the same battery: the escaping reds were **identical
 across all three mutated runs** — `vendorText=4, email/parse=1, endpoints/queries=2`, every
 time. The auth column moved run to run and eventually appeared with no mutation at all. Stable
