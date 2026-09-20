@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -383,5 +386,57 @@ describe('a partial read is not a failed read', () => {
     const back = s.getSnapshot('vendor:jira');
     expect(back?.data, 'the real reading must survive the manufactured one').toEqual({ level: 'operational' });
     expect(back?.error?.code).toBe('http_503');
+  });
+
+  it('EVERY partial-shaped code the adapters emit is registered — the gap guard', () => {
+    // Two independently-reachable definitions compared against each other: the
+    // set in db.ts, and what the adapters actually emit. Neither is derived from
+    // the other, which is the only form of this assertion that can fail.
+    //
+    // It would have caught the gap that motivated it. The first version of
+    // PARTIAL_READ_CODES held `entra_partial` alone while `epc_partial` and
+    // `partial_read` were already live, so Endpoints and Email kept discarding
+    // their payloads after the fix that was supposed to stop exactly that — and
+    // because the default is the SAFE direction, it failed as a silently blank
+    // screen rather than as anything anyone would notice.
+    const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'adapters');
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const e of readdirSync(d)) {
+        const f = join(d, e);
+        if (statSync(f).isDirectory()) walk(f);
+        else if (f.endsWith('.ts') && !f.endsWith('.test.ts')) files.push(f);
+      }
+    };
+    walk(dir);
+
+    // Positive anchor. A walk that found nothing reports no offenders, which is
+    // indistinguishable from a clean tree — the failure mode this repo has
+    // shipped more than once.
+    expect(files.length, 'the walk must actually be reading the adapters').toBeGreaterThan(5);
+
+    const emitted = new Set<string>();
+    for (const f of files) {
+      for (const m of readFileSync(f, 'utf8').matchAll(/code:\s*'([a-z0-9_]*partial[a-z0-9_]*)'/g)) {
+        emitted.add(m[1]!);
+      }
+    }
+    expect(emitted.size, 'and it must be finding the codes').toBeGreaterThanOrEqual(3);
+
+    const unregistered = [...emitted].filter((c) => !PARTIAL_READ_CODES.has(c)).sort();
+    expect(unregistered, 'a partial-shaped code no store branch knows about').toEqual([]);
+  });
+
+  it('a registered code from ANOTHER adapter behaves like the Entra one', () => {
+    // The set entries are exercised, not merely enumerated. Without this the
+    // guard above could pass over a set whose extra members are never used.
+    const s = open(':memory:');
+    s.putSnapshot('endpoints', {
+      data: { total: 213 }, fetchedAt: '2026-09-20T12:00:00.000Z', degraded: true,
+      error: { code: 'epc_partial', message: 'These counts are lower bounds: 2 computer(s) never reported.' },
+    });
+    const back = s.getSnapshot('endpoints');
+    expect(back?.data, 'the Endpoints screen must not be blank on a permanent partial').toEqual({ total: 213 });
+    expect(back?.error?.code).toBe('epc_partial');
   });
 });

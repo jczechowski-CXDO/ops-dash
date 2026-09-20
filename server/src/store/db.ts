@@ -49,9 +49,19 @@ export type Store = ReturnType<typeof openStore>;
  * rather than as wrong numbers.
  *
  * Adding an entry is a deliberate act with a failing test attached, and it
- * belongs to whoever owns the adapter that emits the code.
+ * belongs to whoever owns the adapter that emits the code — but nobody has to
+ * REMEMBER to, because `db.test.ts` greps the adapters for a partial-shaped code
+ * that is not registered here and fails naming it. That guard exists because
+ * the first version of this set had one entry and there were already three
+ * producers, spelled three different ways: `entra_partial`, `epc_partial` and
+ * `partial_read`. A closed set keyed on strings that three agents each named
+ * independently is exactly the kind that silently stops covering things.
  */
-export const PARTIAL_READ_CODES: ReadonlySet<string> = new Set(['entra_partial']);
+export const PARTIAL_READ_CODES: ReadonlySet<string> = new Set([
+  'entra_partial',   // pollEntra hit its page budget
+  'epc_partial',     // pollEndpoints: agents installed that have never reported
+  'partial_read',    // pollEmail: one of the search windows came back short
+]);
 
 /** One `incident_actions` row, out of SQLite's untyped record and into the
  *  shape the pure fold takes. `until` is coerced to `string | null` and never
