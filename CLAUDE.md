@@ -174,6 +174,24 @@ different domain, when the previous context is exhausted or polluted, or when yo
 want a deliberately fresh reading — a reviewer re-reviewing its own work is worth
 nothing.
 
+**There is no way to reset a live agent's context.** `SendMessage` continues it with
+everything intact; a new `Agent` call is a new agent; `TaskStop` ends it. Nothing
+keeps the agent and drops the history. So **stop-and-respawn IS the reset**, and it
+is the right move when a task is done-done and the next one is unrelated — at that
+point the accumulated context is not an asset, it is stale assumptions and a spent
+window.
+
+The two failure modes pull opposite ways and both are real:
+
+- respawning for work that touches the same files throws away the reasoning that was
+  never written down
+- reusing across an unrelated task carries assumptions from the old one into the new
+
+The test is the files, not the calendar. Same files or the same seam — reuse. A
+different corner of the codebase with nothing carried over — stop it and start
+clean, and say in the new brief what the old agent concluded so the useful part
+survives the reset.
+
 **Close an agent when its context has no further use — not to tidy a list.** Idle
 agents that will be reused are fine; spawning the whole team at the start of a
 session and using the ones you need is fine. The waste is an agent that will never
