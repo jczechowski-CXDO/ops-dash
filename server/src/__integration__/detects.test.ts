@@ -540,3 +540,85 @@ describe('retention runs as a source', () => {
     expect(result.data).toMatchObject({ checkRuns: expect.any(Number), incidents: expect.any(Number) });
   });
 });
+
+describe('the engine and the browser see the same service — G5 HIGH 1', () => {
+  /**
+   * The third time this seam produced two answers to one question, and the
+   * first that arrived through an ARGUMENT rather than a function.
+   *
+   * `index.ts` folded a 50-row window for the engine and `api/tile.ts` folded a
+   * 500-row window for the browser. Both correctly implemented "the latest run
+   * of each distinct check"; they disagreed about any service with a probe that
+   * had not reported inside the smaller window.
+   *
+   * Both tests named after that agreement passed, because both ran over ten-row
+   * fixtures where the windows cannot differ. This one is built in the world
+   * where they do — which is the standing rule in RESUME.md: run the battery
+   * against the world where the candidates differ.
+   */
+  /** No live probes: this test supplies the whole check history itself, so the
+   *  cycle's own fresh runs cannot become pod B's latest and hide the case. */
+  const bare = () =>
+    createApp({
+      dbPath: ':memory:',
+      fetchImpl: stubFetch(realPayloads(), allWell).impl,
+      now: () => new Date('2026-09-19T12:00:00.000Z'),
+      probes: [],
+      tokens: stubTokens,
+    });
+
+  const retiredProbeStore = (a: ReturnType<typeof createApp>) => {
+    const base = Date.parse('2026-09-19T12:00:00.000Z');
+    // Pod B answered once, 200 minutes ago, and failed — a probe retired or
+    // renamed. Pod A has polled every minute since and passes.
+    a.store.addRun({
+      serviceId: 'zendesk', at: new Date(base - 200 * 60_000).toISOString(),
+      check: 'Zendesk pod: netsapiens', region: 'us-east', result: 'fail', latencyMs: null,
+    });
+    for (let i = 199; i >= 0; i -= 1) {
+      a.store.addRun({
+        serviceId: 'zendesk', at: new Date(base - i * 60_000).toISOString(),
+        check: 'Zendesk pod: crexendo', region: 'us-east', result: 'pass', latencyMs: 40,
+      });
+    }
+  };
+
+  it('counts the same checks past 50 rows of history', async () => {
+    const a = bare();
+    await cycle(a);
+    retiredProbeStore(a);
+
+    // More than the old 50-row window, so a window difference is visible.
+    expect(a.store.runsFor('zendesk', 500).length).toBeGreaterThan(50);
+
+    const res = await a.api.inject({ method: 'GET', url: '/api/services' });
+    const served = (JSON.parse(res.body) as { services: { id: string; ours: { passing: number; total: number }; currentLevel: string }[] })
+      .services.find((s) => s.id === 'zendesk')!;
+    const signal = a.signals().find((s) => s.serviceId === 'zendesk')!;
+
+    // Pinned to literals as well as compared, because equality alone would call
+    // two identically-wrong answers agreement.
+    expect(signal.ours).toEqual({ passing: 1, total: 2 });
+    expect(served.ours.passing).toBe(1);
+    expect(served.ours.total).toBe(2);
+    expect(served.ours).toMatchObject(signal.ours);
+  });
+
+  it('and therefore reach the same level, which is the thing that was wrong', async () => {
+    // The visible symptom: with `1/1` the engine let amendment 10 infer
+    // `operational` while the tile, seeing `1/2`, rendered Failing. One process,
+    // one store, one instant, two answers.
+    const a = bare();
+    await cycle(a);
+    retiredProbeStore(a);
+
+    const res = await a.api.inject({ method: 'GET', url: '/api/services' });
+    const served = (JSON.parse(res.body) as { services: { id: string; currentLevel: string }[] })
+      .services.find((s) => s.id === 'zendesk')!;
+    const signal = a.signals().find((s) => s.serviceId === 'zendesk')!;
+
+    expect(signal.vendor.level).toBe('unknown');   // one of ours is failing, so no inference
+    expect(served.currentLevel).toBe('unknown');
+    expect(served.currentLevel).toBe(signal.vendor.level);
+  });
+});

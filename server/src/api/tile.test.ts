@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { CheckRun, ServiceId } from '@ops-dash/shared';
 import { openStore, type Store } from '../store/db.js';
-import { oursFor } from '../index.js';
+import { oursFor } from '../store/ours.js';
 import {
   buildTile,
   latestPerCheck,

@@ -21,10 +21,15 @@
  *     service nobody notices is missing.
  */
 
-import type { ServiceId, Incident, CheckRun } from '@ops-dash/shared';
-import { openStore, type Store } from './store/db.js';
+import type { Incident } from '@ops-dash/shared';
+import { openStore } from './store/db.js';
 import { vendorLevel } from './store/currentLevel.js';
 import { SERVICE_PLATFORM } from './services.js';
+// The one fold of check runs into `{ passing, total }`. G5 HIGH 1: this file
+// had its own copy over a 50-row window while the API used 500, so the engine
+// and the browser disagreed about any service whose probe had not reported
+// inside the smaller one.
+import { oursFor } from './store/ours.js';
 import { loadVendorFeeds } from './adapters/vendorstatus/common.js';
 import { pollVendor } from './adapters/vendorstatus/index.js';
 import type { TokenSource } from './http/graphToken.js';
@@ -236,24 +241,6 @@ export function createApp(opts: AppOptions = {}) {
 
 /* -------------------------------------------------------------- helpers */
 
-/**
- * Our half for one service: the latest run of each distinct check.
- *
- * Latest-per-check, not "the last N rows". Zendesk has two probes on one tile,
- * so the last five rows are two or three polls of both pods — counting them
- * raw would report `3/5 passing` for a service with one dead pod out of two,
- * and the number on the tile would drift with the polling cadence rather than
- * with anything real.
- */
-export function oursFor(store: Pick<Store, 'runsFor'>, serviceId: ServiceId): { passing: number; total: number } {
-  const latest = new Map<string, CheckRun>();
-  // Newest first, so the first sighting of a check name is its latest run.
-  for (const run of store.runsFor(serviceId, 50)) {
-    if (!latest.has(run.check)) latest.set(run.check, run);
-  }
-  const runs = [...latest.values()];
-  return { passing: runs.filter((r) => r.result === 'pass').length, total: runs.length };
-}
 
 /**
  * A stored incident row, back into the shape `correlate` carries forward.

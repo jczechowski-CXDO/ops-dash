@@ -4,6 +4,7 @@ import type { CheckRun, ServiceId, StatusLevel } from '@ops-dash/shared';
 // disagree about whether our half is failing — and `total === 0` is the case
 // where two hand-written versions of "is it failing" diverge first.
 import { ourCheckFailing } from '../engine/rules.js';
+import { RUN_WINDOW, latestOf, count } from '../store/ours.js';
 
 /**
  * One service's half of a tile: our own probe evidence, as numbers.
@@ -132,7 +133,12 @@ export const INCIDENT_WINDOW_DAYS = 90;
  * — comfortably more than the 28 the sparkline needs, and enough replay for
  * `lastStateChange` to have seen a recent flip.
  */
-export const RUN_WINDOW = 500;
+// The window, the fold and the count all live in `store/ours.ts` now, and are
+// re-exported here so existing importers keep working. G5 HIGH 1: this file and
+// `index.ts` each had their own copy over different windows, and the engine and
+// the browser disagreed about a service whenever a probe had not reported
+// inside the smaller one.
+export { RUN_WINDOW, latestOf, latestPerCheck, count } from '../store/ours.js';
 
 const DAY_MS = 86_400_000;
 const since = (now: Date, days: number) => new Date(now.getTime() - days * DAY_MS).toISOString();
@@ -148,37 +154,6 @@ export type TileStore = {
   incidentsSince(since: string): Array<Record<string, unknown>>;
 };
 
-/**
- * The latest run of each distinct check, newest check-run first.
- *
- * Latest-per-check, not "the last N rows". Zendesk has two probes on one tile,
- * so the last five rows are two or three polls of both pods — counting them raw
- * would report `3/5 passing` for a service with one dead pod out of two, and
- * the number on the tile would drift with the polling cadence rather than with
- * anything real.
- *
- * `index.ts`'s `oursFor` is the fold of this into `{ passing, total }`, and is
- * a second implementation of the same rule only until it can be pointed here —
- * `index.ts` is not this agent's file. `tile.test.ts` runs both over one store
- * and asserts they agree, so the day they diverge is a red test rather than two
- * different numbers for the same tile.
- */
-export function latestPerCheck(store: Pick<TileStore, 'runsFor'>, serviceId: ServiceId): CheckRun[] {
-  return latestOf(store.runsFor(serviceId, RUN_WINDOW));
-}
-
-/** The same rule over runs already in hand. `buildTile` reads the window ONCE
- *  and folds it several ways, so it uses this: a second `runsFor` would let the
- *  counts and the sparkline be computed from two different sets of rows. */
-export function latestOf(history: readonly CheckRun[]): CheckRun[] {
-  const latest = new Map<string, CheckRun>();
-  // Newest first, so the first sighting of a check name is its latest run.
-  for (const run of history) {
-    if (!latest.has(run.check)) latest.set(run.check, run);
-  }
-  return [...latest.values()];
-}
-
 /** Our half's level from counts. `ourCheckFailing` decides whether it is
  *  failing; this only names the two outcomes and the no-evidence case. There is
  *  no third level: calling a partial pass 'degraded' would be a second opinion
@@ -188,10 +163,6 @@ function ourLevel(counts: { passing: number; total: number }): StatusLevel {
   return ourCheckFailing(counts) ? 'outage' : 'operational';
 }
 
-const count = (runs: readonly CheckRun[]) => ({
-  passing: runs.filter((r) => r.result === 'pass').length,
-  total: runs.length,
-});
 
 function ourNote(latest: readonly CheckRun[], history: readonly CheckRun[]): string {
   const { passing, total } = count(latest);
