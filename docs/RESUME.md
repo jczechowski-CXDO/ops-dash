@@ -2183,6 +2183,49 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## Right outcome, wrong reason — in both directions (2026-09-20)
+
+Two findings an hour apart, and they are the same defect seen from opposite ends. A **green**
+that is green for the wrong reason and a **red** that is red for the wrong reason both tell you
+nothing, and both look exactly like the answer you wanted.
+
+**The green.** `m4-auth`'s route-table guard — the deliverable of the whole auth seam, the
+thing meant to make "no unprotected route can be added" mechanical — **reported seven routes
+where the process serves eight.** `onRoute` only fires for routes registered *after* the hook
+is added; `register` defers to `ready()` so those are still caught, but `serveDashboard` calls
+`app.get` directly and registers immediately, so the hook never fired for it. A guard blind to
+the one route it was written to see, reporting green.
+
+It surfaced **only because the expected list was pinned as literals.**
+`expect(rows.length).toBeGreaterThan(6)` would have passed forever. The new part of the
+positive-set rule: **a count is the thing that can absorb a missing row without noticing.** A
+literal list cannot absorb anything. Any guard here asserting a *length* rather than a
+*membership* has the same hole.
+
+**The red.** `m4-store`'s gap guard had a blind spot found by `m4-entra` testing it
+adversarially. A partial code hoisted to a `const` was invisible to the pattern — but the guard
+still went **red**, on the *count anchor*, because hoisting the literal dropped the count. The
+unregistered check saw nothing. A fourth adapter emitting a literal would have kept the anchor
+satisfied while a hoisted code slipped through — the defect returning **through the guard that
+fixed it.**
+
+It was caught by checking **which** assertion failed rather than that one did. **A mutation
+that dies for the wrong reason is as misleading as one that never ran** — and that sentence
+now has three siblings in this file: the mutant never planted, the typecheck that aborted
+early, `$?` after a pipe.
+
+**The repairs share a shape.** Both replaced a tally with a relationship: literals instead of a
+length, and **set equality** between what the adapters emit and what the store registers
+instead of a `>= 3` anchor. Set equality also catches drift from the far end — a code
+registered that nothing emits any more — which the old subset check could not express at all,
+proven by a mutation that produced a failure the previous version was incapable of producing.
+
+**And the argument for making this routine, in `m4-store`'s words:** the guard was written by
+someone who had *just* been burned by exactly that gap, and it still shipped with a blind spot
+that survived writing and two readings. It was found by another agent attacking it against
+their own adapter, without touching the file. **Guards need adversarial testing as routine
+rather than when somebody happens to feel suspicious.**
+
 ## `$?` after a pipe is the pipe's, and it is always zero (2026-09-20)
 
 ```
