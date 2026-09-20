@@ -46,6 +46,41 @@
  * about this module later.** It is worth refusing in advance. Sanitising means
  * removing the dangerous part; this removes nothing and reveals something. The
  * true summary is that it defangs the terminal without defanging the evidence.
+ *
+ * ## How we know these tests can fail
+ *
+ * Recorded here rather than in a commit message, because a mutation record
+ * that lives only in a commit message is one bad commit from gone — which this
+ * module has already demonstrated: the commit that was meant to carry it swept
+ * these files into somebody else's message instead.
+ *
+ * Three mutations, predictions written down before running, all three matched:
+ *
+ * | mutation | red |
+ * |---|---|
+ * | `escapeInvisible` made the identity | **5** |
+ * | the bidi-isolate range deleted from the table | 2 |
+ * | length measured before escaping instead of after | 1 |
+ *
+ * **The first one is the only evidence that matters, and it is the cross-file
+ * red.** Making `escapeInvisible` the identity reddens four tests in
+ * `vendorText.test.ts` — *makes a right-to-left override visible*, *covers
+ * every range in the table*, *escapes on the way through*, *measures the
+ * length AFTER escaping* — **and one in
+ * `adapters/email/parse.test.ts`**: *escapes an unmapped reason too*. That
+ * fifth red is the whole point of publishing this. It is what proves the email
+ * adapter genuinely routes through this module rather than keeping a private
+ * copy that would drift the first time either premise moved. A refactor of
+ * this shape is otherwise indistinguishable from one that left a duplicate
+ * behind, and both suites pass either way.
+ *
+ * Deleting the `[0x2066, 0x2069]` row reddens *covers every range in the
+ * table* and *includes both ends of every range* — the two tests that exist
+ * because a range quietly dropped from that table is the likeliest edit
+ * anybody will make to this file. Measuring `value.length` instead of
+ * `escaped.length` reddens only *measures the length AFTER escaping*, which is
+ * the point of having that test: 200 overrides become 1,600 characters, and no
+ * other assertion in either suite can see the difference.
  */
 
 /**
