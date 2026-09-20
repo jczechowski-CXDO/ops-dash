@@ -109,27 +109,33 @@ describe('the Endpoints snapshot, end to end over a stubbed EPC', () => {
       .toEqual(new Set(['stale_agent', 'no_bitlocker', 'missing_patches']));
   });
 
-  it('marks the snapshot degraded when a check-in time could not be read', async () => {
-    // One fixture row carries `agent_last_contact_time: 0`, on purpose. The
-    // count is therefore a lower bound, and too small is the direction that
-    // looks calm.
+  it('is NOT degraded by a machine that simply has no agent', async () => {
+    // The fixture world matches the live one: one computer has never contacted
+    // and has no agent installed. That is a fact about the estate, not a hole in
+    // the read, so the snapshot is clean. The first version degraded here and
+    // therefore degraded on EVERY poll of the real estate — a provenance note
+    // that is permanently on is a note nobody reads.
     const { r } = await poll(routes());
-    expect(r.degraded).toBe(true);
-    expect(r.error?.code).toBe('epc_partial');
+    expect(r.degraded).toBe(false);
+    expect(r.error).toBeUndefined();
     expect(r.data).toBeDefined();
   });
 
-  it('is NOT degraded when every row parses — the other half', async () => {
-    const clean = {
+  it('IS degraded by an agent that exists and has never reported', async () => {
+    // The other half. Same missing timestamp, different fact: this one is an
+    // anomaly and the count really is a lower bound.
+    const anomalous = {
       status: 'success',
       message_response: { total: 5, computers: [
-        { resource_id: 104, resource_id_string: '104', resource_name: 'DEMO-LT-0355', os_name: 'macOS', agent_last_contact_time: 1789819200000 },
-        { resource_id: 105, resource_id_string: '105', resource_name: 'DEMO-DT-0092', os_name: 'macOS', agent_last_contact_time: 1789819200000 },
+        { resource_id: 104, resource_id_string: '104', resource_name: 'DEMO-LT-0355', os_name: 'macOS', agent_last_contact_time: 1787313600000, agent_installed_on: 1785000000000 },
+        { resource_id: 105, resource_id_string: '105', resource_name: 'DEMO-DT-0092', os_name: 'macOS', agent_last_contact_time: 0, agent_installed_on: 1785000000000 },
       ] },
     };
-    const { r } = await poll(routes([[(u) => u.includes('som/computers') && u.includes('page=2'), clean]]));
-    expect(r.degraded).toBe(false);
-    expect(r.error).toBeUndefined();
+    const { r } = await poll(routes([[(u) => u.includes('som/computers') && u.includes('page=2'), anomalous]]));
+    expect(r.degraded).toBe(true);
+    expect(r.error?.code).toBe('epc_partial');
+    expect(r.error?.message).toContain('never reported');
+    expect(r.data).toBeDefined();   // and the figures still reach the screen
   });
 });
 

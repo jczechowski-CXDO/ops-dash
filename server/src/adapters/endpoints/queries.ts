@@ -83,18 +83,48 @@ export const osName = (row: Row): string => asString(row['os_name']) ?? asString
 
 /* ------------------------------------------------------------ the readings */
 
-/** Computers seen inside the check-in window. A row whose timestamp will not
- *  parse counts in NEITHER direction and is returned separately, so "we could
- *  not read these" is a number rather than a silent shortfall. */
-export function checkedInWithin(rows: Row[], now: number, days = CHECKIN_WINDOW_DAYS): { count: number; unreadable: number } {
+/**
+ * Computers seen inside the check-in window.
+ *
+ * **A missing check-in time is two different facts and only one of them is a
+ * hole.** The first version counted every unreadable timestamp as unreadable
+ * and marked the whole snapshot `degraded`, which on the live estate fired on
+ * **every single poll** — 2 of 213 computers have no last-contact time, and
+ * they always will. A provenance note that is permanently on is a note nobody
+ * reads, which is the same failure as a permanently-red tile arriving from a
+ * quieter direction.
+ *
+ * Measured, which is what separates the two facts: **both** of those machines
+ * also have no `agent_installed_on`. Their agent was never installed, so they
+ * have never contacted anything — "not checked in" is the *correct* answer for
+ * them, not an approximation, and `checkedIn7d` is exact rather than a lower
+ * bound. (The converse does not hold: 3 computers lack an install time and one
+ * of them has contacted, so the sets are not interchangeable and this tests the
+ * one direction that was actually measured.)
+ *
+ * A computer with no contact time that DOES have an install time is the real
+ * anomaly — an agent that exists and has never spoken — and that one still
+ * counts as unreadable and still degrades the snapshot. Today there are none,
+ * which is why the live poll is now clean.
+ */
+export function checkedInWithin(
+  rows: Row[],
+  now: number,
+  days = CHECKIN_WINDOW_DAYS,
+): { count: number; neverInstalled: number; unreadable: number } {
   let count = 0;
+  let neverInstalled = 0;
   let unreadable = 0;
   for (const row of rows) {
     const t = instant(row['agent_last_contact_time']);
-    if (t === undefined) { unreadable += 1; continue; }
+    if (t === undefined) {
+      if (instant(row['agent_installed_on']) === undefined) neverInstalled += 1;
+      else unreadable += 1;
+      continue;
+    }
     if (now - t <= days * DAY_MS) count += 1;
   }
-  return { count, unreadable };
+  return { count, neverInstalled, unreadable };
 }
 
 /**

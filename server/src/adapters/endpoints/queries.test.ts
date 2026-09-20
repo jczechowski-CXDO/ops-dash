@@ -48,21 +48,33 @@ describe('EPC timestamps', () => {
 });
 
 describe('check-in freshness', () => {
-  it('counts the window and reports unreadable rows separately', () => {
+  it('counts the window, and a machine with no agent is NOT a hole', () => {
     // Read off the fixtures by hand against NOW: 1 day and 3 days ago are
-    // inside seven; 30 and 45 days are outside; one row has 0.
+    // inside seven; 30 and 45 days are outside; one row has never contacted and
+    // has no agent installed. That last one is honestly "not checked in" — the
+    // correct answer, not an approximation — so it is `neverInstalled` and not
+    // `unreadable`, and it does not degrade anything.
     const out = checkedInWithin(COMPUTERS, NOW);
-    expect(out.count).toBe(2);
-    expect(out.unreadable).toBe(1);
+    expect(out).toEqual({ count: 2, neverInstalled: 1, unreadable: 0 });
     expect(CHECKIN_WINDOW_DAYS).toBe(7);
   });
 
-  it('an unreadable row is in NEITHER direction', () => {
-    // Not counted as checked in, and not counted as stale. It is a hole, and
-    // the hole is reported as a number the caller can act on.
+  it('an agent that EXISTS and has never reported is the real anomaly', () => {
+    // The other half, and the world where the two readings differ. Same missing
+    // timestamp; the presence of an install time is what makes it a hole rather
+    // than a fact. Measured on the live estate: both never-contacted machines
+    // have no install time, so this branch is empty there — which is the whole
+    // reason the live poll stopped reporting itself degraded on every tick.
+    const anomaly: Row[] = [{ agent_last_contact_time: 0, agent_installed_on: 1785000000000 }];
+    expect(checkedInWithin(anomaly, NOW)).toEqual({ count: 0, neverInstalled: 0, unreadable: 1 });
+  });
+
+  it('neither kind of missing row is counted as checked in, however wide the window', () => {
+    // Not counted as fresh, ever. Widening the window to a year must not sweep
+    // them in, because the reassuring direction is the one to refuse.
     const out = checkedInWithin(COMPUTERS, NOW, 365);
     expect(out.count).toBe(COMPUTERS.length - 1);
-    expect(out.unreadable).toBe(1);
+    expect(out.neverInstalled).toBe(1);
   });
 });
 

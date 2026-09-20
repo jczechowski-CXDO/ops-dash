@@ -196,7 +196,10 @@ export async function pollEndpoints(opts: EndpointsPollOptions): Promise<SourceR
 
   const reasons: string[] = [];
   if (truncated.length > 0) reasons.push(`hit the page budget on: ${truncated.join(', ')}`);
-  if (checkIn.unreadable > 0) reasons.push(`${checkIn.unreadable} computer(s) carry no readable last-contact time`);
+  // Only the genuine anomaly degrades: an agent that exists and has never
+  // spoken. A machine with no agent has honestly never checked in, and marking
+  // the snapshot degraded for it fired on every poll of the live estate.
+  if (checkIn.unreadable > 0) reasons.push(`${checkIn.unreadable} computer(s) have an installed agent that has never reported`);
   if (reasons.length > 0) {
     return { data, fetchedAt, degraded: true, error: { code: 'epc_partial', message: `These counts are lower bounds: ${reasons.join('; ')}.` } };
   }
