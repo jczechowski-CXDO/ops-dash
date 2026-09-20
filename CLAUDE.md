@@ -185,6 +185,29 @@ code commit does not, and that feeling is the whole mechanism.
 
 `git commit -- <paths>` bypasses the index entirely, so it is immune to the race and needs no
 discipline about *when* you stage. Prefer it always; it costs nothing when you are alone.
+
+**`--` must come after every option.** `git commit -- file.ts -F -` fails with
+`pathspec '-F' did not match any file(s)`, which points at the wrong thing entirely. The
+working order is `git commit -F <msgfile> -- <paths>`. The natural way to type it is the way
+that breaks.
+
+## Two ways a mutation battery lies to you
+
+Both found in one hour, both by agents who were being careful about everything else.
+
+**1. A mutant that was never planted looks exactly like a mutant that survived.** A `sed`
+whose pattern did not match plants nothing, and if the failure breaks an `&&` chain the test
+never runs — so the output is silent in precisely the place a passing run is also silent.
+**Never plant a mutant without asserting it is there.** `grep -c` the mutated text and check
+the count *before* running the suite; that check has no silent form.
+
+**2. The battery is exactly when you disable the typecheck, and exactly when a type error
+reads as a surviving mutant.** Iterating with `--typecheck.enabled=false`, an agent's test
+called `open()` with no argument — a compile error the root typecheck would have caught — so
+`openStore(undefined)` fell through to its `'ops-dash.sqlite'` default: **a real file in the
+repo root, shared across every test and persisting between runs.** Their cold-start test had
+been passing against leftover state, and the mutation that should have killed it did not.
+Re-enable the typecheck before you believe a survivor.
 - `git stash` — removes other agents' uncommitted files from the shared tree.
 - `git checkout -- <file>` / `git restore` — restores to **HEAD, not to your edit**, and the
   suite goes green afterwards because green was also the state you just lost. Cost one agent
