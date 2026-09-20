@@ -39,6 +39,8 @@ import { correlate, toStoreRow, parseSeverity, WINDOW_MS } from './engine/correl
 import type { ServiceSignal } from './engine/rules.js';
 import { buildApi, vendorSource, SERVICE_ORDER } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
+import { pollEntra } from './adapters/entra/index.js';
+import type { EntraSnapshot } from '@ops-dash/shared';
 
 
 export const VENDOR_INTERVAL_MS = 60_000;
@@ -48,6 +50,33 @@ export const VENDOR_INTERVAL_MS = 60_000;
 export const PRUNE_INTERVAL_MS = 60 * 60_000;
 export const PROBE_INTERVAL_MS = 60_000;
 export const CORRELATE_INTERVAL_MS = 60_000;
+
+/**
+ * Entra polls every fifteen minutes, not every sixty seconds like the vendor
+ * feeds, and the number is measured rather than chosen.
+ *
+ * A full poll is thirteen sequential Graph requests and takes **43 seconds**
+ * against the real tenant — because the directory is 1658 users and 1473 app
+ * registrations, which is two pages each at the maximum page size. At sixty
+ * seconds this source would be in flight essentially all the time, and the
+ * sign-in log throttles: a measured 429 took **thirty seconds** to clear, which
+ * is longer than the interval it would be competing with.
+ *
+ * The vendor feeds are 60s because an outage should surface within a minute.
+ * A directory's MFA coverage does not change in a minute, so the cadence buys
+ * nothing and costs a self-inflicted throttle.
+ *
+ * NOTE for whoever implements section 7's `spray` rule — failed sign-ins over
+ * 500 in fifteen minutes. That rule needs a tighter cadence on the sign-in count
+ * ALONE, not on 1473 app registrations. The adapter keeps its cheap and
+ * expensive reads separable for exactly that; do not fuse them here either.
+ */
+export const ENTRA_INTERVAL_MS = 15 * 60_000;
+
+/** Not a `vendorSource`. Entra is our own directory, not a vendor's status feed,
+ *  and folding it into a vendor key would put a Graph failure on the m365 tile —
+ *  which has its own feed, saying something else. */
+export const ENTRA_SOURCE = 'entra';
 
 /** The source name the synthetic probes write under. Not a `vendorSource`:
  *  probes are our half, and folding them into a vendor key would make a probe
@@ -126,6 +155,53 @@ export function createApp(opts: AppOptions = {}) {
       return { data: runs, fetchedAt, degraded: false, ...(runs.length === 0 ? { empty: true } : {}) };
     },
   };
+
+  /* ----------------------------------------------------------------- entra */
+
+  /**
+   * Registered only when a credential exists. Without one this is not a source
+   * that is failing, it is a source that was never configured — and a permanent
+   * red on `/api/health` for a deliberate absence is the same defect as a tile
+   * that can never go green.
+   */
+  const entraSources: Source[] = opts.tokens
+    ? [
+        {
+          name: ENTRA_SOURCE,
+          intervalMs: ENTRA_INTERVAL_MS,
+          run: async () => {
+            // THE SEAM, and it is deliberately one line. `pollEntra` owns the
+            // arithmetic and must not know where "previous" is kept; this owns
+            // storage and must not know how a delta is computed. Milestone 3's
+            // expensive defects were all two halves each individually correct
+            // and disagreeing about the join.
+            //
+            // `mfa_gap`'s delta24h is the one signal Graph cannot answer — the
+            // registration report is point-in-time and there is no query for
+            // yesterday's number. On a cold start this is `undefined` and the
+            // adapter OMITS the signal rather than emitting a zero. The count
+            // itself is never lost; it stays in `stats.mfaUnregistered`.
+            const stored = store.getSnapshot(ENTRA_SOURCE);
+            const previous =
+              stored && !stored.error && stored.data !== undefined
+                ? (stored.data as EntraSnapshot)
+                : undefined;
+
+            const result = await pollEntra({
+              tokens: opts.tokens!,
+              ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+              now,
+              ...(previous ? { previous } : {}),
+            });
+            // Written whether it succeeded or not, same as the vendor feeds:
+            // `putSnapshot` branches on `error`, so a failed read records the
+            // attempt without overwriting the last good payload.
+            store.putSnapshot(ENTRA_SOURCE, result);
+            return result;
+          },
+        },
+      ]
+    : [];
 
   /* ---------------------------------------------------------- correlation */
 
@@ -223,7 +299,7 @@ export function createApp(opts: AppOptions = {}) {
     },
   };
 
-  const sources: Source[] = [...vendorSources, probeSource, correlateSource, pruneSource];
+  const sources: Source[] = [...vendorSources, probeSource, ...entraSources, correlateSource, pruneSource];
   const schedule = createSchedule(sources);
   const api = buildApi({
     store,
