@@ -838,7 +838,24 @@ four of them would have produced silent wrong-green rather than a loud failure.
 
 ## Open questions
 
-M365 Graph consent (`ServiceHealth.Read.All` + `ServiceMessage.Read.All`) · Hornetsecurity
+**BLOCKING M4, both of them, and both are credentials John has to place (2026-09-20).** The
+two remaining adapters cannot start without them, and neither has a workaround worth shipping:
+
+| For | Needed | State on this box |
+|---|---|---|
+| **Endpoints** (Task 5) | ManageEngine Endpoint Central Cloud, Zoho OAuth self-client | absent. `RESUME.md` records `C:\secure\.epc\config.json` on the *deploy server* — a Windows path, and this is not that machine |
+| **Email** (Task 6) | Hornetsecurity / Proofpoint 365 Control Panel API | absent. The status.io feed we already poll is the public **status** page, which is a different thing from the Control Panel API the screen needs |
+
+`~/.config/ops-dash/` holds `graph.json` and `graph-key.pem` and nothing else. The shape that
+works is the one Graph already uses: a file outside the repo, mode 600, located by an env var,
+never a path transcribed into source.
+
+Both were confirmed absent by checking, not by assuming — and Task 5 was confirmed *necessary*
+by measurement: Intune holds 16 managed devices against a fixture of 612, so there is no
+Graph-shaped shortcut to take while waiting.
+
+Older, non-blocking: M365 Graph consent (`ServiceHealth.Read.All` + `ServiceMessage.Read.All`,
+now granted) · Hornetsecurity
 region filter = `United States - Atlanta`? · Zendesk pod (one instance or two) · synthetic check
 targets and regions · alert delivery channel · CrowdStrike as a later tile.
 
