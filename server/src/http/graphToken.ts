@@ -48,7 +48,16 @@ export function graphConfigPath(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function loadGraphConfig(path = graphConfigPath()): GraphConfig {
   const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  if (typeof raw !== 'object' || raw === null) throw new Error(`${path}: not an object`);
+  // `Array.isArray` is not decoration: `typeof [] === 'object'` and `[] !== null`,
+  // so a JSON array reaches the field checks below and fails as
+  // "tenant_id is not a GUID" — pointing whoever is wiring up a credential at
+  // the wrong line entirely. It still throws either way, so nothing unsafe
+  // happens; the cost is purely that the error names the wrong problem, at the
+  // moment somebody is least able to tell. Found by `m4-email`, who had the
+  // identical imprecision in their own loader until a test caught it.
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${path}: not an object`);
+  }
   const { tenant_id, client_id, cert_pem } = raw as Record<string, unknown>;
   const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (typeof tenant_id !== 'string' || !guid.test(tenant_id)) throw new Error(`${path}: tenant_id is not a GUID`);

@@ -121,7 +121,15 @@ describe('the config', () => {
     expect(() => loadGraphConfig(write({ ...CFG, tenant_id: 'not-a-guid' }))).toThrow(/tenant_id/);
     expect(() => loadGraphConfig(write({ ...CFG, client_id: '' }))).toThrow(/client_id/);
     expect(() => loadGraphConfig(write({ ...CFG, cert_pem: '' }))).toThrow(/cert_pem/);
-    expect(() => loadGraphConfig(write([1, 2, 3]))).toThrow();
+    // Pinned to the MESSAGE, not merely to the throw. A bare `.toThrow()` here
+    // passed for months while the loader reported an array as
+    // "tenant_id is not a GUID": `typeof [] === 'object'` and `[] !== null`, so
+    // the array sailed past the shape check and failed on the first field
+    // instead — pointing whoever is wiring up a credential at the wrong line at
+    // the moment they are least able to tell. Nothing unsafe, purely an error
+    // that named the wrong problem, and a test that only asked "did it throw"
+    // could not tell the two apart.
+    expect(() => loadGraphConfig(write([1, 2, 3]))).toThrow(/not an object/);
     // And accepts the real shape.
     expect(loadGraphConfig(write(CFG))).toEqual(CFG);
   });
