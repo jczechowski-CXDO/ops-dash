@@ -2196,6 +2196,45 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## A rule that cannot fire breaks no test (2026-09-20)
+
+Two half-built seams found in one afternoon, and **neither was found by anything failing.**
+
+- `graphStub.ts` was extracted so the composition root's test and the adapter's could read one
+  world. The test was never written, so for hours the shared module had **no consumer outside
+  its own directory** — and looked used, because it existed and was well made.
+- `pollEntraWithIdentity` was proposed, approved, and never built. The four identity rules
+  were implemented, correct, registered in `RULES` with `enabled: true` — and **unreachable**,
+  because nothing produced an `IdentitySignal`.
+
+`m4-entra`'s statement of it is the one to keep:
+
+> This deferral did not go stale — it went **invisible to its own author.** Nothing was red for
+> six hours, because **a rule that cannot fire breaks no test.**
+
+**Neither end failing is the signature.** A stale record eventually contradicts something; a
+missing end contradicts nothing. `npm test` was green throughout, the adapter half was correct,
+the engine half was correct, and the gap between them had no representation anywhere that runs.
+
+**What caught them.** The identity gap was caught by a guard the *lead* wrote — an assertion
+that nothing outside `engine/` builds an `IdentitySignal`, deliberately phrased to go red the
+day somebody closes the gap. The `graphStub` gap was caught by its author checking whether
+anything actually imported a module they had extracted. Both point the same way:
+
+> **The thing that catches a half-built seam is an assertion that the other end exists, and the
+> person least likely to write it is whoever built the first end.**
+
+And one honest limit on the mechanism: the guard recorded the identity gap faithfully for six
+hours, in a green suite, and told nobody. **A deferral pinned mechanically still needs somebody
+to read it.** It survived being forgotten; it did not cause anybody to remember.
+
+**The sequencing trap that follows.** A guard whose instruction is *"delete this when it goes
+red"* is dangerous when one agent owns each end: building the first half trips the guard without
+closing the gap, so following the instruction deletes an accurate record in exchange for
+nothing. Land both ends in one window, announce the red interval to everyone else first, and
+never accept a stub in the composition root as the bridge — a placeholder there is a fake in the
+one place nobody looks twice at.
+
 ## Knowing a rule and applying it to your own instrument are different acts (2026-09-20)
 
 Three times in one afternoon, and the gap between the two acts was minutes each time:
