@@ -110,6 +110,11 @@ evidence: assert what a value **must be**, never what it must not be; run the ba
 against the world where the candidates **differ**; and before trusting a check that
 passes, prove it can fail.
 
+**The last run before any commit is a plain `npx vitest run`.** Mutation testing wants
+`--typecheck.enabled=false` for speed, and that flag makes a green run a lie about whether
+the file compiles — it has already produced a commit with nine passing tests and a broken
+build. Speed during the mutation loop, the full thing before the commit.
+
 ## Current state
 
 Milestone 1 (offline scaffold) is complete: 539 unit tests, 153 e2e tests, 152 visual

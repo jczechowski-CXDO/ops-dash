@@ -1422,3 +1422,42 @@ BitLocker recovery keys, mailbox folders, Teams recordings, message trace. Raise
 and accepted: it is his toolbox app registration and this runs on his machine alone. Four
 new entries are on the security review's "Reopens at release" list, the first of which is
 to narrow the grant before this runs anywhere else.
+
+
+## `--typecheck.enabled=false` makes a green run a lie (2026-09-20)
+
+Reported by the store agent against its own work, and it applies to everyone on this
+project including the lead, who had been doing exactly the same thing all session.
+
+Mutation runs want the typecheck off — it roughly triples the time of a loop you run six or
+seven times per change. The cost is that vitest then reports **tests** green while the
+**file does not compile**, and the two are easy to conflate when the output says
+`Tests 9 passed`. It produced a committed fixture with `platform: 'atlassian'`, which is not
+a `VendorPlatform`; nine tests passed, the suite was red, and the commit was already made.
+
+The rule: fast runs during the mutation loop, **a plain `npx vitest run` as the last thing
+before any commit.** Now in CLAUDE.md.
+
+Worth noting the shape, because it is the project's own lesson turned on the tooling: a
+check that reports success without exercising what its name implies. `Tests passed` does not
+mean `the code compiles`, and the flag that makes it fast is the flag that severs them.
+
+## Two names that both sound like the answer (2026-09-20)
+
+`currentLevel` → `publishedLevel`, with `vendorLevel` as the one public reading.
+
+This seam produced the same defect twice: two components disagreeing about a service's
+level. Both times the fix was "put the honest answer in a shared function", and both times a
+later caller reached for the wrong sibling. G2's HIGH 4 was the store and the engine; the
+second was `/api/services` serving `zendesk: unknown` while the engine said `operational`,
+in the same process, at the same instant — found only because the server was finally running
+as a process.
+
+The API agent, who hit it the second time, proposed the rename, and the reasoning is the
+part to keep: **one of two sibling functions should sound like a SOURCE rather than an
+answer.** Nobody reaches for `publishedLevel` when they want to colour a tile. `currentLevel`
+invited exactly that.
+
+And the third defence is mechanical rather than documentary — a guard restricting who may
+import `publishedLevel`. A third paragraph of documentation was the obvious alternative and
+would have been the third time that failed.
