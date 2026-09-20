@@ -347,3 +347,78 @@ describe('parseIncidents carries data and error together (amendment 9)', () => {
     }
   });
 });
+
+describe('an OMITTED key is handled, not merely an explicit null — G5 MEDIUM 6', () => {
+  /**
+   * The server omits `result.data` rather than sending `data: null` when a
+   * source has never succeeded — `exactOptionalPropertyTypes` makes those
+   * different types, and amendment 9 chose omission deliberately so a consumer
+   * destructuring `data` gets nothing rather than a present-but-empty field.
+   *
+   * G5 raised the hazard: an omitted key survives `{ ...defaults, ...entry }`
+   * and silently restores whatever the default was, so a fixture's "operational"
+   * could outlive a source that has never been read.
+   *
+   * It does not reproduce here, because the parser reads every key explicitly
+   * instead of spreading. These tests turn "happens not to bite" into "cannot
+   * bite" — the distinction the reviewer was right to insist on, since the next
+   * person to touch this file is one `...raw` away from the hazard being real.
+   */
+  const neverPolled = () =>
+    entry({
+      id: 'm365',
+      source: 'vendor:m365',
+      // No `data` key at all. Not `data: null`, not `data: {}`.
+      result: { fetchedAt: '2026-09-20T04:00:00.000Z', degraded: true, error: { code: 'never_polled', message: 'no poll yet' } },
+      currentLevel: 'unknown',
+      ours: { level: 'unknown', label: 'No checks', note: 'No probe of ours has ever run.', passing: 0, total: 0 },
+      latencyMs: null,
+      p50Ms: null,
+      p95Ms: null,
+      spark: null,
+      uptime30d: null,
+      uptimeFrom: null,
+      uptimeSamples: 0,
+      incidents90d: 0,
+      lastStateChange: null,
+    });
+
+  it('a source that has never succeeded does not inherit a level from anywhere', () => {
+    const view = serviceEntryView(neverPolled());
+    expect(view.vendor.level).toBe('unknown');
+    // And the past-tense reading is absent rather than defaulted: there is no
+    // "what we last saw", because we never saw anything.
+    expect(view.feed.data).toBeUndefined();
+    expect(view.feed.error?.code).toBe('never_polled');
+  });
+
+  it('the omitted key does not become a truthy object somewhere downstream', () => {
+    // The specific failure: `data` arriving as `{}` and `level(undefined)`
+    // resolving to a default. Asserted on the level rather than on the key, so
+    // it holds however the parser is reorganised.
+    const view = serviceEntryView(neverPolled());
+    expect(view.vendor.level).not.toBe('operational');
+    expect(view.vendor.level).toBe('unknown');
+  });
+
+  it('an explicit null is handled the same as an omission', () => {
+    // The server does not send this today. It should still not matter which
+    // shape arrives — a consumer that behaved differently would be relying on
+    // a serialisation detail nobody promised.
+    const withNull = entry({
+      result: { data: null, fetchedAt: '2026-09-20T04:00:00.000Z', degraded: true, error: { code: 'http_503', message: 'x' } },
+      currentLevel: 'unknown',
+    });
+    const view = serviceEntryView(withNull);
+    expect(view.vendor.level).toBe('unknown');
+    expect(view.feed.data).toBeUndefined();
+  });
+
+  it('a present payload still reads through, so the tests above are not passing vacuously', () => {
+    // The control. Without it, a parser that dropped `data` unconditionally
+    // would satisfy every assertion above.
+    const view = serviceEntryView(entry());
+    expect(view.feed.data?.level).toBe('operational');
+    expect(view.vendor.level).toBe('operational');
+  });
+});

@@ -1,3 +1,4 @@
+import type { ServiceId } from '@ops-dash/shared';
 /**
  * The ONE door out of `web/src`, and the only file in it that names a network
  * client.
@@ -35,9 +36,22 @@
  * non-2xx, a 2xx carrying non-JSON, an empty body, and an abort.
  */
 
-/** The three routes that exist. A union, not a string: nothing outside this
- *  file can name a target. */
+/** The routes that exist. A union, not a string: nothing outside this file can
+ *  name a target. */
 export type ApiPath = '/api/services' | '/api/incidents' | '/api/health';
+
+/**
+ * The one route that takes an argument, built here rather than by a caller.
+ *
+ * A caller passing `/api/checks?service=${id}` would make `ApiPath` a string in
+ * practice and this file would stop being the only place that can name a
+ * target. So the caller passes a `ServiceId` — already a closed union from the
+ * frozen contract — and the path is assembled here, encoded, with no way to
+ * express anything else.
+ */
+export function checksPath(serviceId: ServiceId): string {
+  return `/api/checks?service=${encodeURIComponent(serviceId)}`;
+}
 
 export type Fetched = { ok: true; json: unknown } | { ok: false; error: { code: string; message: string } };
 
@@ -45,11 +59,24 @@ const failed = (code: string, message: string): Fetched => ({ ok: false, error: 
 
 /** The narrow contract the provider depends on, so a test can supply a client
  *  that answers from a literal rather than stubbing a global. */
-export type ApiClient = { get(path: ApiPath, signal?: AbortSignal): Promise<Fetched> };
+export type ApiClient = {
+  get(path: ApiPath, signal?: AbortSignal): Promise<Fetched>;
+  /** Kept separate from `get` so the path union stays a union. */
+  checks(serviceId: ServiceId, signal?: AbortSignal): Promise<Fetched>;
+};
 
-export const apiClient: ApiClient = { get: getJson };
+export const apiClient: ApiClient = {
+  get: getJson,
+  checks: (serviceId, signal) => request(checksPath(serviceId), signal),
+};
 
 export async function getJson(path: ApiPath, signal?: AbortSignal): Promise<Fetched> {
+  return request(path, signal);
+}
+
+/** The single call. `getJson` and `checks` differ only in how their path is
+ *  built; everything about the request itself is decided once, here. */
+async function request(path: string, signal?: AbortSignal): Promise<Fetched> {
   let response: Response;
   try {
     response = await fetch(path, {

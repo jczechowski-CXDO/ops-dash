@@ -121,13 +121,20 @@ const fail = (message: string): Fetched => ({ ok: false, error: { code: 'unreach
  *  before the first assertion can see it. */
 const pending = (): Promise<Fetched> => new Promise<Fetched>(() => {});
 
-function clientOf(answers: Partial<Record<ApiPath, () => Promise<Fetched> | Fetched>>): ApiClient {
+function clientOf(
+  answers: Partial<Record<ApiPath, () => Promise<Fetched> | Fetched>>,
+  checks?: () => Promise<Fetched> | Fetched,
+): ApiClient {
   return {
     get: async (path) => {
       const answer = answers[path];
       if (!answer) return fail(`no stub for ${path}`);
       return answer();
     },
+    // Unstubbed by default and deliberately an ERROR rather than an empty
+    // success: a test that forgets to stub this should see a panel saying the
+    // runs could not be read, not one saying there are none.
+    checks: async (serviceId) => (checks ? checks() : fail(`no checks stub for ${serviceId}`)),
   };
 }
 
