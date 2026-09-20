@@ -248,6 +248,60 @@ across all three mutated runs** — `vendorText=4, email/parse=1, endpoints/quer
 time. The auth column moved run to run and eventually appeared with no mutation at all. Stable
 across runs is the signal; present once is not.
 
+**Three runs, not two.** The agent who found this corrected their own report on it: with two
+runs you can say *reproduced*; it took the **third** to say *and the other column is not
+reproducing*. One mutated run between two controls tells you your mutation did something. It
+does not separate a stable signal from a tree that happens to be moving.
+
+**Diff the failing-name SETS. Do not read them.**
+
+```
+attributable = failing(mutated) \ failing(control)
+not yours    = failing(mutated) ∩ failing(control)
+```
+
+Predicting test names rather than counts is already better than a tally — a stranger's commit
+reddens a *differently named* test, so it cannot silently inflate your number. But it has a hole
+its own author found: **if a stranger reddens a test you predicted, you credit your mutation
+falsely and never know.** The set difference closes it, because a stranger's red appears in both
+runs and drops out **without anyone having to notice it** — which is the property that matters
+at the end of a long session.
+
+**Narrow scope is a cheaper defence, and it inverts for a shared module.** Scoping the run to
+what the mutation can reach excludes other agents' churn, and for a mutation inside your own
+directory that is one cheap run instead of three. **But when the measurement IS the out-of-
+directory reds, you cannot buy protection that way** — scoping to the owner's directory would
+have hidden the cross-suite red that was the entire finding.
+
+- mutation **local to your own directory** → narrow scope, one run
+- mutation in a **published module** → run wide; A/B/A is the only defence available
+
+**Narrow scope buys protection by discarding reach, so when reach is the measurement you cannot
+buy it at all.** And it reduces exposure in proportion to the **import closure**, not the
+directory: `--root server src/adapters/email` still pulls in `shared/contracts.ts`,
+`http/fetchJson.ts` and `vendorText.ts`. A reduction, not a fence.
+
+## A test count in a commit message is not evidence about that commit
+
+`2428 passed, 0 failed` is a snapshot of a shared tree at an unrecorded instant. It was true
+when measured and it is **not a property of the change it sits beneath** — in one eight-minute
+window the root suite passed through five distinct states, none caused by the agent writing that
+line into their messages.
+
+It is worse than useless afterwards, because **it reads as a claim and cannot be checked.**
+Nobody can reconstruct which of five states you meant.
+
+What actually holds, and what to write instead:
+
+- the **scoped** result over paths you exclusively own, with the scope named
+- *"these paths are clean since `<commit>`"*, which is checkable
+- a timestamp, if you cite a whole-tree number at all
+
+Everyone here has been doing this, the lead included. Do not amend old messages on a live
+branch — just stop adding them.
+
+
+
 **4. A mutation that does not typecheck is a bad instrument.** One attempt left a variable
 assigned and unused — a type error — and Vitest warns that unhandled source errors *"may cause
 false positive tests"*. Re-run with a type-*valid* mutation of the same intent before believing
