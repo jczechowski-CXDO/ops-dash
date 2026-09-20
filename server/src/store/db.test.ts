@@ -388,7 +388,7 @@ describe('a partial read is not a failed read', () => {
     expect(back?.error?.code).toBe('http_503');
   });
 
-  it('EVERY partial-shaped code the adapters emit is registered — the gap guard', () => {
+  it('the adapters and the store name the SAME set of partial codes, both directions', () => {
     // Two independently-reachable definitions compared against each other: the
     // set in db.ts, and what the adapters actually emit. Neither is derived from
     // the other, which is the only form of this assertion that can fail.
@@ -415,16 +415,40 @@ describe('a partial read is not a failed read', () => {
     // shipped more than once.
     expect(files.length, 'the walk must actually be reading the adapters').toBeGreaterThan(5);
 
+    // Comments stripped without moving lines: prose naming a code is not code
+    // emitting one, and the adapters' docblocks discuss these by name.
+    const strip = (t: string) =>
+      t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/^(\s*)\/\/.*$/gm, '$1');
+
+    // `[:=]` and all three quote styles, not `code:` and a single quote.
+    // `m4-entra` measured the blind spot: a code HOISTED to a constant
+    // (`const PARTIAL_CODE = 'epc_partial_v2'`) is invisible to a `code:`
+    // pattern, and hoisting is what anyone does the moment a code is used
+    // twice. Measuring it here independently found two more shapes they had
+    // not tried — double quotes and a template literal — so the miss was three
+    // shapes wide, not one.
     const emitted = new Set<string>();
     for (const f of files) {
-      for (const m of readFileSync(f, 'utf8').matchAll(/code:\s*'([a-z0-9_]*partial[a-z0-9_]*)'/g)) {
+      for (const m of strip(readFileSync(f, 'utf8')).matchAll(/[:=]\s*['"`]([a-z0-9_]*partial[a-z0-9_]*)['"`]/g)) {
         emitted.add(m[1]!);
       }
     }
-    expect(emitted.size, 'and it must be finding the codes').toBeGreaterThanOrEqual(3);
 
-    const unregistered = [...emitted].filter((c) => !PARTIAL_READ_CODES.has(c)).sort();
-    expect(unregistered, 'a partial-shaped code no store branch knows about').toEqual([]);
+    // SET EQUALITY, not a subset check against a hard-coded count.
+    //
+    // The `>= 3` anchor this replaces was a literal tied to today's adapter
+    // count, and `m4-entra`'s case B died on IT rather than on the
+    // unregistered check — a mutation that dies for the wrong reason is as
+    // misleading as one that never ran. With a fourth adapter emitting a
+    // literal code, that anchor would have stayed satisfied while a hoisted
+    // code went unnoticed.
+    //
+    // Equality also catches the drift from the other end, which the subset
+    // check could never see: a code registered here that no adapter emits any
+    // more. Two independently-reachable definitions, asserted equal, neither
+    // derived from the other.
+    expect([...emitted].sort(), 'the adapters and the store must name the same set')
+      .toEqual([...PARTIAL_READ_CODES].sort());
   });
 
   it('a registered code from ANOTHER adapter behaves like the Entra one', () => {
