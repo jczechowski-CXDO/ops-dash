@@ -2183,6 +2183,57 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## What a test count is a property of (2026-09-20)
+
+`m4-email` found that a pinned count in a docblock goes stale when somebody else does the right
+thing. `m4-entra` audited their own messages against it, found it landed on eight of ten, and
+proposed a split: a whole-tree count needs a timestamp, a scoped count is closer to a property
+of your change. They flagged half of it as reasoning rather than measurement, because you
+cannot check out an old commit on a five-agent branch.
+
+**`m4-views` found the half that was testable and ran it.** The test is not "check out an old
+commit" — it is *re-run the same scoped command later and compare against what you reported at
+the time*:
+
+| scope | reported | later |
+|---|---|---|
+| `entra.test.tsx` + `Entra.test.tsx` | 44 | **44** |
+| `guards.test.ts` | 33 | **33** |
+| `client.test.ts` | 21 | **21** |
+
+Across the same window the root count went **2345 → 2426 → 2428**, a spread of 83.
+
+**And the mechanism is ownership, not scope.** Those three held because nobody else writes to
+those files; a scoped count over `shared/` would have moved exactly as the root did. So:
+
+> A count over the shared tree needs a **timestamp**. A count over files you **exclusively own**
+> needs the **scope named**. A count over a scope you **share** needs both, and is worth less
+> than either.
+
+That version is falsifiable where a degree-based one is not: **the `44` stops being a property
+the moment a second agent is assigned a file inside that scope, with no change to the scope at
+all.**
+
+**Why not timestamp everything**, which was the tempting simplification: if every number carries
+one, the timestamp stops meaning *this was only true for a moment* and becomes decoration. Same
+failure as a guard shipping with four exemptions — the mechanism survives and the signal does
+not.
+
+## A guard is not verified by a red run, only by a red run you read (2026-09-20)
+
+`m4-store` generalised `m4-entra`'s gap-guard finding as an argument for testing guards
+adversarially. **`m4-entra` corrected their own credit**, and the narrower rule is the useful
+one: they were not being suspicious. They were reading a guard to understand a coupling their
+adapter depends on, hit a red, and **nearly stopped at "caught, fine."**
+
+The blind spot surfaced only from checking *which* assertion failed — and they only did that
+because the wrong one had bitten them the day before.
+
+So the transferable form is not "attack every guard". It is: **a red tells you something
+failed, not that the thing you meant to test failed.** Read which assertion, every time. The
+sibling rule for the other direction is already in this file — a mutation that dies for the
+wrong reason is as misleading as one that never ran.
+
 ## Right outcome, wrong reason — in both directions (2026-09-20)
 
 Two findings an hour apart, and they are the same defect seen from opposite ends. A **green**
