@@ -60,6 +60,24 @@ export type ServiceTile = {
   spark: Array<number | null> | null;
   /** 0-1 over `UPTIME_WINDOW_DAYS`, or `null` when the window holds no runs. */
   uptime30d: number | null;
+  /**
+   * The oldest probe run the `uptime30d` figure is actually computed from, and
+   * how many runs went into it. `null` / `0` when there are none.
+   *
+   * G5 HIGH 2, and John's ruling on it. On a fresh install — every install, for
+   * its first month — `uptime30d` is `1` after three minutes of probing. That
+   * number is TRUE: everything we watched did pass. The lie is the label. A
+   * tile that says "100% uptime (30d)" on forty minutes of evidence has claimed
+   * a month we did not observe, and adding a probe today to a service that was
+   * down all month makes it say the same thing.
+   *
+   * Nulling it below a coverage floor was the other option and is worse: it
+   * discards a real measurement to avoid a bad caption, and the floor would
+   * have been a number I invented. Serve the figure with its basis and let the
+   * tile say "100% · 47m observed" instead of "100% (30d)".
+   */
+  uptimeFrom: string | null;
+  uptimeSamples: number;
   /** Incidents WE recorded, opened within `INCIDENT_WINDOW_DAYS`, for this
    *  service alone.
    *
@@ -150,7 +168,10 @@ const message = (cause: unknown) => String((cause as Error)?.message ?? cause);
 export type TileStore = {
   runsFor(serviceId: ServiceId, limit?: number): CheckRun[];
   percentiles(serviceId: ServiceId, since: string): { p50: number; p95: number } | undefined;
-  uptime(serviceId: ServiceId, since: string): number | undefined;
+  uptime(
+    serviceId: ServiceId,
+    since: string,
+  ): { ratio: number; samples: number; from: string } | undefined;
   incidentsSince(since: string): Array<Record<string, unknown>>;
 };
 
@@ -246,6 +267,8 @@ export function buildTile(store: TileStore, serviceId: ServiceId, now: Date): Se
   let p95Ms: number | null = null;
   let spark: Array<number | null> | null = null;
   let uptime30d: number | null = null;
+  let uptimeFrom: string | null = null;
+  let uptimeSamples = 0;
   let changedAt: string | null = null;
 
   try {
@@ -274,7 +297,14 @@ export function buildTile(store: TileStore, serviceId: ServiceId, now: Date): Se
     // `?? null`, never `?? 1` and never `?? 0`: `db.uptime` returns undefined
     // precisely to refuse both, and this is where that refusal leaves the
     // process.
-    uptime30d = store.uptime(serviceId, since(now, UPTIME_WINDOW_DAYS)) ?? null;
+    const measured = store.uptime(serviceId, since(now, UPTIME_WINDOW_DAYS));
+    uptime30d = measured?.ratio ?? null;
+    // From the SAME scan as the ratio. The obvious alternative — counting the
+    // rows already in `history` — is wrong: that read is capped at RUN_WINDOW
+    // and the uptime query is not, so on a busy service the count would
+    // describe fewer runs than the ratio came from. Two reads, one question.
+    uptimeSamples = measured?.samples ?? 0;
+    uptimeFrom = measured?.from ?? null;
   } catch (cause) {
     failures.push(`probe history: ${message(cause)}`);
   }
@@ -293,6 +323,8 @@ export function buildTile(store: TileStore, serviceId: ServiceId, now: Date): Se
     p95Ms,
     spark,
     uptime30d,
+    uptimeFrom,
+    uptimeSamples,
     incidents90d,
     lastStateChange: changedAt,
     ...(failures.length > 0

@@ -131,8 +131,13 @@ describe('the numbers the contract publishes survive a prune', () => {
 
     const before = s.uptime('jira', since);
     s.prune(NOW);
-    expect(before).toBe(0.8);
-    expect(s.uptime('jira', since)).toBe(0.8);
+    const after = s.uptime('jira', since);
+    expect(before?.ratio).toBe(0.8);
+    expect(after?.ratio).toBe(0.8);
+    // The coverage has to survive the prune too, or the tile would keep the
+    // right percentage and start describing a shorter window than it measured.
+    expect(after?.samples).toBe(before?.samples);
+    expect(after?.from).toBe(before?.from);
   });
 
   it('a service with no rows left still reports undefined, not 100%', () => {

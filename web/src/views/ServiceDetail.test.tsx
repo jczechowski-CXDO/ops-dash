@@ -5,7 +5,7 @@ import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { CheckRun, ServiceStatus } from '@ops-dash/shared';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
-import ServiceDetail from './ServiceDetail.js';
+import ServiceDetail, { uptimeCoverage } from './ServiceDetail.js';
 import { serviceViewOf } from '../live/model.js';
 
 /** The injected service goes in as a `ServiceStatus` and is widened by the same
@@ -252,5 +252,51 @@ describe('ServiceDetail — provenance is derived from the field, not from the n
 
     expect(screen.getByText(/No successful poll on record/i)).toBeInTheDocument();
     expect(screen.queryByText(/Last successful poll/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('uptimeCoverage — a true number with an honest caption', () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+
+  it('says "rolling 30 days" only when it really has thirty days', () => {
+    // The mature install, and the demo world. Unchanged wording, so the 152
+    // baselines and every fixture screen read exactly as they did in M1.
+    expect(uptimeCoverage({ uptime30d: 0.9998, uptimeFrom: ago(30 * DAY), uptimeSamples: 43_200 }))
+      .toBe('rolling 30 days');
+  });
+
+  it('qualifies a figure measured over minutes', () => {
+    // The live reproduction: a fresh install reports 100% after three minutes
+    // of probing. That is true of three minutes and not of a month.
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: ago(47 * 60_000), uptimeSamples: 47 }))
+      .toBe('only 47m observed, not 30 days');
+  });
+
+  it('qualifies hours and days too, with the right unit', () => {
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: ago(5 * HOUR), uptimeSamples: 300 }))
+      .toBe('only 5h observed, not 30 days');
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: ago(3 * DAY), uptimeSamples: 4_320 }))
+      .toBe('only 3 days observed, not 30');
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: ago(1 * DAY), uptimeSamples: 1_440 }))
+      .toBe('only 1 day observed, not 30');
+  });
+
+  it('never claims zero minutes', () => {
+    // A sub-minute window is still a window. "only 0m observed" reads like a
+    // bug; the floor is one minute.
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: ago(4_000), uptimeSamples: 1 }))
+      .toBe('only 1m observed, not 30 days');
+  });
+
+  it('still says "no runs" when there is nothing, which is a different claim', () => {
+    // Absent is not a short window and must not be captioned as one.
+    expect(uptimeCoverage({ uptime30d: null, uptimeFrom: null, uptimeSamples: 0 }))
+      .toBe('no runs in the window');
+    // And a present figure with no coverage is incoherent — treat it as absent
+    // rather than inventing a duration for it.
+    expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: null, uptimeSamples: 0 }))
+      .toBe('no runs in the window');
   });
 });

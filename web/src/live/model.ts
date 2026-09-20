@@ -156,6 +156,11 @@ export type ServiceView = {
   p95Ms: number | null;
   spark: Array<number | null> | null;
   uptime30d: number | null;
+  /** The coverage behind `uptime30d`: when the oldest run in the window was,
+   *  and how many there were. A true 100% over forty minutes is still true —
+   *  it is the "30 days" caption that would be the lie. */
+  uptimeFrom: string | null;
+  uptimeSamples: number;
   incidents90d: number | null;
   lastStateChange: string | null;
   /** OUR STORE failed to answer, so every `null` above is ignorance rather
@@ -172,6 +177,12 @@ export type ServiceView = {
   feed: Load<{ level: StatusLevel; label: string }>;
 };
 
+/** Coverage for the fixture world: a full window, comfortably sampled. The
+ *  exact numbers do not matter, only that they clear the "is this figure
+ *  qualified?" test, so the demo screens read as they did in Milestone 1. */
+const FIXTURE_UPTIME_FROM = new Date(Date.now() - 30 * 86_400_000).toISOString();
+const FIXTURE_UPTIME_SAMPLES = 43_200;
+
 /** A fixture service, unchanged, as a view. No measurement is absent in a
  *  fixture and no fixture feed has ever failed, so this is pure widening and
  *  the demo screens render exactly as they did in Milestone 1. */
@@ -187,6 +198,13 @@ export function serviceViewOf(s: ServiceStatus): ServiceView {
     p95Ms: s.p95Ms,
     spark: s.spark,
     uptime30d: s.uptime30d,
+    // A fixture is a mature install by construction — the prototype's numbers
+    // are a month of history — so its uptime covers the whole window and the
+    // tile prints the plain "rolling 30 days" caption. Synthesised here rather
+    // than added to the frozen contract: the coverage is a property of a real
+    // store's history, and a fixture has none.
+    uptimeFrom: FIXTURE_UPTIME_FROM,
+    uptimeSamples: FIXTURE_UPTIME_SAMPLES,
     incidents90d: s.incidents90d,
     lastStateChange: s.lastStateChange,
     feed: ready(

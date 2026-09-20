@@ -151,6 +151,8 @@ export function serviceEntryView(raw: unknown): ServiceView | null {
     p95Ms: num(raw['p95Ms']),
     spark: Array.isArray(raw['spark']) ? raw['spark'].map(num) : null,
     uptime30d: num(raw['uptime30d']),
+    uptimeFrom: str(raw['uptimeFrom']),
+    uptimeSamples: num(raw['uptimeSamples']) ?? 0,
     incidents90d: num(raw['incidents90d']),
     lastStateChange: str(raw['lastStateChange']),
     ...(errorOf(raw['metricsError']) === null

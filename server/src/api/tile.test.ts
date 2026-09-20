@@ -499,3 +499,45 @@ describe('a store that cannot be read says so, loudly', () => {
     expect(seen).toEqual([RUN_WINDOW, RUN_WINDOW]);
   });
 });
+
+describe('uptime coverage comes from the same scan as the ratio', () => {
+  it('counts every run in the window, not just the RUN_WINDOW rows read for the folds', () => {
+    // The discriminating case, and the reason it is needed: `buildTile` reads
+    // `runsFor(serviceId, RUN_WINDOW)` for the sparkline and the latest-per-check
+    // folds, and it is tempting to count THOSE rows as the uptime coverage.
+    // That read is capped at 500; the uptime query is not. On a busy service the
+    // caption would describe fewer runs than the percentage was computed from —
+    // the exact shape of G5 HIGH 1, one field over.
+    //
+    // Every other fixture in this file is under the cap, so the two numbers
+    // cannot differ there. This one is deliberately over it.
+    const store = memStore();
+    const base = Date.parse('2026-09-19T12:00:00.000Z');
+    const rows = RUN_WINDOW + 137;
+    for (let i = 0; i < rows; i += 1) {
+      store.addRun({
+        serviceId: 'jira',
+        at: new Date(base - i * 60_000).toISOString(),
+        check: 'REST /myself',
+        region: 'us-east',
+        result: 'pass',
+        latencyMs: 100,
+      });
+    }
+
+    const tile = buildTile(store, 'jira', new Date(base));
+    expect(store.runsFor('jira', RUN_WINDOW)).toHaveLength(RUN_WINDOW);
+    expect(tile.uptimeSamples).toBe(rows);
+    expect(tile.uptimeSamples).toBeGreaterThan(RUN_WINDOW);
+    // And the window start is the oldest run, not the oldest row we happened to
+    // read — 637 minutes back, not 500.
+    expect(tile.uptimeFrom).toBe(new Date(base - (rows - 1) * 60_000).toISOString());
+  });
+
+  it('reports no coverage when there is no uptime figure', () => {
+    const tile = buildTile(memStore(), 'jira', new Date('2026-09-19T12:00:00.000Z'));
+    expect(tile.uptime30d).toBeNull();
+    expect(tile.uptimeFrom).toBeNull();
+    expect(tile.uptimeSamples).toBe(0);
+  });
+});

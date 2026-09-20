@@ -57,9 +57,15 @@ export function openStore(path = 'ops-dash.sqlite') {
        ORDER BY latency_ms ASC`,
     ),
     uptime: db.prepare(
+      // MIN(at) comes from the same scan as the counts, deliberately. The
+      // coverage behind an uptime figure has to describe the exact rows the
+      // ratio was computed from — deriving it from a separate, row-capped read
+      // would be a second implementation of the same question, which is how
+      // this codebase has produced two answers to one question four times.
       `SELECT
          SUM(CASE WHEN result = 'pass' THEN 1 ELSE 0 END) AS passed,
-         COUNT(*) AS total
+         COUNT(*) AS total,
+         MIN(at)  AS oldest
        FROM check_runs WHERE service_id = ? AND at >= ?`,
     ),
     putVendorState: db.prepare(
@@ -188,9 +194,25 @@ export function openStore(path = 'ops-dash.sqlite') {
     },
     /** 0-1. Returns undefined rather than 1 when there is nothing to measure —
      *  no data is not perfect uptime, which is this product's whole thesis. */
-    uptime(serviceId: ServiceId, since: string): number | undefined {
-      const row = stmt.uptime.get(serviceId, since) as { passed: number | null; total: number };
-      return row.total === 0 ? undefined : (row.passed ?? 0) / row.total;
+    /**
+     * The pass ratio over a window, WITH the coverage behind it.
+     *
+     * `undefined` when nothing was measured — never 1, never 0, because both
+     * are readings nobody took. When something was measured, the caller also
+     * gets `samples` and `from`, so a true 100% over forty minutes can be
+     * rendered as forty minutes rather than as a month (G5 HIGH 2).
+     */
+    uptime(
+      serviceId: ServiceId,
+      since: string,
+    ): { ratio: number; samples: number; from: string } | undefined {
+      const row = stmt.uptime.get(serviceId, since) as {
+        passed: number | null;
+        total: number;
+        oldest: string | null;
+      };
+      if (row.total === 0 || row.oldest === null) return undefined;
+      return { ratio: (row.passed ?? 0) / row.total, samples: row.total, from: row.oldest };
     },
 
     putVendorState(vendor: string, component: string, level: StatusLevel, lastPoll: string | null) {

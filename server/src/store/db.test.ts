@@ -156,7 +156,7 @@ describe('check_runs answers the questions the UI asks', () => {
     const p = s.percentiles('jira', '2026-01-01T00:00:00.000Z')!;
     expect(p.p50).toBe(100);
     expect(p.p95).toBe(100);
-    expect(s.uptime('jira', '2026-01-01T00:00:00.000Z')).toBeCloseTo(0.1, 5);
+    expect(s.uptime('jira', '2026-01-01T00:00:00.000Z')?.ratio).toBeCloseTo(0.1, 5);
   });
 
   it('answers the percentile query at 30 days of real volume', () => {
@@ -182,7 +182,9 @@ describe('check_runs answers the questions the UI asks', () => {
     const elapsed = performance.now() - t0;
 
     expect(p).toBeDefined();
-    expect(up).toBe(1);
+    expect(up?.ratio).toBe(1);
+    // And the coverage comes from the same scan as the ratio, at real volume.
+    expect(up?.samples).toBe(40_389);
     // Generous on purpose — this is a smoke alarm for a missing index, not a
     // benchmark. Without check_runs_service_at it is orders of magnitude worse.
     expect(elapsed, `percentile+uptime over 300k rows took ${elapsed.toFixed(0)}ms`).toBeLessThan(2000);

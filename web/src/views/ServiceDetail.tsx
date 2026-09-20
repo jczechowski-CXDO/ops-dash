@@ -200,6 +200,38 @@ const CHECK_COLUMNS: Column<CheckRun>[] = [
  * service WITHOUT one. They are test-only and the app never passes them; the
  * route remains the only source of truth in the running application.
  */
+/**
+ * What the uptime figure actually covers.
+ *
+ * G5 HIGH 2. `uptime30d: 1` on a forty-minute-old install is a true statement
+ * about forty minutes captioned as a month, and adding a probe today to a
+ * service that was down all month produces the same reading. The number is not
+ * the problem; "rolling 30 days" is.
+ *
+ * Only qualified when the coverage is genuinely short — a mature install says
+ * "rolling 30 days" exactly as it always did, so the demo screens and the 152
+ * baselines are untouched.
+ */
+export function uptimeCoverage(service: {
+  uptime30d: number | null;
+  uptimeFrom: string | null;
+  uptimeSamples: number;
+}): string {
+  if (service.uptime30d === null || service.uptimeFrom === null) return 'no runs in the window';
+  const coveredMs = Date.now() - Date.parse(service.uptimeFrom);
+  const DAY = 86_400_000;
+  // Within a day of the full window: the caption is honest as it stands.
+  if (coveredMs >= 29 * DAY) return 'rolling 30 days';
+  if (coveredMs >= DAY) {
+    const days = Math.floor(coveredMs / DAY);
+    return `only ${days} day${days === 1 ? '' : 's'} observed, not 30`;
+  }
+  const hours = Math.floor(coveredMs / 3_600_000);
+  if (hours >= 1) return `only ${hours}h observed, not 30 days`;
+  const minutes = Math.max(1, Math.floor(coveredMs / 60_000));
+  return `only ${minutes}m observed, not 30 days`;
+}
+
 export default function ServiceDetail({
   service: injectedService,
   runs: injectedRuns,
@@ -366,11 +398,17 @@ export default function ServiceDetail({
       {/* README § 2: repeat(auto-fit, minmax(150px, 1fr)), gap 12. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         {/* No probe data is NOT 100% uptime, and it is not 0% either. An em
-            dash, with the note saying why. A real 0 still prints 0.00%. */}
+            dash, with the note saying why. A real 0 still prints 0.00%.
+
+            And a figure that IS a measurement still has to say what it measured:
+            on a fresh install this reads 100% after three minutes of probing,
+            which is true of those three minutes and not of a month. The value
+            stays — discarding a real measurement to avoid a bad caption would
+            be the worse trade — and the note carries the coverage. */}
         <StatCard
           label="Uptime (30d)"
           value={uptimeText(service.uptime30d)}
-          note={service.uptime30d === null ? 'no runs in the window' : 'rolling 30 days'}
+          note={uptimeCoverage(service)}
         />
         <StatCard
           label="Checks passing"
