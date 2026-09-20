@@ -1913,5 +1913,60 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
   needs a mutating route, which needs the auth seam. Deliberately M4.
 - **Entra, Endpoints and Email are fixture-backed.** Each needs its own adapter.
 - **`DATA_CONTRACTS.md` §7** promises a Sev2 no rule emits. Still John's call.
-- **One unexplained `nav item · dark` capture failure**, non-reproducing, whose pixel delta
-  was destroyed by re-running. Two clean full suites since.
+- ~~**One unexplained `nav item · dark` capture failure**~~ — **closed, and it was never a
+  visual regression.** See below.
+
+## The flaky baseline was not a baseline (2026-09-20)
+
+It happened a second time, on a different capture, and `m3-runs` copied the artefact out
+*before* re-running. The failure is not a screenshot comparison at all:
+
+```
+Error: clock.pauseAt: Cannot fast-forward to the past
+```
+
+`prepare()` installed the clock *running* at `FROZEN` and then asked it to pause *at*
+`FROZEN`, giving the round trip between the two calls a budget of zero. On a loaded box the
+clock is already past the instant, and the error lands on whichever capture happened to be
+running. Fixed at `4786592` by installing one second earlier and pausing at `FROZEN`, which
+leaves `FROZEN` — and therefore every baseline — untouched.
+
+Four things this taught, in rising order of generality:
+
+- **A comment describing a hazard is not a mitigation of it.** `support.ts:79` predicted this
+  failure in its own text, in the same commit that shipped the zero-budget form.
+- **A rare race can be made deterministic, and must be before you claim a fix.** Widening the
+  window with a deliberate 300ms sleep throws every time in the old form and never in the new,
+  and the probe pinned `Date.now()` in the page as exactly `FROZEN` afterwards. "The flake
+  stopped happening" is not evidence; this is.
+- **Capture the failure's identity in the same command that produces it.** `m3-runs`'s rule,
+  and it supersedes the narrower "read the diff count before re-running" I had written after
+  destroying one myself — mine named one action and would have missed my own case, where the
+  *grep* was the destructive act and the re-run was incidental.
+- **A test error is not a test failure**, and a harness that reports them the same way will
+  get a real intermittent shrugged at twice.
+
+## Two agents, one tree (2026-09-20)
+
+`m3-runs` and `m3-prims` each ran mutation batteries that write to a file, run vitest and
+write it back. Neither had a `try`/`finally`; both believed their method was safe because it
+had never left anything behind. It had never been interrupted. **A battery that reports
+"survived" is a script that has been writing to the shared tree for minutes** — reversible is
+not read-only, and the repo's existing warning about scripted multi-file edits covered it all
+along. One of them did find a mutant in the other's file and reasonably blamed the wrong
+agent.
+
+The protocol they settled, now standing: **you do not mutate a file you do not own. You send
+the owner the exact `sed` and your predicted red, and the owner runs it.** The window is then
+zero rather than short.
+
+It paid on first use, and not in the way it was designed to. `m3-prims` ran a drift mutation
+`m3-runs` had predicted would redden three of eight equivalence assertions; it reddened none
+of theirs. The guard asked "was a `polyline` drawn" where the mutant made the component emit
+an empty `<svg>` frame — no line either way, so the equivalence held over a component that had
+quietly started rendering nothing-as-something. Both agents had independently reached for
+`polyline` to mean "did the chart draw anything". Closed at `12118ab`.
+
+So, sharpening the standing rule: **watch it fail where you said it would.** "It should go red
+somewhere" scores that mutation a success — four tests did fail, all of them the wrong ones.
+The prediction has to name the tests, or it only confirms that something is broken.
