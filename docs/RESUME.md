@@ -2196,6 +2196,33 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## Knowing a rule and applying it to your own instrument are different acts (2026-09-20)
+
+Three times in one afternoon, and the gap between the two acts was minutes each time:
+
+| who | cited the rule | then |
+|---|---|---|
+| the lead | wrote the A/B/A entry saying `git log` cannot substitute for a control | reached for `git log` to exclude their own commit, an hour later |
+| `m4-entra` | quoted the dark-palette ruling — *a grep catches prose, not just code* — at another agent | ran an unstripped content grep to establish a fact they built a conclusion on, inflating an import count twofold |
+| `m4-email` | explained at length why a single before-control is worthless on this branch | had just used one, and nearly committed a false coupling off it |
+
+**None of these was forgetting.** Each had stated the rule clearly, in writing, to somebody
+else, within the hour. What did not happen is the step from *I know this about the world* to
+*therefore this instrument, the one in my hand right now, is unsound.*
+
+`m4-email`'s formulation is the one to keep: **knowing a rule and applying it to your own
+instrument are different acts.** Both of today's measurement errors live in that gap.
+
+The practical form: **when you reach for a measurement, name which rule governs it before you
+read the result.** Not afterwards, when the number is already in your head and has started
+being evidence.
+
+**And one of them got away with it by luck, which is the detail worth having.** `m4-email`'s
+earlier consumer-set verification happened to be sound only because they grepped
+`vendorText.js` *with the extension*, which in that tree appears only inside import specifiers.
+Their own docblock very nearly writes the filename with its extension in prose — and had it
+done so, their "verified consumer set" would have listed the module as a consumer of itself.
+
 ## A defence that held for a reason nobody chose (2026-09-20)
 
 Two in one round, and the useful half of each is the agent working out *why* they were safe
