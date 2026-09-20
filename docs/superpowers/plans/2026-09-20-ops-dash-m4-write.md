@@ -23,6 +23,51 @@ guard that would have caught it is the one we skipped to go faster.
 It is also the cheapest it will ever be. Today there are zero mutating routes, so the seam
 is a decision about one middleware. After Task 3 it is a decision about six handlers.
 
+## The board, 2026-09-20 15:5x
+
+Four agents running on disjoint directories. The one file everything wants is
+`server/src/api/routes.ts`, so exactly one agent owns it and everyone else reports a route
+need rather than editing it.
+
+| # | Task | Owner | Directory | State |
+|---|---|---|---|---|
+| 1 | **Auth seam** — local user, route-table guard | `m4-auth` | `server/src/auth/**`, `server/src/api/routes.ts` | running · blocks 2, 3 |
+| 2 | **Ack / mute / resolve, persisted** | `m4-store` | `server/src/store/**` | running · store half only |
+| 3 | **Settings toggles a rule** | `m4-store` | `server/src/store/**` | queued behind 2 |
+| 4 | **Entra adapter** | `m4-entra` | `server/src/adapters/entra/**` | **DONE** `b5dc9f2`, live |
+| 5 | **Endpoints adapter** | — | — | **BLOCKED**: no EPC credential |
+| 6 | **Email adapter** | — | — | **BLOCKED**: no Hornetsecurity CP credential |
+| 7 | **Entra page, browser half** | `m4-views` | `web/src/views/Entra.tsx`, `web/src/live/**` | running · contract-first |
+| 8 | **Section 7's four missing rules** | `m4-entra` | `server/src/engine/**` | running |
+| 9 | `retryAfterMs` on the wire — amend or strip | lead | `DATA_CONTRACTS.md` / `routes.ts` | lead's call |
+| 10 | Seam round-trip test, now unblocked by the shared stub | lead | `server/src/entraSource.test.ts` | lead |
+| 11 | Resolved platform incidents reachable nowhere | — | needs a history route | queued behind 1 |
+
+**Why these four in parallel and not one queue.** They touch four disjoint directories and the
+seams between them are narrow and written into each brief. That is the case the agent-team
+section in `CLAUDE.md` says parallelism is *for*. Tasks 2 and 3 are one agent's queue rather
+than two agents, because they share a vocabulary — which is the case it says parallelism is
+against.
+
+**The seams, decided before either side builds**, because every serious defect in M3 was two
+halves each individually correct disagreeing about the join:
+
+- **auth → everything**: one module publishes the answer; the export surface is pinned as a set
+  and a guard restricts who may import the narrow form. Nothing else forms an opinion about
+  who the user is. `m4-store` takes the actor as a **parameter** and imports nothing from `auth/`.
+- **store → routes**: `m4-store` proposes the function signatures to the lead before building;
+  a route is a thin call over them.
+- **engine → entra**: `m4-entra` proposes what the engine consumes before building. `ServiceSignal`
+  is deliberately narrower than `ServiceStatus` so a rule cannot become a function of history;
+  whatever replaces or extends it must keep that property.
+- **routes → views**: the `/api/entra` response shape is agreed with the lead *first*, and
+  `m4-views` builds the browser half against it while the route is written to meet it.
+
+**What is NOT being built while blocked.** No honestly-scoped 16-device Intune panel as a
+consolation for Task 5. A screen labelled "Endpoints" carrying a number no operator recognises
+is the permanently-wrong-tile failure wearing a new hat, and both the lead and `m4-entra`
+reached that conclusion independently.
+
 ## Global constraints — these bind every task
 
 Carried forward and non-negotiable.
