@@ -2261,11 +2261,24 @@ So the pair is:
 *"reddens 5"*. Two agents arrived at that from opposite directions within an hour — one
 falsified by somebody else's correctness, one by their own.
 
-And the corollary for how the scoping rule applies: **twelve files outside `engine/**` import
+And the corollary for how the scoping rule applies: **many files outside `engine/**` import
 from it**, so it is a *published module* by the shared-module test, and every battery run with
 `--root server server/src/engine/` was measuring a wide-radius mutation through a narrow
 window. "Narrow scope" is a claim about the **import closure**, and almost nothing in this repo
 has a small one.
+
+**And the closure has a direction, which the first version of this entry did not say.** That
+count of twelve was taken from an undirected walk and included `adapters/email/`, which imports
+nothing from `engine/` at all — the single real edge between those two runs the other way. The
+same grep answers both questions and they decide different things:
+
+| question | decides |
+|---|---|
+| **who imports me** | whether my mutation needs A/B/A — my reach is their suites |
+| **who do I import** | whose churn lands inside my "narrow" scope |
+
+An import analysis driving the scoping rule **has to be directed**, or it produces a confident
+wrong answer in whichever direction you happened to grep.
 
 ## What a test count is a property of (2026-09-20)
 
