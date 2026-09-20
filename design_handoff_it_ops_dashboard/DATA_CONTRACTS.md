@@ -418,6 +418,7 @@ only to our own store.
 | `secrets` | Secret or certificate expiring | within 14 days | 3 |
 | `stale` | Agent stale | no check-in for 21 days | 2 |
 | `legacy` | Successful legacy protocol sign-in | any occurrence | 2 |
+| `ourside` | **Our check failing and no vendor advisory corroborating it** (amendment 11) | at least one probe failing, vendor not `degraded`/`outage`, vendor actually read | 2 |
 | `blackout` | **All vendors on one platform went `unknown` together** (amendment 8) | every service whose `vendor.platform` matches, and more than one | 2 |
 
 The `vendor` rule is the headline behavior of the product: neither signal alone opens a
@@ -431,6 +432,26 @@ more alarming fact — we are blind to four vendors and nothing says so. It is a
 a Sev1 because nothing is known to be broken: we have lost the ability to tell. It fires only
 where more than one service shares the platform, so a single `msgraph` outage stays an ordinary
 `unknown` on one tile.
+
+`ourside` is the rule this section described twice in prose and the engine did not implement
+until 2026-09-20 (amendment 11). It is the `vendor` ladder one rung down, and the rungs are
+what give each severity its meaning: vendor corroborates + our probe red is Sev1, confirmed
+and theirs; nothing corroborates + our probe red is Sev2, unconfirmed and probably ours; a
+vendor advisory with our probe green is neither, because it is an advisory.
+
+Two exclusions are load-bearing rather than tidy. **No probe is not a failing probe** —
+`ours.total === 0` is no evidence, and no evidence may not manufacture an incident any more
+than it may render green, which is what keeps `ourside` off the four services that have no
+synthetic check. And **a vendor we have not read yet is not an uncorroborated failure**: after
+a restart the store already holds probe history while the vendor snapshot is still null, so
+without the exclusion the rule opens a Sev2 on every boot, blaming our own network for a feed
+we had not yet asked. That is the same defect as INC-119d4dc7, one rule over.
+
+It is deliberately **not** suppressed while a `blackout` is firing on the same platform. The
+two answer different questions and both answers are true: blackout says visibility is lost
+from one upstream cause, `ourside` says this service is measurably failing and nobody upstream
+confirms it. The over-count `blackout` exists to collapse is four *identical* unknowns, not two
+different facts.
 
 The vendor half of the rule is satisfied by `degraded` or `outage` **only**. `unknown` and
 `maintenance` do not satisfy it (amendment 1). A vendor at `unknown` with our check failing is
@@ -486,6 +507,7 @@ tile had been grey in production for a day.
 | # | Change | Prevents |
 |---|---|---|
 | 10 | `ServiceStatus.vendor` gains `inferred?: { basis }`, and a platform that publishes no health MAY report `operational` under the rule below | A permanently-grey tile. Amendment 4 stopped an absent status field reading as green; it also left Zendesk unable to read anything *but* grey, and a tile that can never change teaches the operator to ignore it exactly as a permanently-red one does |
+| 11 | The `ourside` rule is added to section 7's table (engine only — no type changes, so the frozen contract is untouched) | A rule this document promised twice in prose and the engine never implemented. Section 7 said "our checks failing with no vendor advisory is a Sev2" and "a vendor at `unknown` with our check failing is the Sev2 case"; three tests in `correlate.test.ts` asserted the *absence* of exactly those findings, one of them quoting this document's own sentence in its comment. The spec and the suite disagreed for two milestones and the suite was green |
 
 ### Amendment 10, in full
 

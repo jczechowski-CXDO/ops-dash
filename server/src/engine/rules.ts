@@ -38,7 +38,7 @@ export type ServiceSignal = {
   ours: { passing: number; total: number };
 };
 
-export type RuleKey = 'vendor' | 'blackout';
+export type RuleKey = 'vendor' | 'ourside' | 'blackout';
 
 /** One rule firing, before any identity or persistence is attached. Turning
  *  findings into `Incident`s — ids, windows, resolution — is `correlate.ts`. */
@@ -62,6 +62,13 @@ export const RULES: ReadonlyArray<AlertRule & { severity: Severity }> = [
     detail: 'Vendor reports degraded or outage AND at least one of our probes is failing',
     enabled: true,
     severity: 1,
+  },
+  {
+    key: 'ourside',
+    name: 'Our check failing, uncorroborated',
+    detail: 'One of our probes is failing and no vendor advisory confirms it',
+    enabled: true,
+    severity: 2,
   },
   {
     key: 'blackout',
@@ -115,6 +122,60 @@ export function vendorHalfSatisfied(level: StatusLevel): boolean {
  */
 export function ourCheckFailing(ours: { passing: number; total: number }): boolean {
   return ours.total > 0 && ours.passing < ours.total;
+}
+
+/* ----------------------------------------------------------------- ourside */
+
+/**
+ * Whether we have simply not read this vendor yet, as opposed to having read it.
+ *
+ * Shared by `ourside` and `blackout` because they ask the same question for the
+ * same reason, and because a second copy of this list is exactly the drift this
+ * project keeps paying for. See `NOT_BLINDNESS_YET` below for the codes and for
+ * the cold start that put them there.
+ */
+function haveNotReadVendor(s: ServiceSignal): boolean {
+  return s.vendor.errorCode !== undefined && NOT_BLINDNESS_YET.has(s.vendor.errorCode);
+}
+
+/**
+ * Section 7's other Sev2, which the prose states twice and the engine did not
+ * implement: *"our checks failing with no vendor advisory is a Sev2 pointing at
+ * our own network or credentials"*, and *"a vendor at `unknown` with our check
+ * failing is the Sev2 case"*. Both wordings describe one signal — **our probe is
+ * red and the vendor does not corroborate it.**
+ *
+ * It is the `vendor` rule's ladder one rung down, and the rungs are what give
+ * each severity its meaning:
+ *
+ *   vendor says degraded + our probe red   -> Sev1, confirmed, theirs
+ *   vendor does not say so + our probe red -> Sev2, unconfirmed, probably ours
+ *   vendor says degraded + our probe green -> nothing. An advisory, not an incident.
+ *
+ * DELIBERATELY NOT SUPPRESSED under a concurrent `blackout`. The two answer
+ * different questions and both answers are true: blackout says "you have lost
+ * visibility, from one upstream cause", this says "this service is measurably
+ * failing and nobody upstream is confirming it". Collapsing them would hide the
+ * second, which is the more actionable of the two. The over-count `blackout`
+ * exists to prevent is four *identical* unknowns, not two different facts.
+ *
+ * The summary hedges on purpose. "Points at our own side until proven otherwise"
+ * is what section 7 claims and it is the honest strength: during a platform
+ * blackout the same upstream event may well have broken both halves, and a rule
+ * that asserted "this is your network" would be wrong exactly when it mattered.
+ */
+function ourSideSuspect(s: ServiceSignal): boolean {
+  // `total === 0` is already excluded by `ourCheckFailing` — no probe is no evidence.
+  if (!ourCheckFailing(s.ours)) return false;
+  // The vendor corroborating it makes it a Sev1 for the `vendor` rule, not this.
+  if (vendorHalfSatisfied(s.vendor.level)) return false;
+  // COLD START, and it is the same defect as INC-119d4dc7 one rule over. After a
+  // restart the store already holds probe history, so `ours` is populated on the
+  // first tick while the vendor snapshot is still null. Without this the rule
+  // would open a Sev2 on every boot for every service with a red probe, blaming
+  // our network for a feed we had not yet asked.
+  if (haveNotReadVendor(s)) return false;
+  return true;
 }
 
 /* ---------------------------------------------------------------- blackout */
@@ -176,7 +237,7 @@ const NOT_BLINDNESS_YET = new Set(['platform_unsupported', 'never_polled']);
 function blackoutPopulation(services: readonly ServiceSignal[]): Map<VendorPlatform, ServiceSignal[]> {
   const byPlatform = new Map<VendorPlatform, ServiceSignal[]>();
   for (const s of services) {
-    if (s.vendor.errorCode !== undefined && NOT_BLINDNESS_YET.has(s.vendor.errorCode)) continue;
+    if (haveNotReadVendor(s)) continue;
     const list = byPlatform.get(s.vendor.platform);
     if (list) list.push(s);
     else byPlatform.set(s.vendor.platform, [s]);
@@ -230,6 +291,48 @@ export function evaluate(
             value: s.vendor.level,
             note: `as published on the ${s.vendor.platform} feed`,
             level: s.vendor.level === 'outage' ? 'error' : 'warning',
+          },
+        ],
+      });
+    }
+  }
+
+  if (on('ourside')) {
+    for (const s of services) {
+      if (!ourSideSuspect(s)) continue;
+      const failing = s.ours.total - s.ours.passing;
+      const vendorPhrase =
+        s.vendor.level === 'unknown'
+          ? `we cannot read ${nameOf(s)}'s ${s.vendor.platform} feed`
+          : `${nameOf(s)} reports ${s.vendor.level} on its ${s.vendor.platform} feed`;
+      findings.push({
+        ruleKey: 'ourside',
+        serviceId: s.serviceId,
+        severity: severityOf('ourside'),
+        title: `${nameOf(s)} — our checks failing, no vendor advisory`,
+        summary:
+          `${failing} of ${s.ours.total} of our own probes for ${nameOf(s)} ${failing === 1 ? 'is' : 'are'} ` +
+          `failing, and ${vendorPhrase}. Nothing upstream corroborates the failure, which points at our own ` +
+          `network, DNS or credentials until proven otherwise. It is a Sev2 rather than a Sev1 because only ` +
+          `one half of the evidence is in.`,
+        metaParts: [
+          `Sev 2`,
+          nameOf(s),
+          s.vendor.level === 'unknown' ? 'Vendor unreadable' : `Vendor ${s.vendor.level}`,
+          `${s.ours.passing}/${s.ours.total} probes passing`,
+        ],
+        blastRadius: [
+          {
+            label: 'Probes failing',
+            value: `${failing} of ${s.ours.total}`,
+            note: `synthetic checks for ${nameOf(s)}`,
+            level: 'error',
+          },
+          {
+            label: 'Vendor corroboration',
+            value: s.vendor.level === 'unknown' ? 'Unreadable' : 'None',
+            note: `${s.vendor.platform} reports ${s.vendor.level}`,
+            level: 'warning',
           },
         ],
       });

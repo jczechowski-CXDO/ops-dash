@@ -59,10 +59,14 @@ describe('our half of the headline rule', () => {
 });
 
 describe('the rule registry', () => {
-  it('declares exactly the two rules this milestone implements, at their contract severities', () => {
+  it('declares exactly the three rules this milestone implements, at their contract severities', () => {
     // Literals from DATA_CONTRACTS.md section 7, not read back off the rules.
+    // `ourside` is section 7's other Sev2, stated twice in the prose and missing
+    // from the engine until 2026-09-20: "our checks failing with no vendor
+    // advisory is a Sev2 pointing at our own network or credentials".
     expect(RULES.map((r) => [r.key, r.severity])).toEqual([
       ['vendor', 1],
+      ['ourside', 2],
       ['blackout', 2],
     ]);
   });

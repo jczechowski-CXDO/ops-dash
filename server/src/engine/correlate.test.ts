@@ -22,29 +22,70 @@ const jiraWith = (level: ServiceSignal['vendor']['level']): ServiceSignal =>
   svc({ vendor: { level, platform: 'statuspage' }, ours: { passing: 0, total: 1 } });
 
 describe('the headline rule: what it does NOT fire on', () => {
-  it('vendor unknown + our check failing does NOT open a Sev1', () => {
-    // THE case. Amendment 1: `unknown` does not satisfy the vendor half.
-    // Four of the seven services sit behind Statuspage, so without this one
-    // Statuspage failure becomes four false Sev1s at once — and an operator
-    // who has seen a fleet of false Sev1s stops reading Sev1s.
-    expect(correlate({ at: T0, services: [jiraWith('unknown')] })).toEqual([]);
+  /** Sev of the single incident these cases produce, or `none`. Reaching for the
+   *  severity rather than the emptiness is the whole correction here: three of
+   *  these tests were named "does NOT open a Sev1" and asserted `[]`, which is a
+   *  strictly stronger claim than their names made — and the wrong one. Section 7
+   *  promises a Sev2 for exactly these shapes, so for two milestones they pinned
+   *  the absence of a rule the contract of record requires. One of them even
+   *  carried section 7's own words in its comment. */
+  const sevOf = (services: ServiceSignal[]): Severity | 'none' => {
+    const found = correlate({ at: T0, services });
+    if (found.length === 0) return 'none';
+    expect(found).toHaveLength(1);
+    return found[0]!.severity;
+  };
+
+  it('vendor unknown + our check failing is a Sev2, never a Sev1', () => {
+    // Amendment 1: `unknown` does not satisfy the vendor half. Four of the seven
+    // services sit behind Statuspage, so accepting it would turn one Statuspage
+    // failure into four false Sev1s — and an operator who has seen a fleet of
+    // false Sev1s stops reading Sev1s. But it is not nothing: we have lost sight
+    // of the vendor AND something here is measurably broken.
+    expect(sevOf([jiraWith('unknown')])).toBe(2);
   });
 
-  it('vendor maintenance + our check failing does NOT open a Sev1', () => {
-    // Announced work is not an incident (amendment 1).
-    expect(correlate({ at: T0, services: [jiraWith('maintenance')] })).toEqual([]);
+  it('vendor maintenance + our check failing is a Sev2, never a Sev1', () => {
+    // Announced work is not an incident (amendment 1) — so it does not corroborate
+    // our failing probe, which leaves the failure uncorroborated rather than absent.
+    expect(sevOf([jiraWith('maintenance')])).toBe(2);
   });
 
-  it('vendor degraded + our check PASSING does NOT open a Sev1', () => {
-    // A vendor advisory with our side healthy is informational.
+  it('vendor degraded + our check PASSING opens nothing at all', () => {
+    // The one genuinely empty case of the four, and the reason `sevOf` returns
+    // 'none' rather than this suite asserting `[]` everywhere: an advisory with our
+    // side healthy is informational. Both other halves need evidence from us.
     const services = [svc({ vendor: { level: 'degraded', platform: 'statuspage' }, ours: { passing: 1, total: 1 } })];
-    expect(correlate({ at: T0, services })).toEqual([]);
+    expect(sevOf(services)).toBe('none');
   });
 
-  it('our check failing + vendor operational does NOT open a Sev1', () => {
-    // That points at our own network or credentials, not at the vendor.
+  it('our check failing + vendor operational is a Sev2 pointing at our own side', () => {
+    // Section 7, verbatim: "our checks failing with no vendor advisory is a Sev2
+    // pointing at our own network or credentials".
     const services = [svc({ vendor: { level: 'operational', platform: 'statuspage' }, ours: { passing: 0, total: 2 } })];
-    expect(correlate({ at: T0, services })).toEqual([]);
+    expect(sevOf(services)).toBe(2);
+  });
+
+  it('no probe configured is not a failing probe, however dark the vendor', () => {
+    // SURVIVOR. `total === 0` is no evidence, and no evidence may not manufacture
+    // an incident any more than it may render green. This is what stops `ourside`
+    // firing for the four services that have no synthetic probe at all.
+    const services = [svc({ vendor: { level: 'unknown', platform: 'statuspage' }, ours: { passing: 0, total: 0 } })];
+    expect(sevOf(services)).toBe('none');
+  });
+
+  it('a vendor we have not read yet is not an uncorroborated failure', () => {
+    // COLD START, the same defect as INC-119d4dc7 one rule over. After a restart
+    // the store already holds probe history, so `ours` is populated on the first
+    // tick while the vendor snapshot is still null. Without the exclusion this
+    // opens a Sev2 on every boot, blaming our network for a feed we had not asked.
+    const services = [
+      svc({
+        vendor: { level: 'unknown', platform: 'statuspage', errorCode: 'never_polled' },
+        ours: { passing: 0, total: 1 },
+      }),
+    ];
+    expect(sevOf(services)).toBe('none');
   });
 });
 
