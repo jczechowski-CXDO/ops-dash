@@ -2221,6 +2221,39 @@ case `m4-email` hit when theirs crossed three suites.
 about. A defence you did not choose is a defence you cannot rely on twice, and the only way to
 find out which you have is to ask why you were safe rather than noting that you were.
 
+## A mutation result is a property of a moment too — and yours goes stale by your own hand
+
+The third and sharpest instance of this week's theme, and the only one that has nothing to do
+with the branch being shared.
+
+`c9bce12`'s message records a battery as **"predicted 5, got 5, exact."** Re-run with A/B/A over
+the whole server workspace, the same mutation now reddens **14 tests across five suites**,
+including two files its author does not own.
+
+**The 5 was not wrong.** At `c9bce12`, `evaluatedRules` was only set when a caller passed one,
+so the blast radius genuinely was five tests in one file. Then **the author's own later commit**
+`768752c` made `correlate` derive the set on every call — and the radius grew to fourteen. The
+recorded result became false three commits later, by their own hand, **with nothing in the
+message a reader could use to tell.**
+
+So the pair is:
+
+| | goes stale when |
+|---|---|
+| a pinned **test count** | a *stranger* does the right thing — adopts your helper, lands a commit |
+| a pinned **mutation result** | *you* do the right thing later — the code's own coupling changes |
+
+**The repair is the same and it is not timestamping.** Name the **reach**, not the number:
+*"breaking this must redden every suite that consumes the resolution path"* rather than
+*"reddens 5"*. Two agents arrived at that from opposite directions within an hour — one
+falsified by somebody else's correctness, one by their own.
+
+And the corollary for how the scoping rule applies: **twelve files outside `engine/**` import
+from it**, so it is a *published module* by the shared-module test, and every battery run with
+`--root server server/src/engine/` was measuring a wide-radius mutation through a narrow
+window. "Narrow scope" is a claim about the **import closure**, and almost nothing in this repo
+has a small one.
+
 ## What a test count is a property of (2026-09-20)
 
 `m4-email` found that a pinned count in a docblock goes stale when somebody else does the right
