@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { graphConfigPath } from './http/graphToken.js';
+import { authConfigPath } from './auth/credentials.js';
 
 /**
  * The process.
@@ -40,16 +41,26 @@ const DB_PATH = process.env['OPS_DASH_DB'] ?? join(homedir(), '.local', 'share',
  * All interfaces by default, so the dashboard opens from another machine.
  *
  * **This was `127.0.0.1` and John changed it deliberately**, to reach the
- * dashboard from his desktop. Recording the trade rather than the setting: the
- * API has no authentication — `/api/health` says `auth: { mode: 'none' }` in
- * its own output — so on `0.0.0.0` anyone who can route to this host can read
- * the estate's health, the incident log, and the Graph certificate's subject
- * and expiry.
+ * dashboard from his desktop. Recording the trade rather than the setting.
+ *
+ * **UPDATED with the auth seam, because this paragraph had gone stale in the
+ * reassuring-to-read direction.** It used to say the API has no authentication
+ * at all. That is now half false and the surviving half is the important one:
+ *
+ *   - **Writes are protected.** Every mutating route requires a session, and a
+ *     route that declares no policy is refused before its handler runs.
+ *   - **Reads are open, by decision and not by omission.** `/api/services`,
+ *     `/api/incidents`, `/api/checks` and the liveness half of `/api/health`
+ *     answer anyone who can route to this host — which is the estate's health,
+ *     the incident log and every probe result. Each is marked `'public-read'`
+ *     in `routes.ts` so it is a choice somebody wrote down.
+ *   - The Graph certificate's subject and expiry are now redacted for an
+ *     unauthenticated caller; that specific disclosure is closed.
  *
  * Acceptable on a trusted LAN, which is where this runs. Not acceptable the
  * moment this host is reachable from anywhere else, and the security review's
- * release list carries it as its own item. `HOST=127.0.0.1` restores the old
- * behaviour without a code change.
+ * release list carries both the binding and the open reads as their own items.
+ * `HOST=127.0.0.1` restores the old behaviour without a code change.
  */
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 
@@ -151,11 +162,26 @@ async function main(): Promise<void> {
 
   await app.api.listen({ port: PORT, host: HOST });
   log(`listening on http://${HOST}:${PORT}`);
-  // Said at every start, not buried in a comment. A server with no auth on a
-  // network interface is a decision, and a decision nobody is reminded of
-  // becomes an assumption.
+  // Said at every start, not buried in a comment. A server exposed on a network
+  // interface is a decision, and a decision nobody is reminded of becomes an
+  // assumption.
+  //
+  // UPDATED with the auth seam. The old line said "NO AUTHENTICATION"
+  // unconditionally, which stopped being true the moment writes were protected —
+  // and a startup banner that is wrong in the REASSURING direction is the thing
+  // this repo treats as worst, but one that is wrong in the alarming direction
+  // is only slightly better: an operator who learns the warning overstates its
+  // case stops reading it, and then does not read the day it is right.
+  //
+  // So both states name what is actually open rather than what is missing, and
+  // the unconfigured one names the fix, which the old line could not.
   if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
-    log(`WARNING: bound to ${HOST} with NO AUTHENTICATION — anyone who can reach this host can read the dashboard and /api/*. Set HOST=127.0.0.1 for loopback only.`);
+    const credentialed = existsSync(authConfigPath());
+    log(
+      credentialed
+        ? `bound to ${HOST}. Reads are OPEN on this network by decision; every write needs a session. Set HOST=127.0.0.1 for loopback only.`
+        : `WARNING: bound to ${HOST} with NO OPERATOR CREDENTIAL — reads are open to anyone who can reach this host, and every write will be REFUSED until one exists. Run: npm run auth:set`,
+    );
   }
 
   app.schedule.start();
