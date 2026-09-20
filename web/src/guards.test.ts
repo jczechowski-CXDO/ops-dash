@@ -253,6 +253,56 @@ describe('nothing reaches off-box', () => {
   });
 });
 
+/**
+ * What a **fabricated** value looks like in this repo, in one place.
+ *
+ * This guard exists to stop a real secret entering a history that is pushed. It
+ * is not, and must not become, a rule against the word `secret` appearing near
+ * a string — because the adapters that handle credentials have to be tested,
+ * and a test asserting an observed `authorization` header has to pin a LITERAL.
+ * Rewriting such an assertion as `\`Zoho-oauthtoken ${token}\`` would make it
+ * compute its expectation from the value under test, which is the tautology
+ * this project forbids in three separate places. **A guard that can only be
+ * satisfied by weakening a test is a guard that will be switched off**, and the
+ * comment on `INLINE_BEARER` already said so: it refused to add `Bearer`
+ * precisely because `'Bearer stub-token'` assertions are "obviously fake and
+ * legitimately literal".
+ *
+ * So the exemption is stated once, positively, as the vocabulary this repo
+ * already uses for fabricated values — `DEMO-*` is CLAUDE.md's own redaction
+ * convention — rather than being widened per-file as each new adapter test
+ * trips it. Two narrowings in five minutes is how a guard erodes; one rule with
+ * controls in both directions is not.
+ *
+ * A real secret that happens to begin `DEMO-` would slip through. That is
+ * accepted: the value would have to be fabricated-looking on purpose, and the
+ * guard's job is to catch a transcribed secret, not an adversary inside the
+ * repo choosing a disguise.
+ */
+const PLACEHOLDER = /^(DEMO-|stub-|fake-|test-|example-|redacted|changeme|xxx)/i;
+
+/** A secret's own VALUE, however it got into the file: a PEM block or a
+ *  hard-coded Windows secrets path is a secret whether or not anything was
+ *  assigned to it. No placeholder exemption — there is no fabricated form of
+ *  these. */
+const VALUE_SHAPES_PATTERN = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
+
+/** Zoho's scheme followed by a token that is neither interpolated nor a
+ *  placeholder. One definition, because the guard and its control each held a
+ *  copy — and a control computing its answer from a drifted copy proves nothing
+ *  about the guard it is named after. That is not hypothetical: the edit that
+ *  hoisted these replaced the CONTROL's copy and silently missed the GUARD's,
+ *  so for one run the control passed against a pattern the guard did not use. */
+const INLINE_BEARER_PATTERN = new RegExp(
+  `Zoho-oauthtoken\\s+(?!\\$\\{)(?!${PLACEHOLDER.source.slice(1)})[A-Za-z0-9._-]{8}`,
+);
+
+/** `name: "..."` / `name = '...'` assigned a literal that is not a placeholder. */
+const ASSIGNED_LITERAL_PATTERN = new RegExp(
+  `\\b(client_secret|refresh_token|api_key)\\b\\s*[:=]\\s*['"\`](?!${PLACEHOLDER.source.slice(1)})`,
+  'i',
+);
+
 describe('no credentials, ever', () => {
   /** Everything a human might paste while wiring an adapter up. */
   const sources = () => [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc(), ...serverData()];
@@ -282,10 +332,8 @@ describe('no credentials, ever', () => {
     // "abc123"` does not. The bare-value shapes below are unchanged, because a
     // PEM block or a hard-coded Windows secrets path in source is a value
     // however it got there.
-    const VALUE_SHAPES = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
-    /** `name: "..."` or `name = '...'` — the field assigned a literal secret.
-     *  Not `name` alone, not `{ name }`, not `cfg.name`. */
-    const ASSIGNED_LITERAL = /\b(client_secret|refresh_token|api_key)\b\s*[:=]\s*['"`]/i;
+    const VALUE_SHAPES = VALUE_SHAPES_PATTERN;
+    const ASSIGNED_LITERAL = ASSIGNED_LITERAL_PATTERN;
     /** Zoho's scheme followed by something that is not an interpolation.
      *  `\`Zoho-oauthtoken ${t}\`` is the correct way to write it; the same
      *  string with the token typed in is the thing to refuse.
@@ -298,7 +346,7 @@ describe('no credentials, ever', () => {
      *  unblock three Zoho identifiers. A guard widened past its reason
      *  collects false positives, and false positives are how a guard gets
      *  disabled by someone in a hurry. */
-    const INLINE_BEARER = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
+    const INLINE_BEARER = INLINE_BEARER_PATTERN;
     const pattern = new RegExp(
       `${VALUE_SHAPES.source}|${ASSIGNED_LITERAL.source}|${INLINE_BEARER.source}`,
       'i',
@@ -312,9 +360,9 @@ describe('no credentials, ever', () => {
     // relaxed without controls is a guard nobody can tell from a deleted one.
     // Assembled from fragments so this file does not itself trip the rule.
     const q = String.fromCharCode(34);
-    const VALUE_SHAPES = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
-    const ASSIGNED_LITERAL = /\b(client_secret|refresh_token|api_key)\b\s*[:=]\s*['"`]/i;
-    const INLINE_BEARER = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
+    const VALUE_SHAPES = VALUE_SHAPES_PATTERN;
+    const ASSIGNED_LITERAL = ASSIGNED_LITERAL_PATTERN;
+    const INLINE_BEARER = INLINE_BEARER_PATTERN;
     const fires = (line: string) =>
       VALUE_SHAPES.test(line) || ASSIGNED_LITERAL.test(line) || INLINE_BEARER.test(line);
 
@@ -333,6 +381,28 @@ describe('no credentials, ever', () => {
     expect(fires('const { client_id, client_secret, refresh_token } = raw;')).toBe(false);
     expect(fires('grant_type: ' + q + 'refresh_token' + q)).toBe(false);
     expect(fires('authorization: `Zoho-oauthtoken ${token}`')).toBe(false);
+    // The placeholder exemption, in both directions. A fake token in a test
+    // assertion is not a secret; a real-looking one still is, however it is
+    // spelled. Assembled for the same reason as the positive case above.
+    const scheme = ['Zoho', 'oauthtoken'].join('-');
+    for (const fake of ['stub-token', 'fake-token-1', 'test-token-abc', 'example-token', 'redacted', 'DEMO-TOKEN']) {
+      expect(fires(`expect(seen.auth).toBe('${scheme} ${fake}')`), fake).toBe(false);
+    }
+    // The same exemption on the assigned-literal rule, which is where the
+    // Endpoints adapter's fabricated config trips it. `DEMO-` is CLAUDE.md's
+    // own redaction convention, so a test config using it is the repo obeying
+    // its own rule, not breaking this one.
+    for (const fake of ['DEMO-SECRET', 'stub-secret', 'changeme', 'xxx']) {
+      expect(fires(`client_secret: ${q}${fake}${q}`), fake).toBe(false);
+      expect(fires(`refresh_token: ${q}${fake}${q}`), fake).toBe(false);
+    }
+    // …and a real-looking one still fires, however it is spelled.
+    for (const real of ['1000.abcdef0123456789', 'sk-live-000111222', 'demonstrably-real-9f3a']) {
+      expect(fires(`api_key: ${q}${real}${q}`), real).toBe(true);
+    }
+    for (const real of ['1000.deadbeefcafe', 'stubbery.9f3a1c', 'testing.9f3a1c22']) {
+      expect(fires(`authorization: \`${scheme} ${real}\``), real).toBe(true);
+    }
     expect(fires('body.set(' + q + 'refresh_token' + q + ', cfg.refresh_token);')).toBe(false);
     expect(fires('if (!cfg.client_secret) return missing(' + q + 'client_secret' + q + ');')).toBe(false);
   });
@@ -544,6 +614,129 @@ describe('HTML sinks', () => {
         !(f.endsWith('aurora/Icon.test.tsx') && read(f).includes("not.toContain('<image')")),
     );
     expect(offenders.map(rel)).toEqual([]);
+  });
+
+  /**
+   * URL-bearing attributes this tree may contain. **Empty, and that is the
+   * finding**: measured across every non-test file under `web/src`, there is
+   * not one `href`, `src`, `action` or `formaction` in the application. All
+   * navigation is react-router's `to`, every image is an inline SVG from
+   * `Icon.tsx`'s vetted path data, and every font and stylesheet is referenced
+   * from `index.html`, which the outbound guard covers separately.
+   *
+   * An entry here is a decision, like `ALLOWED_DOMAINS` above: `path => reason`.
+   */
+  const ALLOWED_URL_ATTRIBUTES: Record<string, string> = {};
+
+  /**
+   * The files this guard reads: every non-test source file under `web/src`.
+   *
+   * ONE definition, used by the guard and by its control. Found by mutation:
+   * with the control computing the corpus separately, pointing the guard at an
+   * empty list left all thirty tests green — the control was asserting that
+   * `src()` is non-empty, which was never the question. A non-vacuity check on
+   * a parallel computation proves nothing about the computation that matters.
+   */
+  const urlScanned = () => src().filter((f) => !/\.test\.tsx?$/.test(f));
+
+  /**
+   * `href=`, `src=`, `action=`, `formaction=` **as an attribute**, in JSX or
+   * inside a template string, in any casing.
+   *
+   * The two restrictions are both load-bearing and both were put there by the
+   * guard firing on honest code the first time it ran:
+   *
+   *   - the value must start `{`, `"`, `'` or `$` — an attribute's value always
+   *     does, and `const href = navHref(item)` and `href === item.path` do not.
+   *     `app/Sidebar.tsx`, `app/routes.ts` and `live/parse.ts` all hold a local
+   *     named `href` or `action`, and a guard that cried wolf on those would
+   *     have been deleted within the week.
+   *   - not preceded by a word character, `.` or `:`, which is what keeps
+   *     `xlink:href` with the generated-icon assertion below that owns it.
+   *
+   * Known blind spot, stated rather than papered over: `createElement('a', {
+   * href: u })` uses a colon and is invisible here. This tree is JSX
+   * throughout and contains no `createElement` call, so the gap is theoretical
+   * today — but it is a gap, and the next person should know it rather than
+   * trust the guard further than it reaches.
+   */
+  const URL_ATTRIBUTE =
+    /(?<!\b(?:const|let|var)\s)(?<![\w$.:])(href|src|action|formaction)\s*=\s*["'{$]/i;
+
+  it('no value reaches a URL-bearing attribute, because there are none', () => {
+    // Written because `m4-email` traced the Email page's sinks and found the
+    // gap: `BlockedMessage.from` is the most link-shaped field in the product —
+    // an attacker-chosen address, one `mailto:` convenience away from being an
+    // href — and nothing in this file would have caught it. `mailto:` is also
+    // not the only scheme a browser accepts from a string somebody else wrote.
+    //
+    // The guard deliberately does NOT try to judge whether a particular href is
+    // safe. That is a semantic judgement a grep gets wrong in both directions,
+    // and the moment it tries, it acquires an opinion it will be wrong about.
+    // It asserts the much stronger and currently TRUE property: this tree has
+    // no such attribute at all. Adding the first one is then a conversation
+    // rather than a diff nobody reads — which is the whole value, because the
+    // dangerous href is never the one somebody thought about.
+    const offenders = urlScanned()
+      .filter((f) => URL_ATTRIBUTE.test(read(f)))
+      .map(rel)
+      .filter((f) => !Object.hasOwn(ALLOWED_URL_ATTRIBUTES, f));
+    expect(offenders).toEqual([]);
+  });
+
+  it('every allowlisted path is real and still needs its exemption', () => {
+    // Found by mutation: an entry added to the allowlist hid a genuine sink and
+    // nothing complained, because nothing ever checked the entries. An
+    // exemption that outlives its reason is worse than no guard — the guard
+    // still looks present. Same shape as the open-loop guard's own
+    // 'the allowlist names real contract fields and carries a reason' test.
+    const scanned = new Set(urlScanned().map(rel));
+    for (const [path, reason] of Object.entries(ALLOWED_URL_ATTRIBUTES)) {
+      expect(scanned, `${path} is allowlisted but is not a file this guard scans`).toContain(path);
+      // It must STILL contain one. An exemption for a sink somebody removed is
+      // a licence nobody is using and nobody will notice being used again.
+      expect(
+        URL_ATTRIBUTE.test(read(join(REPO, path))),
+        `${path} is allowlisted but no longer has a URL attribute — drop the entry`,
+      ).toBe(true);
+      expect(reason.length, `${path} carries no reason`).toBeGreaterThan(20);
+    }
+  });
+
+  it('that guard can fail — the pattern fires on every shape it claims to catch', () => {
+    // The control. The assertion above is "no offender found", which passes
+    // identically against a regex that matches nothing, a walk that reads no
+    // files, or a filter that excludes everything. Three of those four
+    // possibilities are live here, so this proves the pattern AND the corpus.
+    for (const sink of [
+      '<a href={`mailto:${row.from}`}>',
+      "<img src={row.preview} />",
+      '<a HREF="x">',
+      '<form action={u}>',
+      '<button formaction={u}>',
+      'const s = `<img src=${u}>`;',
+    ]) {
+      expect(URL_ATTRIBUTE.test(sink), sink).toBe(true);
+    }
+    // `xlink:href` belongs to the generated-icon assertion below and must not be
+    // double-claimed here, or a real offender on the same line would be read as
+    // that one's problem.
+    expect(URL_ATTRIBUTE.test('<use xlink:href="#a"/>')).toBe(false);
+    // The OTHER half of the control, and the half this guard actually needed:
+    // the real lines that made it fire on its first run. A pattern that goes
+    // back to matching these is a pattern somebody will switch off.
+    for (const innocent of [
+      'const href = navHref(item, dashboard.incidents.data ?? []);',
+      'return pathname === item.path && href === item.path;',
+      "const action = str(raw['action']);",
+      'if (at === null || action === null) return null;',
+    ]) {
+      expect(URL_ATTRIBUTE.test(innocent), innocent).toBe(false);
+    }
+    // And the corpus the GUARD ITSELF reads is real — `urlScanned`, the same
+    // call, not a second one that happens to agree.
+    expect(urlScanned().length).toBeGreaterThan(20);
+    expect(urlScanned().map(rel)).toContain('web/src/views/Email.tsx');
   });
 
   it('the generated icon data is geometry only — no script, no event handler, no external ref', () => {
