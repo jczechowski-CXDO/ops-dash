@@ -36,7 +36,7 @@ need rather than editing it.
 | 3 | **Settings toggles a rule** | — | — | **store half was ALREADY DONE** (`db.ts` + 9 green tests + `index.ts:260` reads it every tick). Only the route (`m4-auth`) and rendering a disabled rule as disabled (`m4-views`) remain |
 | 4 | **Entra adapter** | `m4-entra` | `server/src/adapters/entra/**` | **DONE** `b5dc9f2`, live |
 | 5 | **Endpoints adapter** | — | — | **BLOCKED**: no EPC credential |
-| 6 | **Email adapter** | — | — | **BLOCKED**: no Hornetsecurity CP credential |
+| 6 | **Email adapter** | — | — | **HALTED 2026-09-20 by John.** The credential existed for ~40 minutes and he revoked it: *"it was way over privileged."* Nothing was built — `m4-email` was still measuring, so there is no half-adapter to unwind. See the note below before restarting |
 | 7 | **Entra page, browser half** | `m4-views` | `web/src/views/Entra.tsx`, `web/src/live/**` | running · contract-first |
 | 8 | **Section 7's four missing rules** | `m4-entra` | `server/src/engine/**` | running |
 | 9 | `retryAfterMs` on the wire — amend or strip | lead | `DATA_CONTRACTS.md` / `routes.ts` | lead's call |
@@ -69,6 +69,28 @@ halves each individually correct disagreeing about the join:
 consolation for Task 5. A screen labelled "Endpoints" carrying a number no operator recognises
 is the permanently-wrong-tile failure wearing a new hat, and both the lead and `m4-entra`
 reached that conclusion independently.
+
+### Task 6 is halted, and the reason is a finding rather than a setback
+
+John placed a Proofpoint/Hornetsecurity Control Panel token, then revoked it about forty
+minutes later: **"it was way over privileged."**
+
+That is the system working, and it is worth writing down as a precedent rather than an
+inconvenience. This dashboard needs one thing from that API — a read of mail-flow counts and a
+list of recently blocked messages. A token scoped wider than that is a standing liability on a
+box that already binds `0.0.0.0` with a `_note` field naming the customer scope, and catching it
+*before* an adapter is built on it costs one agent's measuring time. Catching it afterwards
+costs the adapter, its tests, its fixtures and a credential rotation.
+
+**Nothing was built.** `m4-email` was still in the measure-before-build phase when the halt
+arrived, which is the second time in one day that rule has meant a reversal cost nothing — the
+first was Endpoints, where the source in this plan was wrong and the measurement caught it
+before a line was written.
+
+**Before restarting**, the credential needs to come back scoped to what the screen actually
+renders, and the adapter brief should name the required permissions explicitly so the next token
+can be minted narrowly rather than re-minted broadly. `~/.config/ops-dash/hornet.json` still
+exists and now holds a dead token; it is John's file and nobody else touches it.
 
 ## Global constraints — these bind every task
 
