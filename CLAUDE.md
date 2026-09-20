@@ -550,6 +550,32 @@ the restore, and it exists however reliable the restore is. So the rule is not "
 `finally`" — though do that too — it is do not open the window at all on a file someone else
 is reading.
 
+**And the restore is the WORSE half, which this rule did not say until somebody nearly proved
+it.** An agent appended a marker to a live peer's file and restored it from a `cp` backup 23
+milliseconds later. Nothing was lost. Their own account of why that is not a defence is the
+finding:
+
+> Had the owner written to that file inside the window, **my restore would have silently
+> clobbered their work with no error anywhere.**
+
+- **A stray edit is visible** — a diff, a failing test, a marker somebody greps for.
+- **A successful restore of stale bytes produces no error, no diff and no failing test.** The
+  owner's work is simply gone, and it surfaces only when they wonder why their change is
+  missing and disbelieve themselves.
+
+So a **more reliable restore makes this more likely to pass unnoticed, not less.** The window
+is not a risk of leaving something behind; it is a risk of taking something away.
+
+**Simulate against a file you own.** That agent was doing the right thing — building a detector
+and wanting to watch it fire rather than assert it would — and the fix is one word. The
+detector did not care whose file moved; their own `db.ts` would have been exactly as convincing.
+
+**Disclosure is why this cost thirty seconds instead of twenty minutes.** In the `sed` episode
+below, the owner reconstructed a mutant for twenty minutes and named a peer who had done
+nothing wrong. Here the peer reported their own near-miss, with timestamps precise enough for
+the owner to rule it out immediately. Same hazard, opposite outcome, and the difference was
+disclosure rather than care.
+
 **The instinct was right and the instrument was wrong** — the distinction matters, because
 the wrong lesson here is "do not verify". Wanting to watch a reported defect fail yourself
 rather than taking it on trust is the habit this whole file is about, and it is why the
