@@ -1,7 +1,9 @@
 import { createApp } from './index.js';
+import { serveDashboard } from './static.js';
 import { createTokenSource } from './http/graphToken.js';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { graphConfigPath } from './http/graphToken.js';
 
@@ -18,6 +20,11 @@ import { graphConfigPath } from './http/graphToken.js';
  * long-lived behaviour until now was reasoned from the code.
  */
 
+/** This file's own location, so the dashboard is found relative to the build
+ *  rather than to whatever directory the process was started from — the same
+ *  mistake the store path made. */
+const HERE_DIST = dirname(fileURLToPath(import.meta.url));
+
 const PORT = Number(process.env['PORT'] ?? 4000);
 /**
  * Where the SQLite file lives.
@@ -29,12 +36,22 @@ const PORT = Number(process.env['PORT'] ?? 4000);
  * and no explanation. Found by starting it from `/tmp`.
  */
 const DB_PATH = process.env['OPS_DASH_DB'] ?? join(homedir(), '.local', 'share', 'ops-dash', 'ops-dash.sqlite');
-/** Loopback by default, and deliberately not `0.0.0.0`. The API has no auth —
- *  `/api/health` says `auth: { mode: 'none' }` out loud — so binding it to
- *  anything reachable would publish the estate's health to the network. The
- *  security review's release list has this as its own item; the default is the
- *  safe one and an operator has to mean it to change it. */
-const HOST = process.env['HOST'] ?? '127.0.0.1';
+/**
+ * All interfaces by default, so the dashboard opens from another machine.
+ *
+ * **This was `127.0.0.1` and John changed it deliberately**, to reach the
+ * dashboard from his desktop. Recording the trade rather than the setting: the
+ * API has no authentication — `/api/health` says `auth: { mode: 'none' }` in
+ * its own output — so on `0.0.0.0` anyone who can route to this host can read
+ * the estate's health, the incident log, and the Graph certificate's subject
+ * and expiry.
+ *
+ * Acceptable on a trusted LAN, which is where this runs. Not acceptable the
+ * moment this host is reachable from anywhere else, and the security review's
+ * release list carries it as its own item. `HOST=127.0.0.1` restores the old
+ * behaviour without a code change.
+ */
+const HOST = process.env['HOST'] ?? '0.0.0.0';
 
 function log(line: string): void {
   process.stderr.write(`[ops-dash] ${new Date().toISOString()} ${line}\n`);
@@ -125,8 +142,21 @@ async function main(): Promise<void> {
   // Listen BEFORE polling. The first poll round takes a second or two against
   // seven real feeds, and a dashboard that refuses connections while it warms
   // up looks exactly like a dashboard that has crashed.
+  // The built SPA, from the same process, so there is one URL to open. Absent
+  // build → the route says so rather than 404ing as if the path were wrong.
+  // server/dist/main.js -> server/dist -> server -> repo root, then web/dist.
+  const webDist = resolve(HERE_DIST, '..', '..', 'web', 'dist');
+  serveDashboard(app.api, webDist);
+  log(existsSync(join(webDist, 'index.html')) ? `serving the dashboard from ${webDist}` : `no dashboard build at ${webDist} — run npm run build`);
+
   await app.api.listen({ port: PORT, host: HOST });
   log(`listening on http://${HOST}:${PORT}`);
+  // Said at every start, not buried in a comment. A server with no auth on a
+  // network interface is a decision, and a decision nobody is reminded of
+  // becomes an assumption.
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+    log(`WARNING: bound to ${HOST} with NO AUTHENTICATION — anyone who can reach this host can read the dashboard and /api/*. Set HOST=127.0.0.1 for loopback only.`);
+  }
 
   app.schedule.start();
   log(`polling ${app.sources.length} sources`);
