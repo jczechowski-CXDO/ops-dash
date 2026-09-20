@@ -389,6 +389,26 @@ describe('a partial read is not a failed read', () => {
   });
 
   it('the adapters and the store name the SAME set of partial codes, both directions', () => {
+    // ## What breaking this must redden, and what it must NOT
+    //
+    // Stated as REACH rather than as a count, because a count is a property of
+    // the import closure at the moment it was measured and nothing in it says
+    // so. `m4-entra` demonstrated that on their own work: a mutation pinned in
+    // a commit message as "predicted 5, got 5" reddens 14 across five suites
+    // today, because a later commit of their own widened the coupling. The 5
+    // was true and is now false, and the message cannot tell you which.
+    //
+    //   unregistering a code an adapter still emits
+    //     -> this test, AND 'a registered code from ANOTHER adapter behaves
+    //        like the Entra one', because that one exercises the entry
+    //   registering a code no adapter emits
+    //     -> this test ALONE. Nothing else can see a set entry that has gone
+    //        stale, which is why the equality is load-bearing rather than
+    //        tidier than a subset check
+    //
+    // Measured A/B/A over the whole `server` workspace with both controls at
+    // zero, not with a run scoped to `src/store` — a scoped battery counts only
+    // the blast it was pointed at.
     // Two independently-reachable definitions compared against each other: the
     // set in db.ts, and what the adapters actually emit. Neither is derived from
     // the other, which is the only form of this assertion that can fail.
