@@ -317,6 +317,24 @@ export function sparkSamples(spark: Array<number | null> | null): { values: numb
   return { values, missing: spark.length - values.length };
 }
 
+/**
+ * "6 of 17 probes did not answer" — the count beside a broken line, on both
+ * screens, from one definition.
+ *
+ * The line shows an operator THAT there are gaps. It cannot say how many, or
+ * out of how many, and that is the whole of what this sentence adds — read on
+ * screen by the lead against real store data, where the detail page's longer
+ * version ("and the line breaks where each of them should be") turned out to
+ * describe what the reader was already looking at.
+ *
+ * One helper rather than one literal per view: two screens stating the same
+ * fact in two sentences is how the tile and the detail page end up disagreeing
+ * about what a hole is called.
+ */
+export function holesPhrase(missing: number, answered: number): string {
+  return `${missing} of ${answered + missing} probes did not answer`;
+}
+
 /* ------------------------------------------------------------ incident view */
 
 /** Live incidents are the frozen `Incident`, assembled from what the API

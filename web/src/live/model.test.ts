@@ -4,6 +4,7 @@ import {
   countText,
   feedMarker,
   firstSentence,
+  holesPhrase,
   lastSeenLine,
   latencyText,
   loadKind,
@@ -164,6 +165,18 @@ describe('sparkSamples keeps the holes countable', () => {
 
   it('a clean series passes through unchanged', () => {
     expect(sparkSamples([1, 2, 3])).toEqual({ values: [1, 2, 3], missing: 0 });
+  });
+
+  it('the holes sentence is one definition, quoted by both screens', () => {
+    // Pinned as a literal, not composed from the same template the function
+    // uses: an expectation built the way the code builds it agrees with itself
+    // however wrong it is.
+    expect(holesPhrase(2, 2)).toBe('2 of 4 probes did not answer');
+    expect(holesPhrase(6, 11)).toBe('6 of 17 probes did not answer');
+    // The total is answered PLUS missing — the denominator is every probe we
+    // asked, not the ones that came back. "6 of 11" over 17 samples would be a
+    // true-looking number about the wrong population.
+    expect(holesPhrase(1, 0)).toBe('1 of 1 probes did not answer');
   });
 
   it('a probe that did not answer is counted, not dropped and not zeroed', () => {

@@ -6,6 +6,7 @@ import {
   feedMarker,
   latencyText,
   panelStateFor,
+  holesPhrase,
   sparkSamples,
   type IncidentView,
   type ServiceView,
@@ -362,7 +363,7 @@ function TileSpark({ spark, color }: { spark: Array<number | null> | null; color
       <Sparkline values={spark ?? []} color={color} height={26} viewBoxHeight={26} />
       {missing === 0 ? null : (
         <div data-testid="tile-spark-holes" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
-          {`${missing} of ${values.length + missing} probes did not answer`}
+          {holesPhrase(missing, values.length)}
         </div>
       )}
     </>

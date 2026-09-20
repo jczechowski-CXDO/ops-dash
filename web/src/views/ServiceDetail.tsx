@@ -11,6 +11,7 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
 import { useChecks, useDashboard } from '../live/DataSource.js';
 import {
   countText,
+  holesPhrase,
   lastSeenLine,
   loadKind,
   panelStateFor,
@@ -424,7 +425,10 @@ export default function ServiceDetail({
         </div>
         {sparkMissing === 0 ? null : (
           <div data-testid="spark-holes" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-            {`${sparkMissing} of ${sparkValues.length + sparkMissing} samples are missing: those probes did not answer, and the line breaks where each of them should be.`}
+            {/* The count, and only the count: the broken line already says
+                there are gaps, so a clause describing the break is the picture
+                said twice. Read on screen before cutting. */}
+            {holesPhrase(sparkMissing, sparkValues.length)}
           </div>
         )}
       </Card>
