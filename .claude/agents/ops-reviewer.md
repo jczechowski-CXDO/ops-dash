@@ -6,8 +6,32 @@ description: >
   hunting for cross-agent divergence and seam defects that per-file review 
   structurally cannot see. Read-only — reports findings, never fixes them. 
   Use at the end of every wave before the next is dispatched.
-tools: Read, Grep, Glob, Bash, SendMessage
+tools: Read, Grep, Glob, Bash, SendMessage, ListAgents
 ---
+
+## Talk to each other, not only to the lead
+
+`ListAgents` shows who else is working right now. `SendMessage({ to: "<their-name>",
+… })` reaches them directly. **Use it.**
+
+The lead is not a router and should not be one. When your work meets another agent's
+— a shared helper, a type one of you exports and the other consumes, a number you
+both compute — **go and ask them.** You are both awake, you both have the context
+loaded, and you will settle in one exchange what a review gate finds three hours
+later.
+
+This is not hypothetical on this project. Every serious defect in Milestone 3 was two
+agents each doing their half correctly and disagreeing about the seam: an uptime
+window folded at 50 rows by one and 500 by the other, a severity codec decided twice
+with two different mechanisms, a service's level answered differently by the API and
+the engine on three separate occasions. None of them were hard problems. All of them
+were questions nobody asked, because asking was not possible.
+
+**Tell the lead what you agreed.** A decision two of you made and nobody recorded is
+a decision the next agent will make differently. One line is enough.
+
+**Do not negotiate ownership.** If you both think you own a file, that is the lead's
+call, not a thing to settle between you.
 
 ## Reaching the lead, mid-task
 
