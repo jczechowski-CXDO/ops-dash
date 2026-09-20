@@ -1560,6 +1560,35 @@ It also measured something useful: the noise floor of that improvised harness is
 and HEAD-against-HEAD differs on one of the same captures — **precisely because
 `killTransitions` cannot run.** The broken thing was measurable through the hole it left.
 
+### FIXED the same day — `24e229a`, and the suite is green
+
+**Read this before acting on anything above.** The account above describes a state that
+lasted a few hours on 2026-09-20 and is no longer true. At HEAD the suite is
+**157 passed, 1 skipped, exit 0**, including the `killTransitions`-dependent visual tests
+and the CSP security specs. **Run it.**
+
+The fix keeps the CSP untouched: `killTransitions` serves its stylesheet from the app's own
+origin via `page.route` and `addStyleTag({ url })`, so it arrives as a same-origin
+`<link rel=stylesheet>` that `style-src 'self'` admits, with byte-identical CSS to the old
+inline tag. No baseline moved.
+
+Two results from that work worth keeping:
+
+- **`killTransitions` is not redundant with `animations: 'disabled'`**, established by
+  experiment rather than argument. With the CSS emptied and the assertion disabled, all 152
+  screenshots still passed and the **WCAG AA contrast sweep failed** — a frozen
+  mid-transition colour. It is load-bearing for contrast and not for baselines, so deleting
+  it would have been wrong.
+- **The repaired suite immediately found a real regression**: in-app links drop `?demo=`, so
+  one click on a tile left the fixtures and mounted the live provider. Fixed by making
+  `DemoModeProvider` the single source of truth for `isDemo`.
+
+That this correction had to be added by another agent reading the section is itself the
+lesson the section is about. **A stale account of a safety net is worse than none**: the
+next reader skips the run because the document says it is broken anyway. The original text
+is kept above rather than rewritten, because what happened matters — but it needed this
+paragraph the moment `24e229a` landed, and it did not get one for two hours.
+
 
 ## When a number is honest and its label is not, fix the label (2026-09-20)
 
