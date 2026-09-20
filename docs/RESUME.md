@@ -1788,3 +1788,48 @@ re-run.** The output was on screen and was filtered out before anyone read it.
 for a count, while a name is going past, is watching the number and discarding the only
 thing that would make the number mean something.
 
+
+
+## Reasoning correctly from an incomplete roster still produces a wrong name (2026-09-20)
+
+An agent found a live mutation in a file it owns, reconstructed the mechanism correctly —
+two mutation batteries on one file clobber each other, because the second script's "restore"
+writes back whatever it read as the original — and named the only other agent it knew was
+running one. The mechanism was right. The name was wrong: **the lead had run that mutation**,
+on their file, while they were committing, to reproduce a reported finding rather than take
+it on trust.
+
+The agent's own account of its error, which is sharper than the correction:
+
+> My error was not the diagnosis, it was the naming. I had the evidence for the mechanism
+> and no evidence at all for the attribution, and I reported them at the same confidence.
+
+**Say what you know, not what you concluded from a list you cannot prove is complete.** What
+was actually known was "something outside my script wrote to this file and I cannot tell you
+what". That sentence needed no retraction.
+
+Two consequences worth separating, because they are not the same size:
+
+- The collision cost about twenty minutes of diagnosis.
+- **The misattribution cost a correct behaviour a black mark** — it landed on the one agent
+  that had done it right, which sent the finding and the one-line fix and never touched the
+  file — and cited that agent's own honest description of its battery as the evidence
+  against it. Only this one needed a third party to undo.
+
+### And the corrected rule is about the window, not the restore
+
+The lead's mutation restored correctly. A bash `EXIT` trap fired and both runs ended green.
+The mutant still reached the owner's tree, because **the hazard is the window between the
+write and the restore**, not the restore failing. So "restore in a `finally`" is not the
+rule; it is a mitigation for a different failure.
+
+The rule is: do not open that window on a file someone else is reading. Send the mutation to
+the owner and let them run it — which is not a courtesy on top of the rule, it is the only
+form that closes the window.
+
+### The instinct was right; do not learn the wrong lesson
+
+Wanting to watch a reported defect fail yourself rather than accept it on trust is the habit
+this project runs on, and it is why the finding was confirmed rather than assumed. The
+correction is to the instrument, not the instinct. The owner would have run it inside a
+minute and the evidence would have been identical.

@@ -260,8 +260,19 @@ the restore, and it exists however reliable the restore is. So the rule is not "
 `finally`" — though do that too — it is do not open the window at all on a file someone else
 is reading.
 
-**And the lead is not exempt.** Verifying is not a category that excuses a write; a `sed` is
-a write whatever its purpose.
+**The instinct was right and the instrument was wrong** — the distinction matters, because
+the wrong lesson here is "do not verify". Wanting to watch a reported defect fail yourself
+rather than taking it on trust is the habit this whole file is about, and it is why the
+finding was real. `sed` on a live agent's file is simply the wrong way to get that evidence.
+Asking the owner to run it gives the same evidence in the same minute with none of the cost.
+
+**And say what you know, not what you concluded.** The owner reasoned correctly from a
+roster of two while a third party was writing to their file, and named a peer. They had
+evidence for the mechanism and none for the attribution, and reported both at the same
+confidence. What they actually knew was "something outside my script wrote to this file and
+I cannot tell you what", which was the whole of what needed saying. The collision cost
+twenty minutes; the misattribution cost a correct behaviour a black mark, and only the
+second one needed somebody else to undo.
 
 What kept it out of the history was staging by path. A single `git add -A` in that window
 would have committed a deliberately broken component under a commit message about tests,
