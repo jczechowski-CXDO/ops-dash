@@ -2116,6 +2116,42 @@ worth fixing.** "Wrong in the store" was always sufficient to justify `600fdea`;
 mechanism, not carelessness — *reaching for the worst consequence is how a true finding
 acquires a false sentence.*
 
+## Three ways a restore or a retry lies (2026-09-20)
+
+All three found inside one afternoon, all three by the instrument rather than by the work.
+
+**1. `git checkout -- <file>` restores to HEAD, not to your edit.** `m4-entra` restored a
+mutation that way and silently discarded the entire in-progress seam rework, because the file
+was already tracked and HEAD's version was a perfectly good older one. **The suite went green
+immediately afterwards, because green was also HEAD's state** — so the tests confirmed the
+loss instead of catching it. They found it by grepping for a symbol that should have existed.
+For an *untracked* file `git checkout` fails loudly and you notice; for a tracked one it
+succeeds and you do not. **Once a file is tracked, restore a mutation from a copy you made,
+never from HEAD.**
+
+**2. A retried command chain carries the action without the verification.** I ran
+`npm test && git add && git commit`, killed my own shell mid-chain with a `pgrep -f` that
+matched the command containing the pattern, then re-ran *the commit half alone* because I had
+"already run" the tests. I had not — the green run predated the edit that removed an import's
+last use, and the branch went red at `pretest` for every agent until `m4-entra` reported it.
+**An aborted `A && B` is no evidence about A**, and a green line earlier in the session is not
+a claim about the tree as it stands.
+
+**3. A scoped run's typecheck line is a claim about that scope only** — second instance, and
+the first to produce a red branch rather than a slow hour. `npx vitest run --root server <file>`
+printed "Type Errors no errors" against the very file whose unused import `tsc -b` rejects.
+
+## Predict against the assertions that enumerate, not the one whose name matches
+
+`m4-entra` under-predicted two mutation batteries in the same direction and named the pattern
+rather than the instances: **a mutation that ADDS a row breaks every assertion that enumerates
+rows**, not only the test whose name matches the mutation. Emitting a phantom `mfa_gap` on a
+cold start was predicted to redden one test and reddened three — the signal-list enumeration
+and the `lastSeen` sweep fell too, because the phantom row joins both.
+
+This is the useful half of predicting: the *shape* of the miss is reusable where the instance
+is not. Forecast the enumerating assertions first, then the named one.
+
 ## Two agents, one tree (2026-09-20)
 
 `m3-runs` and `m3-prims` each ran mutation batteries that write to a file, run vitest and
