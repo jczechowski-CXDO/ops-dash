@@ -63,6 +63,17 @@ controls, now reachable from his desktop.
   set*: the M3 lesson is that a guard phrased as an absence claim passes over anything it
   did not think to look for.
 
+**Define the seam before either half is built.** `m3-runs`, who asked for this task and has
+spent the milestone on exactly this class of defect, put it best: *the mutating routes and the
+auth check will be written against two different ideas of what "authenticated" means unless one
+of them is published and the other is forbidden from having an opinion.* That is the
+`publishedLevel`/`vendorLevel` fork again — except the failure mode is a route that writes for
+someone who is not who they say they are, rather than a tile that is the wrong colour.
+
+So: one module publishes the answer, a guard restricts who may import the narrow form, and the
+export surface is pinned as a set. **Mechanical, not documentary** — this project has now
+watched three entirely accurate comments fail to prevent the thing they described, in one night.
+
 Open for John, and it changes the work: **is this a shared secret in the config file, or
 does it need to be real sign-in?** The honest recommendation is the former — it matches the
 single-operator reality and can be done in an evening — but it is his call, and the answer

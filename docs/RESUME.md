@@ -1943,6 +1943,23 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
 - ~~**One unexplained `nav item · dark` capture failure**~~ — **closed, and it was never a
   visual regression.** See below.
 
+## Three accurate comments that did not prevent what they described (2026-09-20)
+
+Counted in one night, which is what makes it a pattern rather than an anecdote:
+
+- `web/e2e/support.ts:79` named the `pauseAt` race exactly — *"fast-forward to the past is an
+  error once the page has been open for a moment"* — and shipped the zero-budget form beside it.
+- `server/src/index.ts:154` said of its two codes *"Both are 'we have not read this'"* and then
+  handed the rule two codes where the rule excluded one.
+- The blackout rationale in `rules.ts` argued the cold-start case correctly, in full, without
+  naming it, and the rule fired on every restart for a fortnight.
+
+**A comment describing a hazard is not a mitigation of it**, and worse, an accurate comment
+*reads as a handled case* — which is why two people read `support.ts` and neither noticed. The
+countermeasure is the one already adopted for `publishedLevel`: make it mechanical. A guard,
+a closed set, a pinned export surface. Prose is the third defence and it has now failed three
+times in a row while being entirely correct.
+
 ## The flaky baseline was not a baseline (2026-09-20)
 
 It happened a second time, on a different capture, and `m3-runs` copied the artefact out
@@ -2054,6 +2071,13 @@ So the rule earns a second half. *Say what you know, not what you concluded* —
 conclusion is that something is worse than you have evidence for, that is exactly when to go
 and check.** Pessimism is not a safe default; it is just a different way to be wrong with
 confidence.
+
+`m3-runs` put the sharper version of this, and it is the one to keep: the tempting lesson is
+"check before you claim", but **a finding does not need its worst plausible consequence to be
+worth fixing.** "Wrong in the store" was always sufficient to justify `600fdea`; the
+`incidents90d` sentence was decoration on an argument that did not need it. That is the
+mechanism, not carelessness — *reaching for the worst consequence is how a true finding
+acquires a false sentence.*
 
 ## Two agents, one tree (2026-09-20)
 
