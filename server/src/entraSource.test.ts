@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createApp, ENTRA_SOURCE, ENTRA_INTERVAL_MS } from './index.js';
 import type { FetchLike } from './http/fetchJson.js';
-import type { EntraSnapshot } from '@ops-dash/shared';
 
 /** Obviously fake, like the integration suite's. No test in this repo can reach
  *  the real credential by forgetting to stub something: `createApp` has no token
