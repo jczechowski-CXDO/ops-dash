@@ -1968,6 +1968,19 @@ countermeasure is the one already adopted for `publishedLevel`: make it mechanic
 a closed set, a pinned export surface. Prose is the third defence and it has now failed three
 times in a row while being entirely correct.
 
+**A fifth instance named WHY the shape recurs, which the first four did not.** The Endpoints
+adapter's docblock said *"the screen must never divide it by `total`"* — written deliberately by
+the person who had measured the 81 unscanned machines — while the screen divided it by `total`
+**twice**, once as a fraction and once as a progress bar. `m4-views`' formulation:
+
+> **A comment stating a rule for a file that cannot enforce it is a wish.**
+
+That is the mechanism. The comment lived in the adapter; the violation lived in the view; **no
+artefact spanned them.** Every one of the five has that shape — a rule written where it is known
+and broken where it is not, with nothing in between. So the test is not "is this comment
+accurate" but **"can the file containing this comment fail when the rule is broken?"** If not,
+the rule belongs somewhere that can, or in a guard that reads both ends.
+
 ## The flaky baseline was not a baseline (2026-09-20)
 
 It happened a second time, on a different capture, and `m3-runs` copied the artefact out
