@@ -1330,10 +1330,33 @@ One false survivor too, worth recording because it wastes time: a `sed` mutation
 pattern did not match the file's spacing reported "survived" when nothing had been mutated.
 **Check that a mutation actually changed the file before believing it survived.**
 
-### One open question for John
+### Asking the question found a bug in the answer
 
-The rollup covers all 16 Hornetsecurity services in our datacentres. Some — Security
-Awareness Service, Teams Protection, DMARC Manager — may not be in use, and each one we do
-not use is a tile that can go amber for no reason. `VendorFeed.component` already narrows
-to a named service if we want it. Not urgent: with no proofpoint probe, `ours.total === 0`,
-so the vendor half can never pair with a failing our-half and no Sev1 can fire from this.
+I asked John which Hornetsecurity services are in use, expecting to narrow the rollup. He
+said all of them — and that answer exposed a hole rather than closing one.
+
+The first filter **dropped** any service with no container of ours, reasoning that we are
+not served from that region. Three services are published from exactly one region and it is
+not ours: AI Recipient Validation (Frankfurt), Ticket System (Europe-West), Website
+(Hannover). A service published in one region is delivered to *everyone* from it. So the
+rollup silently covered 16 of 19 services we use — **a quietly shorter list that still read
+healthy**, which is the precise failure this codebase is built against, written by the
+person who has spent all day writing tests against it.
+
+The filter's job is narrower than "keep only our region". It is: **when a service runs in
+several regions, read ours instead of the worst of all of them.** That is all it should do,
+and it is enough to keep a Frankfurt outage of a multi-region product off our tile.
+
+The note now states the split rather than hiding it — "16 read from United States - Atlanta
+/ United States - Georgia, 3 published from one region only" — because a reader who cannot
+see which services were regionally scoped cannot tell how much the filter is doing.
+
+One consequence worth keeping: the total-mismatch check had to move. With the global
+fallback in place, a `locations` list that matches nothing no longer produces an empty
+rollup — it produces a perfectly ordinary unscoped read. So "did ANY service match one of
+our containers" is now asked separately, and a wrong datacentre name still reads `unknown`
+rather than quietly becoming a global estate.
+
+The generalisable bit: **a scoping filter must distinguish "not relevant to us" from "not
+scoped by this vendor".** Treating the second as the first deletes data. That is the same
+error as inferring health from absence, one layer up.

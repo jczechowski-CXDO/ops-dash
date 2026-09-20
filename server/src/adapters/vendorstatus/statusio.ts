@@ -152,32 +152,57 @@ export async function pollStatusio(feed: VendorFeed, fetchImpl?: FetchLike): Pro
     };
   }
 
-  // Narrow to our datacentres. A service with containers but none of ours is
-  // not served to us from there at all, so it is dropped rather than rolled up
-  // — including it would put another region's outage on our tile.
+  // Read each service from OUR datacentre when it has one, and from its global
+  // status when it does not.
+  //
+  // The second half is the correction that matters, and the first version got
+  // it wrong: it DROPPED a service with no container of ours, reasoning that we
+  // are not served from there. But a service published in exactly one region is
+  // delivered to everyone from that region — Hornetsecurity runs three that way
+  // (AI Recipient Validation from Frankfurt, Ticket System from Europe-West,
+  // Website from Hannover). Dropping them produced a quietly shorter list that
+  // still read healthy, which is the failure this codebase exists to prevent,
+  // and John confirmed we use the whole Hornetsecurity estate.
+  //
+  // The filter's real job is narrower than "keep only our region": it is "when a
+  // service runs in several regions, read ours rather than the worst of all of
+  // them". That is what stops a Frankfurt outage of a multi-region product
+  // reaching our tile, and it is all it should do.
   const here = feed.locations;
-  const relevant = here === undefined
-    ? named.map((s) => ({ name: s.name, level: s.level }))
-    : named
-        .map((s) => ({ name: s.name, matched: s.containers.filter((c) => here.includes(c.name)) }))
-        .filter((s) => s.matched.length > 0)
-        .map((s) => ({ name: s.name, level: worstLevel(s.matched.map((c) => c.level)) }));
+  const matchedAny = (s: Service) => (here === undefined ? [] : s.containers.filter((c) => here.includes(c.name)));
+  const relevant = named.map((s) => {
+    const mine = matchedAny(s);
+    return { name: s.name, level: mine.length > 0 ? worstLevel(mine.map((c) => c.level)) : s.level, scoped: mine.length > 0 };
+  });
 
-  if (relevant.length === 0) {
+  // If NOTHING matched, either the datacentre names changed or we are reading
+  // the wrong ones. Checked separately from the rollup above, because with the
+  // global fallback in place a total mismatch would otherwise look like a
+  // perfectly ordinary unscoped read.
+  if (here !== undefined && named.length > 0 && !relevant.some((s) => s.scoped)) {
     return {
       ...result,
       data: unknownVendor(
         feed.platform,
-        here === undefined
-          ? 'The status.io feed published no services to roll up.'
-          : `No status.io service is published for ${here.join(' or ')}. Either the datacentre names changed or we are reading the wrong ones — both mean we cannot see Proofpoint, which is not the same as Proofpoint being well.`,
+        `No status.io service is published for ${here.join(' or ')}. Either the datacentre names changed or we are reading the wrong ones — both mean we cannot see Proofpoint, which is not the same as Proofpoint being well.`,
       ),
+    };
+  }
+
+  if (relevant.length === 0) {
+    return {
+      ...result,
+      data: unknownVendor(feed.platform, 'The status.io feed published no services to roll up.'),
     };
   }
 
   const level = worstLevel(relevant.map((s) => s.level));
   const notOk = relevant.filter((s) => s.level !== 'operational');
-  const where = here === undefined ? '' : ` in ${here.join(' / ')}`;
+  const scopedCount = relevant.filter((s) => s.scoped).length;
+  const where =
+    here === undefined
+      ? ''
+      : ` (${scopedCount} read from ${here.join(' / ')}, ${relevant.length - scopedCount} published from one region only)`;
   const note =
     notOk.length === 0
       ? `status.io reports all ${relevant.length} Hornetsecurity services${where} operational.`

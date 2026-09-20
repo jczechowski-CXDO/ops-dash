@@ -69,13 +69,33 @@ describe('the code map', () => {
 });
 
 describe('pollStatusio against the real captured payload', () => {
-  it('rolls up our datacentres only', async () => {
+  it('covers the WHOLE estate: ours by datacentre, single-region ones globally', async () => {
+    // All 19, not 16. The first version dropped the three services with no US
+    // container — AI Recipient Validation (Frankfurt), Ticket System
+    // (Europe-West), Website (Hannover) — on the reasoning that we are not
+    // served from those regions. But a service published in exactly ONE region
+    // is delivered to everyone from it, and John confirmed we use the whole
+    // Hornetsecurity estate. Dropping them was a quietly shorter list that
+    // still read healthy.
     const r = await pollStatusio(feed(), serve(CAPTURED));
-    // 16 of the 19 are served from one of our two US containers; the other
-    // three (AI Recipient Validation, Ticket System, Website) live only in
-    // Frankfurt, Europe-West and Hannover.
-    expect(r.data!.note).toContain('16 Hornetsecurity services');
+    expect(r.data!.note).toContain('19 Hornetsecurity services');
+    expect(r.data!.note).toContain('16 read from');
+    expect(r.data!.note).toContain('3 published from one region only');
     expect(r.error).toBeUndefined();
+  });
+
+  it('a single-region service going down does reach our tile', async () => {
+    // The consequence of the above, asserted rather than assumed. Frankfurt is
+    // not our datacentre, but AI Recipient Validation is only ever served from
+    // there, so its outage is our outage.
+    const body = withContainer('AI Recipient Validation', 'Germany - Frankfurt', 500);
+    // status.io carries the rollup on the service too; move both, as the real
+    // feed does.
+    const root = body as { result: { status: { name: string; status_code: number }[] } };
+    root.result.status.find((x) => x.name === 'AI Recipient Validation')!.status_code = 500;
+    const r = await pollStatusio(feed(), serve(body));
+    expect(r.data!.level).toBe('outage');
+    expect(r.data!.note).toContain('AI Recipient Validation (Outage)');
   });
 
   it('reads a service from OUR container, not from its global rollup', async () => {
@@ -93,13 +113,18 @@ describe('pollStatusio against the real captured payload', () => {
 
   it('needs BOTH United States names — they are not duplicates', async () => {
     // Atlanta carries the 13 core email services and Georgia the 3 newer 365
-    // products, mutually exclusive. Listing one silently drops a third of the
-    // estate, and a shorter list that still reads healthy is the failure this
-    // whole codebase is built against.
+    // products, mutually exclusive. With only one listed, the other's services
+    // fall back to their GLOBAL status rather than vanishing — so the count
+    // stays at 19 and what changes is how many are read from our region. That
+    // is the honest failure mode: we lose regional precision, not services.
     const atlantaOnly = await pollStatusio(feed({ locations: ['United States - Atlanta'] }), serve(CAPTURED));
+    expect(atlantaOnly.data!.note).toContain('13 read from');
     const georgiaOnly = await pollStatusio(feed({ locations: ['United States - Georgia'] }), serve(CAPTURED));
-    expect(atlantaOnly.data!.note).toContain('13 Hornetsecurity services');
-    expect(georgiaOnly.data!.note).toContain('3 Hornetsecurity services');
+    expect(georgiaOnly.data!.note).toContain('3 read from');
+    // And the cost of getting it wrong, concretely: with only Georgia listed,
+    // `365 Total Backup` is still read regionally but the 13 Atlanta services
+    // are not, so a maintenance window anywhere in the world reaches our tile.
+    expect(georgiaOnly.data!.note).toContain('16 published from one region only');
   });
 
   it('an outage in a datacentre that is not ours does not reach our tile', async () => {
@@ -170,6 +195,11 @@ describe('pollStatusio against the real captured payload', () => {
   it('reads unknown when none of our datacentres appear at all', async () => {
     // Either the names changed or we are reading the wrong ones. Both mean we
     // cannot see Proofpoint, which is not the same as Proofpoint being well.
+    //
+    // Checked separately from the rollup, and that separation is load-bearing:
+    // with the global fallback in place, a total mismatch would otherwise read
+    // as a perfectly ordinary unscoped estate and report `maintenance` as if
+    // everything were fine.
     const r = await pollStatusio(feed({ locations: ['Mars - Olympus'] }), serve(CAPTURED));
     expect(r.data!.level).toBe('unknown');
     expect(r.data!.note).toContain('cannot see Proofpoint');
