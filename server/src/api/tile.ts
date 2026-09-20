@@ -236,6 +236,19 @@ function incidentCount(store: TileStore, serviceId: ServiceId, now: Date): numbe
   // incident that opened four months ago and resolved yesterday is not counted
   // as a new one. Resolved incidents survive 180 days (store/retention.ts), so
   // the ninety-day window is not truncated by pruning.
+  //
+  // NOTE, because the absence looks like a bug and is not: the `service_id`
+  // comparison silently excludes every PLATFORM incident. A `blackout` row
+  // carries `platform:statuspage`, which equals none of the seven service ids,
+  // so it is counted on no tile. That is deliberate and it is the whole point of
+  // the rule — one upstream failure must not print "4 incidents" on four tiles,
+  // which is the over-count `blackout` exists to collapse into one finding.
+  //
+  // The consequence, stated so nobody rediscovers it as a defect: a platform
+  // incident is visible on the SPA only while it is OPEN, via `/api/incidents`,
+  // which serves `openIncidents()`. Once resolved it is reachable nowhere an
+  // operator can get to, though the store keeps it for 180 days. Deliberate for
+  // now; a route to resolved incidents is in the M4 plan.
   return store.incidentsSince(from).filter((row) => row['service_id'] === serviceId && String(row['opened_at']) >= from)
     .length;
 }

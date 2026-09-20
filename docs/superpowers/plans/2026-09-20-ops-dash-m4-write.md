@@ -140,7 +140,13 @@ rather than a wrong number.
    by accident is not.
 3. **`DATA_CONTRACTS.md` §7** promises a Sev2 for a single vendor `unknown` plus our check
    failing. No rule emits one. Either the prose or the engine is wrong.
-4. **Does `DemoModeProvider` die here?** The M1 plan says M4 removes it. But the 152
+4. **Resolved incidents are reachable nowhere.** `/api/incidents` serves open rows only, and
+   `tile.ts`'s count excludes `platform:` ids by design — correctly, since rolling a blackout
+   into its member tiles would print "4 incidents" on four tiles for one upstream failure.
+   The result is that a resolved platform incident sits in the store for 180 days with no
+   route to it. A history route is the honest fix and is M4-sized. **Do not fix it by widening
+   the tile filter** — that trades an invisible row for a lie on four tiles.
+5. **Does `DemoModeProvider` die here?** The M1 plan says M4 removes it. But the 152
    baselines and the offline proof are *built on* `?demo=`, so removing it deletes the
    regression suite along with the affordance. **Recommendation: keep it, dev-gated, and
    strike the M1 note** — the thing that made it a prototype smell was that it was the only

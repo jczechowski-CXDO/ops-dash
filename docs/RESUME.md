@@ -1973,9 +1973,27 @@ Four things this taught, in rising order of generality:
 **A cold start opened a real Sev2.** `INC-119d4dc7`, at 05:16:45Z, one second before the
 server finished booting: all four statuspage services `unknown` because nothing had polled
 yet, which the blackout rule read as a correlated upstream failure. It resolved sixty seconds
-later on the first poll. Every restart minted one, and each counts against `incidents90d` for
-ninety days. Its own summary read *"we have LOST the ability to tell"*, which was false —
-nothing had been lost, nothing had yet been looked at.
+later on the first poll. Every restart minted one. Its own summary read *"we have LOST the
+ability to tell"*, which was false — nothing had been lost, nothing had yet been looked at.
+
+**Correction, and it cuts against me twice.** `600fdea`'s commit message says each one "counts
+against `incidents90d` for ninety days". **It does not, and nothing on screen was ever wrong.**
+`api/tile.ts:239` filters `service_id === serviceId` over the seven; a blackout carries
+`platform:statuspage`, which matches none of them. `m3-runs` checked the code rather than
+taking the report — the same move that found the defect in the first place — and the commit
+message is in history overstating its own finding. The fix is still right: a phantom Sev2 is
+wrong in the store whether or not a tile renders it, and it is briefly *visible* while open,
+because `/api/incidents` serves open rows. But the severity claim was mine and it was inflated.
+
+**The inverse is a real gap, and it is the more interesting half.** `/api/incidents` serves
+`store.openIncidents()` — open rows only. So once a platform incident resolves it is reachable
+**nowhere an operator can get to**: not on a tile (the filter above), not in any stat, and its
+own detail page correctly renders "no open incident X". The store keeps it 180 days and the SPA
+cannot see it. Tonight that is an accident in our favour. As a design fact it wants a decision,
+not a consequence of `serviceId` being a `platform:` pseudo-key. Rolling platform incidents
+into member tiles is the one option to reject outright — it would print "4 incidents" on four
+tiles for one upstream failure, the exact over-count the blackout rule exists to prevent.
+Recorded in the M4 plan as a route to resolved incidents; documented in `tile.ts` meanwhile.
 
 **Fourth instance of the signature defect: two halves each correct, disagreeing about the
 join.** `index.ts` says of the two codes it emits, "No adapter, or never polled. Both are 'we
