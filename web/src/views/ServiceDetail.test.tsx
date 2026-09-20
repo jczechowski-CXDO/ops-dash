@@ -6,7 +6,8 @@ import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import type { CheckRun, ServiceStatus } from '@ops-dash/shared';
 import { fixtures, type DemoMode } from '../fixtures/index.js';
 import ServiceDetail, { uptimeCoverage } from './ServiceDetail.js';
-import { serviceViewOf } from '../live/model.js';
+import { serviceViewOf, sparkSamples } from '../live/model.js';
+import { Sparkline } from '../components/Sparkline.js';
 
 /** The injected service goes in as a `ServiceStatus` and is widened by the same
  *  adapter the app uses. A hand-built `ServiceView` here would let the test pass
@@ -298,5 +299,69 @@ describe('uptimeCoverage — a true number with an honest caption', () => {
     // rather than inventing a duration for it.
     expect(uptimeCoverage({ uptime30d: 1, uptimeFrom: null, uptimeSamples: 0 }))
       .toBe('no runs in the window');
+  });
+});
+
+/* ------------------------------------------------ the two halves of "no line" */
+
+describe('the view and the chart agree about whether anything answered', () => {
+  /**
+   * A seam, asserted as a RELATIONSHIP rather than as two values.
+   *
+   * Two independent definitions of "did any probe answer" now exist, one on
+   * each side of a file boundary: the views guard on
+   * `sparkSamples(spark).values.length === 0` before deciding which empty
+   * sentence to print, and `Sparkline` returns `null` when its own
+   * `answered.length === 0`. They agree today. They are owned by two agents,
+   * they are written in two files, and nothing but this test makes them one
+   * fact.
+   *
+   * The failure they would produce is silent and ugly in exactly the way this
+   * project keeps producing: the view believes a chart exists, so it prints no
+   * empty state, and the component draws nothing — a blank strip where the
+   * sparkline should be, with no sentence explaining it. Neither side is
+   * obviously wrong when you read it.
+   *
+   * So the assertion is the equivalence across several shapes, not the two
+   * current values — the form `allOperational`/`isAffirmed` already uses. A
+   * divergent copy fails this even when it happens to agree on today's data.
+   */
+  const SHAPES: Array<{ name: string; spark: Array<number | null> | null }> = [
+    { name: 'no series at all', spark: null },
+    { name: 'an empty series', spark: [] },
+    { name: 'every probe failed', spark: [null, null, null] },
+    { name: 'one lone answer', spark: [null, 210, null] },
+    { name: 'a clean series', spark: [110, 120, 130] },
+    { name: 'holes among answers', spark: [110, null, 130] },
+    // `0` is a measurement, not a hole: a probe that answered in under a
+    // millisecond must count as "something answered" on both sides.
+    { name: 'a zero measurement', spark: [0] },
+    { name: 'zero among holes', spark: [null, 0, null] },
+  ];
+
+  for (const { name, spark } of SHAPES) {
+    it(`${name}: the view's "nothing answered" is the chart's "nothing to draw"`, () => {
+      const viewSaysNothing = sparkSamples(spark).values.length === 0;
+
+      // The component's own answer, reached WITHOUT calling sparkSamples: render
+      // it and look for a line. Computing both sides from one helper is the
+      // tautology this file's siblings were caught by.
+      const { container, unmount } = render(
+        <Sparkline values={spark ?? []} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const chartDrewNothing = container.querySelector('polyline') === null;
+      unmount();
+
+      expect(viewSaysNothing).toBe(chartDrewNothing);
+    });
+  }
+
+  it('the battery contains both answers, so the equivalence is not vacuous', () => {
+    // Without this, a `sparkSamples` that returned no values for everything
+    // and a `Sparkline` that drew nothing for everything would satisfy every
+    // assertion above.
+    const verdicts = SHAPES.map(({ spark }) => sparkSamples(spark).values.length === 0);
+    expect(verdicts).toContain(true);
+    expect(verdicts).toContain(false);
   });
 });
