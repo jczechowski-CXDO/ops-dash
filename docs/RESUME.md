@@ -1231,3 +1231,54 @@ concatenated rather than deduped, and a failing tenant skipped instead of aborti
 The integration stub caught this change by itself, which is the design working: it 404s
 any URL it was not given, so the new pod-scoped URLs failed loudly rather than quietly
 reporting an empty Zendesk.
+
+
+## Amendment 10 — the first amendment that NARROWS an earlier one (2026-09-19)
+
+Approved by John. Amendment 4 said consumers never infer `operational` from `empty`, and it
+was right about the failure it was written for. What it did not anticipate was a platform
+that publishes **no health field at all**: for Zendesk, `unknown` was not a transient state,
+it was the only state, and the tile could never move. A tile that can never change teaches
+the operator to ignore it exactly as a permanently-red one does — the same failure the probe
+work hit from the other direction on the same day.
+
+**The rule.** A vendor half may read `operational` only when all four hold: the platform
+publishes no health field (`zendesk-ssp` alone, verified twice); the newest poll SUCCEEDED;
+its scoped incident feed shows nothing open; and we have at least one check of our own with
+every one passing. It must then set `vendor.inferred.basis`, and the tile must show the
+reading is ours. **Never downward** — `degraded` and `outage` come from published incidents
+only.
+
+**Why downward is forbidden, and it is not squeamishness.** The Sev1 rule is `vendor
+degraded/outage AND our check failing`. Inferring a vendor outage from our own failing checks
+would fold our half into the vendor half, and the rule would confirm itself from one piece of
+evidence counted twice.
+
+The fourth condition is what keeps the halves independent, and the argument is short enough
+to check: inference fires only when our checks all pass, so it can never satisfy the vendor
+half (`operational` does not), and never suppress one (with our checks failing there is no
+inference, the level stays `unknown`, which also does not). **The rule's behaviour is
+identical before and after — and that is asserted by tests calling the real
+`vendorHalfSatisfied` and `ourCheckFailing`, not argued in a comment.** An amendment that
+claims to leave a rule alone should be made to prove it.
+
+Six mutations, all caught: each of the four conditions dropped in turn, the `inferred` marker
+omitted, and inference made to run downward.
+
+Live afterwards: zendesk `operational`, `2 of 2 of our own checks passing, and no open
+incident published for our pod`. proofpoint and m365 stay `unknown` — condition 1 refusing to
+infer for a platform whose adapter simply does not exist yet, which is the case it was
+written for.
+
+### Two guards caught this, and both were guards written to catch exactly this
+
+The three-way agreement guard failed twice in a row, correctly:
+
+1. I amended the prose in `DATA_CONTRACTS.md` and the type in `contracts.ts` but not the
+   doc's own **type block** — and the doc's type block is the source of record.
+2. Then the doc declared the field across three lines and the conformance test declared it
+   inline on one, so the textual comparison still disagreed.
+
+The second is arguably the guard being fussy about formatting. It is worth keeping anyway:
+the guard's whole job is that the three declarations are transcribed from one another, and a
+transcription that reformats is one a human can no longer diff at a glance.

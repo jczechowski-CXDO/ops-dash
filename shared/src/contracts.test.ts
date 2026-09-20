@@ -84,6 +84,9 @@ describe('contracts — services', () => {
           scheduledFor: string;
           scheduledUntil: string;
         };
+        inferred?: {                    // amendment 10
+          basis: string;
+        };
         incidentsSince: VendorIncident[];
         lastSuccessfulPoll?: string;
         platform: VendorPlatform;

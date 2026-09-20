@@ -94,6 +94,22 @@ export type ServiceStatus = {
       scheduledFor: string;    // ISO 8601
       scheduledUntil: string;  // ISO 8601
     };
+    /** amendment 10 — present when `level` was DERIVED from our own evidence
+     *  rather than published by the vendor; absent means the vendor said it.
+     *
+     *  Only a platform that publishes no health field at all may do this
+     *  (`zendesk-ssp` today), only upward to `operational`, only on a poll that
+     *  SUCCEEDED and showed no open incident, and only when we have at least
+     *  one check of our own and every one passes. See DATA_CONTRACTS amendment
+     *  10 for why each of those four conditions is load-bearing.
+     *
+     *  The tile must show that the reading is ours. A green a user believes the
+     *  vendor affirmed, when it was really our two probes, is a worse lie than
+     *  the grey it replaced. */
+    inferred?: {
+      /** Operator-facing, short: what the claim rests on. */
+      basis: string;
+    };
     /** amendment 2 — everything published since our last SUCCESSFUL poll,
      *  not a current-state diff. */
     incidentsSince: VendorIncident[];

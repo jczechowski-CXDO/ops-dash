@@ -123,6 +123,14 @@ type ServiceStatus = {
       scheduledFor: string;    // ISO 8601
       scheduledUntil: string;  // ISO 8601
     };
+    inferred?: {               // amendment 10 — present when `level` was DERIVED from our own
+      basis: string;           // evidence rather than published by the vendor. Absent means the
+    };                         // vendor said it. Only a platform that publishes no health at
+                               // all may do this, only upward to `operational`, and only when
+                               // every check of ours passes. The tile MUST show that the
+                               // reading is ours: a green the reader believes the vendor
+                               // affirmed, when it was really our two probes, is a worse lie
+                               // than the grey it replaced.
     incidentsSince: VendorIncident[];  // amendment 2 — everything the vendor published since our
                                        // last SUCCESSFUL poll, not a current-state diff
     lastSuccessfulPoll?: string;       // ISO 8601; the lookback anchor for incidentsSince
@@ -471,6 +479,53 @@ casually is not one.
 | 7 | The non-JSON-2xx rule is stated, with `error.code: 'non_json_2xx'` | An expired EPC token returning an HTML sign-in page under HTTP 200 being parsed as a successful poll of zero records |
 | 8 | The `blackout` rule joins section 7's table | The gap amendment 1 left: it stops the false green and raises no alarm about the blindness that replaced it |
 | 9 | `SourceResult.data` becomes optional | `data` was required, so every adapter's error path had to cast past the contract — and code typed on `SourceResult` could write `result.data.components` on an errored result with no type error. Surfaced the first time a real adapter had to return a failure; M1 never noticed because a fixture never fails |
+
+**Amended again 2026-09-19**, approved by John, after Milestone 2 shipped and the Zendesk
+tile had been grey in production for a day.
+
+| # | Change | Prevents |
+|---|---|---|
+| 10 | `ServiceStatus.vendor` gains `inferred?: { basis }`, and a platform that publishes no health MAY report `operational` under the rule below | A permanently-grey tile. Amendment 4 stopped an absent status field reading as green; it also left Zendesk unable to read anything *but* grey, and a tile that can never change teaches the operator to ignore it exactly as a permanently-red one does |
+
+### Amendment 10, in full
+
+This is the one amendment that **narrows** amendment 4, so it is written out rather than
+compressed into the table.
+
+Amendment 4 says consumers never infer `operational` from `empty`. That stands. What it did
+not anticipate is a platform that publishes **no health field at all** — Zendesk's SSP
+publishes incidents and nothing else, verified twice against the live feed, once with the
+account subdomain applied. For such a platform `unknown` is not a transient state, it is the
+only state, and the tile can never move.
+
+Zendesk's own status page renders green for "no open incident". We decline that inference on
+the vendor's behalf — but we are entitled to make a statement about **our own evidence**, and
+we have two direct checks of our two tenants answering in tens of milliseconds.
+
+So: a vendor half MAY report `operational` when **all** of the following hold.
+
+1. The platform is one that publishes no health field. Today that is `zendesk-ssp` alone. A
+   platform that normally publishes health and returned `unknown` this time has genuinely
+   failed to tell us something, and must stay `unknown`.
+2. The newest poll **succeeded**. A failed read is never inferred over — that is the rule the
+   whole product rests on and amendment 10 does not touch it.
+3. Its scoped incident feed shows **no open incident**.
+4. We have **at least one** check of our own for that service, and **every one passes**. No
+   evidence is not evidence: `total === 0` infers nothing, matching `ourCheckFailing`.
+
+When it does, it MUST set `vendor.inferred.basis` naming what the claim rests on, and the tile
+MUST show that the reading is ours rather than the vendor's. `inferred` absent means the
+vendor said it.
+
+A level is **never** inferred downward. `degraded` and `outage` come from published incidents
+only — inferring an outage from our own failing checks would double-count our half into the
+vendor half, and the Sev1 rule is `vendor degraded/outage AND our check failing`. Both halves
+must stay independently sourced or the rule confirms itself.
+
+That independence is preserved by condition 4: inference only fires when our checks all pass,
+so it can never satisfy the vendor half of a Sev1 (`operational` does not), and it can never
+suppress one (if our checks were failing, no inference happens and the level stays `unknown`,
+which also does not satisfy it). The rule's behaviour is unchanged in both directions.
 
 Amendment 3 note: CrowdStrike is a plausible eighth tile later — the credential and a
 `pull_falcon.py` already exist — but it is not one of the seven verified feeds, so it is not in

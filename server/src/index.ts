@@ -21,9 +21,9 @@
  *     service nobody notices is missing.
  */
 
-import type { ServiceId, StatusLevel, VendorPlatform, Incident, CheckRun } from '@ops-dash/shared';
+import type { ServiceId, VendorPlatform, Incident, CheckRun } from '@ops-dash/shared';
 import { openStore, type Store } from './store/db.js';
-import { currentLevel } from './store/currentLevel.js';
+import { vendorLevel } from './store/currentLevel.js';
 import { loadVendorFeeds } from './adapters/vendorstatus/common.js';
 import { pollVendor } from './adapters/vendorstatus/index.js';
 import { runAll, DEFAULT_PROBES } from './adapters/synthetic/runner.js';
@@ -130,11 +130,13 @@ export function createApp(opts: AppOptions = {}) {
       const platform = SERVICE_PLATFORM[id];
       const snapshot = store.getSnapshot(vendorSource(id));
 
-      // `currentLevel`, never `data.level`. A degraded snapshot's payload is
-      // history: the last reading we could actually take. Feeding it to a live
-      // rule would open a Sev1 on evidence that is minutes old — see the
-      // argument in store/currentLevel.ts.
-      const level: StatusLevel = currentLevel(snapshot);
+      // `vendorLevel`, never `data.level`. A degraded snapshot's payload is
+      // history: the last reading we could actually take, and feeding it to a
+      // live rule would open a Sev1 on minutes-old evidence. `vendorLevel` also
+      // applies amendment 10 — see store/currentLevel.ts for why it needs both
+      // halves and why it can only ever move a level upward.
+      const ours = oursFor(store, id);
+      const { level } = vendorLevel(snapshot, platform, ours);
       let errorCode: string | undefined;
       if (!snapshot) {
         // No adapter, or never polled. Both are "we have not read this", and
@@ -148,7 +150,7 @@ export function createApp(opts: AppOptions = {}) {
       return {
         serviceId: id,
         vendor: { level, platform, ...(errorCode ? { errorCode } : {}) },
-        ours: oursFor(store, id),
+        ours,
       };
     });
   }

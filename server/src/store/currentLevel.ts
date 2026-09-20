@@ -1,4 +1,4 @@
-import type { SourceResult, StatusLevel } from '@ops-dash/shared';
+import type { SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
 
 /** The vendor payload shape a snapshot carries, narrowed to the one field this
  *  module reads. Deliberately structural rather than importing `Vendor` from an
@@ -57,4 +57,78 @@ export function isStatusLevel(value: unknown): value is StatusLevel {
     value === 'maintenance' ||
     value === 'unknown'
   );
+}
+
+/* ------------------------------------------------------ amendment 10 */
+
+/**
+ * Platforms that publish **no health field at all**, only incidents.
+ *
+ * `zendesk-ssp` alone, and it was verified twice against the live feed — the
+ * second time with the account subdomain applied, because pod scoping was the
+ * obvious thing that might have changed the answer. It did not: service
+ * attributes are `deprecated, description, hasSubservices, name, position,
+ * slug` either way, and no `status.json` / `summary.json` / `components.json`
+ * endpoint exists.
+ *
+ * A Set rather than a check inside the function, because the membership is the
+ * claim. Adding a platform here says "we have looked, and this one never tells
+ * us how it is" — which is a finding about a vendor, not a default.
+ */
+export const PLATFORMS_WITHOUT_PUBLISHED_HEALTH: ReadonlySet<VendorPlatform> = new Set<VendorPlatform>([
+  'zendesk-ssp',
+]);
+
+/**
+ * The vendor half, with amendment 10 applied.
+ *
+ * Amendment 4 stopped an absent status field reading as green. It also left
+ * Zendesk unable to read anything *but* grey — `unknown` was not a transient
+ * state there, it was the only state — and a tile that can never move teaches
+ * the operator to ignore it exactly as a permanently-red one does.
+ *
+ * So for a platform that publishes no health, we may make a statement about
+ * **our own evidence**: no open incident on our pod, and every check of ours
+ * passing. Four conditions, each load-bearing, each with its own test:
+ *
+ *   1. the platform publishes no health — one that normally does and said
+ *      `unknown` has genuinely failed to tell us something
+ *   2. the newest poll SUCCEEDED — a failed read is never inferred over
+ *   3. no open incident — otherwise the published level already speaks
+ *   4. at least one check of ours, and all of them passing — no evidence is
+ *      not evidence, matching `ourCheckFailing`'s treatment of `total === 0`
+ *
+ * Never downward. `degraded` and `outage` come from published incidents only:
+ * inferring an outage from our own failing checks would fold our half into the
+ * vendor half, and the Sev1 rule is `vendor degraded/outage AND our check
+ * failing`. Both halves must stay independently sourced or the rule confirms
+ * itself.
+ *
+ * Condition 4 is what keeps that true. Inference fires only when our checks all
+ * pass, so it can never satisfy the vendor half (`operational` does not), and
+ * never suppress one (if our checks were failing there is no inference and the
+ * level stays `unknown`, which also does not). The rule is unchanged in both
+ * directions — asserted, not asserted-about.
+ */
+export function vendorLevel(
+  snapshot: SourceResult<unknown> | undefined,
+  platform: VendorPlatform,
+  ours: { passing: number; total: number },
+): { level: StatusLevel; inferred?: { basis: string } } {
+  const published = currentLevel(snapshot);
+  // The vendor spoke. Nothing to infer, in either direction.
+  if (published !== 'unknown') return { level: published };
+  if (!PLATFORMS_WITHOUT_PUBLISHED_HEALTH.has(platform)) return { level: 'unknown' };
+  // Conditions 2 and 3. `currentLevel` already returned `unknown` for a failed
+  // read, but it returns `unknown` for several reasons and only one of them is
+  // inferable, so this re-checks rather than trusting the shared verdict.
+  if (!snapshot || snapshot.error) return { level: 'unknown' };
+  if (ours.total === 0 || ours.passing < ours.total) return { level: 'unknown' };
+
+  return {
+    level: 'operational',
+    inferred: {
+      basis: `${ours.passing} of ${ours.total} of our own checks passing, and no open incident published for our pod`,
+    },
+  };
 }
