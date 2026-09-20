@@ -1920,11 +1920,16 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
   legitimately** so growth is not mistaken for the finding: `check_runs` gains ~250 rows an
   hour all night and should, while `snapshots` must stay pinned at seven.
 
-  **And one honest limit, because a soak that overclaims is worse than none.** Retention is 45
-  days against a database created this morning, so the hourly prune will correctly delete zero
-  rows every time it runs. **This night cannot prove retention works** — its only evidence
-  remains unit tests, and "survives a night" must never be read as "retention verified in
-  production". That needs a seeded-old-rows run against a scratch db and is its own task.
+  **One limit, stated accurately on the second attempt.** Retention is 45 days against a
+  database created this morning, so the hourly prune correctly deletes zero rows all night and
+  P9 pins that. My first version of this line went further — "this night cannot prove retention
+  works, its only evidence remains unit tests, and that needs a seeded-old-rows run against a
+  scratch db, which is its own task." **The task already exists.** `retention.test.ts` seeds
+  old rows against a real file at `mkdtempSync`, calls `prune(NOW)` with **no override** so the
+  production 45/180 constants are the ones under test, and asserts the boundary row, the
+  idempotent second pass, the FK cascade, the kept-open incident, and that a 30-day p95 and
+  `uptime30d` are identical before and after. Retention is well covered. What the night adds is
+  only that the *scheduled* prune fires and reports, which is P9 and nothing more.
 - **Three services have no probe of our own** — proofpoint, claude, openai — which is why
   the Overview reads 3 affirmed / 4 unknown rather than 6 / 1, and why five of seven have no
   `uptime30d`. Credential-free product endpoints exist for all three and are stable
@@ -2022,6 +2027,33 @@ no way to express.* That is not a gap in the tests' rigour; it is a gap in their
 and no amount of mutation testing inside that vocabulary would have surfaced it. **It is the
 argument for the soak, and it arrived fifteen minutes in.** A definition of done that lists
 "survives a night" is not asking for an uptime figure — this is what it is for.
+
+## Three overstatements in one night, all leaning the same way (2026-09-20)
+
+Worth recording as a pattern rather than three corrections, because the direction was constant
+and I did not notice it until the third.
+
+| Claimed | Actually |
+|---|---|
+| the open incident is "proofpoint reading `maintenance`" | resolved after 60s, and `blackout` on `platform:statuspage` — `maintenance` cannot open an incident at all |
+| each phantom Sev2 "counts against `incidents90d` for ninety days" | counts on no tile; `tile.ts` filters `platform:` ids out. Nothing on screen was ever wrong |
+| "this night cannot prove retention works … its own task" | the task exists and passes, against a real file, on the production constants |
+
+Every one was checkable in a single grep. Every one made a finding sound **worse** than it was,
+which is the direction that feels like rigour and is not — an inflated defect buys the same
+false confidence as a missed one, just spent differently, and it sends the next person to fix
+something that is not broken. Two were caught by `m3-runs` reading the code without access to
+the running store; the third I found by finally checking my own.
+
+The common mechanism is the one already recorded one section down: **I reported a conclusion
+where I had a count.** `SELECT count(*)` became a cause, "a phantom row exists" became "it
+corrupts a published number", and "the soak cannot show this" became "nothing shows this". In
+each case the true statement was available and smaller.
+
+So the rule earns a second half. *Say what you know, not what you concluded* — **and when the
+conclusion is that something is worse than you have evidence for, that is exactly when to go
+and check.** Pessimism is not a safe default; it is just a different way to be wrong with
+confidence.
 
 ## Two agents, one tree (2026-09-20)
 
