@@ -191,6 +191,42 @@ discipline about *when* you stage. Prefer it always; it costs nothing when you a
 working order is `git commit -F <msgfile> -- <paths>`. The natural way to type it is the way
 that breaks.
 
+**And it does not work for a NEW file**, because a pathspec is matched against *tracked* files
+and an untracked one is not among them. Verified:
+
+```
+git commit -m x -- brand-new.txt
+  error: pathspec 'brand-new.txt' did not match any file(s) known to git
+
+git add brand-new.txt && git commit -m x -- brand-new.txt
+  1 file changed                      <- only that file, peers' staged work untouched
+```
+
+So a new file needs both. **The `--` is what keeps the commit honest, not the absence of
+staging** — even with a peer's work sitting in the index, only the named paths are committed.
+It leaves a one-command window where your file is staged, which is far smaller than the
+`add` → run tests → `commit` window that swallowed four files earlier today, but it is not
+zero and the rule above implies it is.
+
+## A grep-based guard is blind to indirection, not to intent
+
+Three now, all defeated the same way, none of them by anybody trying to evade a rule:
+
+| guard | blind to |
+|---|---|
+| only `Icon.tsx` may use `dangerouslySetInnerHTML` (G0) | `{...rest}` spreading the prop in |
+| `PARTIAL_READ_CODES` must register every emitted code | the code hoisted to a `const` |
+| every served contract field must be named | the fields arriving by spread of the store's flags |
+
+Nobody was hiding anything in any of these. The value simply was not *spelled* at the point the
+grep was looking, and a grep can only see spellings.
+
+**So the question to ask of a new grep-based guard is: what shape is this value at the moment
+it is produced?** If the answer is a spread, an alias, a computed key or a constant, the grep
+will pass and the guard will look like coverage. The alternatives are an enumeration over a
+real artefact — a booted route table, a resolved import graph, a folded set — or a type that
+makes the omission fail to compile.
+
 ## Four ways a mutation battery lies to you
 
 All found in one afternoon, all by agents who were being careful about everything else.
