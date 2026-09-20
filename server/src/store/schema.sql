@@ -34,7 +34,8 @@ PRAGMA journal_size_limit = 67108864;
 -- stale badge, never zeros dressed as fresh.
 CREATE TABLE IF NOT EXISTS snapshots (
   source            TEXT PRIMARY KEY,
-  payload           TEXT,               -- last SUCCESSFUL SourceResult. NULL until one succeeds.
+  payload           TEXT,               -- last SourceResult that CARRIED DATA - a clean read, or a
+                                        -- partial one. NULL until a poll returns something to draw.
   fetched_at        TEXT,               -- when that successful one was fetched
   last_attempt_at   TEXT NOT NULL,      -- every poll, success or not
   last_error        TEXT                -- the failed attempt's error as JSON; NULL if the last attempt was good

@@ -18,6 +18,41 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 export type Store = ReturnType<typeof openStore>;
 
+/**
+ * The error codes that mean **"this read PARTLY succeeded, and the data is
+ * real"** — as opposed to "the read failed and the adapter synthesised a
+ * placeholder so the panel has something to say".
+ *
+ * Both shapes carry `data` AND `error`, which is why the obvious discriminator
+ * does not work and why this list exists. The contract is explicit that the two
+ * fields are independent (`SourceResult`'s docblock: *"never infer one from the
+ * other"*), and it describes BOTH producers:
+ *
+ *   - a vendor adapter whose feed 503'd returns `data` holding a vendor at
+ *     `unknown` whose note explains that we could not read it. That object is
+ *     **manufactured from the failure**, not measured. It must never overwrite
+ *     the stored last-good payload — that is G0 BLOCKER 2, and
+ *     `currentLevel.test.ts` pins it.
+ *   - `pollEntra` hitting its page budget returns most of the real answer plus
+ *     "these counts are lower bounds". That data **was measured** and there is
+ *     no other copy of it anywhere.
+ *
+ * Nothing in the frozen contract distinguishes them, and it cannot be inferred:
+ * both are `degraded: true` with a payload and a code. So it is a closed,
+ * argued set of codes, in the shape `engine/rules.ts`'s `NOT_BLINDNESS_YET`
+ * already established for exactly this kind of question.
+ *
+ * **The default is the safe direction.** A code that is not listed here behaves
+ * as it always has — the payload is not written and the last-good survives. So
+ * a new adapter that forgets to register cannot silently destroy history; it
+ * merely does not gain the new behaviour, which is visible as a stale panel
+ * rather than as wrong numbers.
+ *
+ * Adding an entry is a deliberate act with a failing test attached, and it
+ * belongs to whoever owns the adapter that emits the code.
+ */
+export const PARTIAL_READ_CODES: ReadonlySet<string> = new Set(['entra_partial']);
+
 /** One `incident_actions` row, out of SQLite's untyped record and into the
  *  shape the pure fold takes. `until` is coerced to `string | null` and never
  *  to `undefined`: absent is not zero and it crosses every boundary in this
@@ -75,6 +110,23 @@ export function openStore(path = 'ops-dash.sqlite') {
       `INSERT INTO snapshots (source, payload, fetched_at, last_attempt_at, last_error)
        VALUES (?, NULL, NULL, ?, ?)
        ON CONFLICT(source) DO UPDATE SET last_attempt_at = excluded.last_attempt_at,
+         last_error = excluded.last_error`,
+    ),
+    // BOTH at once: a read that produced data AND has something to say about
+    // what it could not reach. `pollEntra`'s partial is the live case — most of
+    // the answer, plus "these counts are lower bounds". Writing it through
+    // `putFailed` discarded the payload, and writing it through `putGood` would
+    // throw the reason away instead; neither is the truth, so it gets its own
+    // statement rather than being forced into one of the other two.
+    //
+    // No DDL change was needed for this — the columns were always able to hold
+    // a payload and an error together. What was wrong was `putSnapshot` treating
+    // the two writers as exhaustive.
+    putPartial: db.prepare(
+      `INSERT INTO snapshots (source, payload, fetched_at, last_attempt_at, last_error)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(source) DO UPDATE SET payload = excluded.payload,
+         fetched_at = excluded.fetched_at, last_attempt_at = excluded.last_attempt_at,
          last_error = excluded.last_error`,
     ),
     getSnapshot: db.prepare(
@@ -259,9 +311,48 @@ export function openStore(path = 'ops-dash.sqlite') {
     db,
     close: () => db.close(),
 
+    /**
+     * Three outcomes, not two.
+     *
+     * The contract decided this and this function used to disagree with it.
+     * `SourceResult`'s own docblock: *"`data` and `error` are NOT mutually
+     * exclusive ... Branch on `error` for the stale badge and on `data` for
+     * whether there is anything to draw; **never infer one from the other**."*
+     * The old two-branch form inferred exactly that — it read "has an error" as
+     * "has no payload" and dropped the data on the floor.
+     *
+     *   error, code in PARTIAL_READ_CODES -> a partial read. The data is real
+     *                       and exists nowhere else, so keep the payload AND the
+     *                       error together.
+     *   error, anything else -> the read failed. Whatever `data` it carries is a
+     *                       placeholder manufactured from the failure, so the
+     *                       previous good payload stays where it is and becomes
+     *                       the stale panel's content. This is the default, and
+     *                       it is the safe direction.
+     *   no error         -> a clean read. Replaces the payload and clears the
+     *                       error.
+     *
+     * The middle branch is NOT `result.data === undefined`. That was the first
+     * fix and it was wrong: a vendor adapter whose feed 503'd returns a
+     * synthesised `unknown` payload alongside its error, so keying on the
+     * payload's presence overwrote a real `operational` reading with a
+     * manufactured one. `currentLevel.test.ts`'s G2 HIGH 4 test caught it
+     * immediately, which is the system working.
+     *
+     * A partial OVERWRITES an older fully-good payload, deliberately. It is
+     * newer real data, and the alternative is worse in a way that is hard to
+     * see: `getSnapshot` composes `{...good, degraded: true, error}`, so keeping
+     * the older payload would render an earlier poll's numbers underneath this
+     * poll's "these counts are lower bounds" — a true sentence about the wrong
+     * data. Newer-and-labelled beats older-and-mislabelled.
+     */
     putSnapshot(source: string, result: SourceResult<unknown>) {
-      if (result.error) {
+      if (result.error && !(result.data !== undefined && PARTIAL_READ_CODES.has(result.error.code))) {
         stmt.putFailed.run(source, result.fetchedAt, JSON.stringify(result.error));
+      } else if (result.error) {
+        stmt.putPartial.run(
+          source, JSON.stringify(result), result.fetchedAt, result.fetchedAt, JSON.stringify(result.error),
+        );
       } else {
         stmt.putGood.run(source, JSON.stringify(result), result.fetchedAt, result.fetchedAt);
       }

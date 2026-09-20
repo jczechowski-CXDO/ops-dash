@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openStore, type Store } from './db.js';
+import { openStore, PARTIAL_READ_CODES, type Store } from './db.js';
+import type { SourceResult } from '@ops-dash/shared';
 import type { CheckRun } from '@ops-dash/shared';
 
 const run = (over: Partial<CheckRun> = {}): CheckRun => ({
@@ -215,5 +216,141 @@ describe('an incident id is stable, so an ack is not orphaned', () => {
     expect(s.openIncidents()).toHaveLength(1);
     s.putIncident({ ...inc, resolvedAt: '2026-09-19T11:00:00.000Z' });
     expect(s.openIncidents()).toHaveLength(0);
+  });
+});
+
+describe('a partial read is not a failed read', () => {
+  /**
+   * Reported by `m4-auth`, confirmed here, and the contract had already decided
+   * it. `SourceResult`'s own docblock says:
+   *
+   *   "`data` and `error` are NOT mutually exclusive ... Branch on `error` for
+   *    the stale badge and on `data` for whether there is anything to draw;
+   *    never infer one from the other."
+   *
+   * `putSnapshot` inferred exactly that — it read "has an error" as "has no
+   * payload" and dropped the data. Right for a transport failure, where there
+   * genuinely is nothing to keep; wrong for `pollEntra`'s partial, which is a
+   * successful read of most of the answer plus an honest note about the rest.
+   */
+  const partial = (at: string, count: number): SourceResult<unknown> => ({
+    data: { signals: count },
+    fetchedAt: at,
+    degraded: true,
+    error: { code: 'entra_partial', message: 'These counts are lower bounds: one page failed.' },
+  });
+
+  it('keeps the payload AND the error when both are present', () => {
+    const s = open(':memory:');
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 7));
+    const back = s.getSnapshot('entra');
+    expect(back?.data, 'the payload must survive a partial').toEqual({ signals: 7 });
+    expect(back?.error?.code).toBe('entra_partial');
+    expect(back?.degraded).toBe(true);
+
+    // The COLUMN, by raw SQL — a second, independent path to the same fact.
+    // Without this the assertions above are satisfied by the error that rides
+    // along inside the stored envelope, and `last_error` could be left NULL
+    // with nothing noticing. Two reachable definitions of "was the last attempt
+    // clean" must agree, or ops inspecting the table by hand sees a row that
+    // contradicts what the API serves from it.
+    const raw = s.db.prepare('SELECT payload, fetched_at, last_error FROM snapshots WHERE source = ?')
+      .get('entra') as { payload: string | null; fetched_at: string | null; last_error: string | null };
+    expect(raw.payload, 'the payload column really holds the partial').not.toBeNull();
+    expect(raw.fetched_at).toBe('2026-09-20T12:00:00.000Z');
+    expect(JSON.parse(raw.last_error!).code).toBe('entra_partial');
+  });
+
+  it('a FIRST poll that is partial serves data, not "we could not look"', () => {
+    // The cold start. Three components on this project have shipped or nearly
+    // shipped a cold-start defect; this is the store's. A fresh database whose
+    // very first Entra poll is partial reached the browser with no data at all,
+    // so the SPA rendered "we could not look" for a poll that looked and got
+    // most of it.
+    const s = open(':memory:');
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 7));
+    expect(s.getSnapshot('entra')?.data).toBeDefined();
+  });
+
+  it('a later partial describes ITS OWN numbers, not an older poll’s', () => {
+    // The consequence that would have been hard to find. `getSnapshot`
+    // composes `{...good, degraded: true, error}` — so with the partial's
+    // payload discarded, the screen showed counts from an EARLIER successful
+    // poll underneath the sentence "these counts are lower bounds: one page
+    // failed". A true sentence about the wrong numbers, which is the same
+    // family as a false colour, one level of indirection out.
+    const s = open(':memory:');
+    s.putSnapshot('entra', { data: { signals: 3 }, fetchedAt: '2026-09-20T11:00:00.000Z', degraded: false });
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 9));
+    const back = s.getSnapshot('entra');
+    expect(back?.data, 'the message and the numbers must describe one poll').toEqual({ signals: 9 });
+    expect(back?.fetchedAt).toBe('2026-09-20T12:00:00.000Z');
+  });
+
+  it('still drops nothing when a TRANSPORT failure follows a partial', () => {
+    // A real failure after a partial keeps the partial as the last-good, marked
+    // with the new error. The fallback chain still works; it just has one more
+    // rung than it did.
+    const s = open(':memory:');
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 9));
+    s.putSnapshot('entra', {
+      fetchedAt: '2026-09-20T12:01:00.000Z', degraded: true,
+      error: { code: 'http_503', message: 'Service Unavailable' },
+    });
+    const back = s.getSnapshot('entra');
+    expect(back?.data, 'the partial is still the best data we have').toEqual({ signals: 9 });
+    expect(back?.error?.code, 'but the newest failure is what is reported').toBe('http_503');
+  });
+
+  it('a transport failure with no payload is STILL written as a failure', () => {
+    // The branch that was already right must stay right. Without this the fix
+    // could pass every test above by simply never calling putFailed.
+    const s = open(':memory:');
+    s.putSnapshot('x', {
+      fetchedAt: '2026-09-20T12:00:00.000Z', degraded: true,
+      error: { code: 'http_500', message: 'nope' },
+    });
+    const back = s.getSnapshot('x');
+    expect(back?.data, 'a failed transport has nothing to draw').toBeUndefined();
+    expect(back?.error?.code).toBe('http_500');
+  });
+
+  it('a later FULL success clears the partial’s error', () => {
+    const s = open(':memory:');
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 9));
+    s.putSnapshot('entra', { data: { signals: 12 }, fetchedAt: '2026-09-20T12:05:00.000Z', degraded: false });
+    const back = s.getSnapshot('entra');
+    expect(back?.data).toEqual({ signals: 12 });
+    expect(back?.error, 'a clean poll is not degraded by the last one').toBeUndefined();
+    expect(back?.degraded).toBe(false);
+  });
+
+  it('the partial-code set is not empty \u2014 it cannot be inert', () => {
+    // Every "safe direction" assertion in this file would pass vacuously
+    // against an empty set, because the default branch is the old behaviour.
+    // This is the positive anchor that stops the whole feature being decoration.
+    expect(PARTIAL_READ_CODES.size).toBeGreaterThan(0);
+    expect(PARTIAL_READ_CODES.has('entra_partial')).toBe(true);
+  });
+
+  it('a payload carried by an UNLISTED error code does not overwrite last-good', () => {
+    // The rule the first version of this fix got wrong, stated where the
+    // behaviour is. A vendor adapter whose feed 503'd returns a synthesised
+    // `unknown` alongside its error; that object is manufactured FROM the
+    // failure, not measured, and letting it land would destroy a real reading
+    // — G0 BLOCKER 2. Keying on the payload's presence did exactly that.
+    const s = open(':memory:');
+    s.putSnapshot('vendor:jira', {
+      data: { level: 'operational' }, fetchedAt: '2026-09-20T11:00:00.000Z', degraded: false,
+    });
+    s.putSnapshot('vendor:jira', {
+      data: { level: 'unknown' },     // manufactured by the adapter from the failure
+      fetchedAt: '2026-09-20T12:00:00.000Z',
+      degraded: true,
+      error: { code: 'http_503', message: 'Service Unavailable' },
+    });
+    const back = s.getSnapshot('vendor:jira');
+    expect(back?.data, 'the real reading must survive the manufactured one').toEqual({ level: 'operational' });
+    expect(back?.error?.code).toBe('http_503');
   });
 });
