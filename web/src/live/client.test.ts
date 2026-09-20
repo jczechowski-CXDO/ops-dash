@@ -93,13 +93,24 @@ describe('getJson never throws and says which failure it was', () => {
   });
 });
 
-describe('the door is same-origin and carries no credential', () => {
-  it('requests the literal path, with no origin and no cookies', async () => {
+describe('the door is same-origin, and sends credentials no further', () => {
+  it('requests the literal path, and carries our own session and nothing else', async () => {
     const spy = stub({ body: '{}' });
     await getJson('/api/health');
     const [url, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
     expect(url).toBe('/api/health');
-    expect(init['credentials']).toBe('omit');
+    // `same-origin`, not `omit`. `omit` was right while there was no auth and
+    // became an assertion that auth could not work: the server issues an
+    // HttpOnly session cookie and the SPA could never hold it, so
+    // `auth.authenticated` was permanently false in the browser.
+    //
+    // Pinned as the one allowed value rather than as "not include". A negative
+    // passes for a missing key, which silently restores the default — the
+    // absence-claim failure this repo has now hit five times.
+    expect(init['credentials']).toBe('same-origin');
+    // No bearer anywhere: the cookie is HttpOnly, so no code in this app can
+    // read it, and nothing here assembles an Authorization header.
+    expect(Object.keys(init['headers'] as object)).toEqual(['accept']);
   });
 
   it('passes the caller\'s signal through, so a poll can be cancelled', async () => {
@@ -139,11 +150,14 @@ describe('the one route that takes an argument is still built here', () => {
     expect(checksPath('m365')).toBe('/api/checks?service=m365');
   });
 
-  it('carries the same no-credential terms as every other read', async () => {
+  it('carries the same credential terms as every other read', async () => {
+    // The route that builds its own path must not also acquire its own request
+    // terms. Asserted against the same literal the collection routes are
+    // asserted against, so the two cannot drift into two answers.
     const spy = stub({ body: '{"fetchedAt":"t","degraded":false,"data":[]}' });
     await apiClient.checks('zendesk');
     const [, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
-    expect(init['credentials']).toBe('omit');
+    expect(init['credentials']).toBe('same-origin');
     expect('signal' in init).toBe(false);
   });
 

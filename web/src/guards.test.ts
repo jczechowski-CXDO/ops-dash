@@ -206,16 +206,25 @@ describe('nothing reaches off-box', () => {
     expect(src().some((f) => f === DOOR)).toBe(true);
   });
 
-  it('the one door opens onto our own origin only, with no credential', () => {
+  it('the one door opens onto our own origin only, and sends credentials no further', () => {
     const code = stripComments(read(DOOR));
     // Same-origin paths, spelled as literals in a union type. An absolute URL
     // or a protocol-relative one in this file would be a target outside the
     // CSP's `connect-src 'self'` and outside anything we control.
     expect(code).not.toMatch(/https?:\/\/|(^|[^:])\/\/[a-z0-9.-]+\.[a-z]{2,}/i);
-    // Positive, not merely the absence of a bad thing: the door must SAY it
-    // sends no credential. A missing option defaults to 'same-origin'.
-    expect(code).toMatch(/credentials:\s*'omit'/);
-    expect(code).not.toMatch(/Authorization|credentials:\s*'(include|same-origin)'/i);
+    // POSITIVE, and that is the half that carries the claim. This pinned
+    // `'omit'` until Milestone 4, which was right while there was no auth and
+    // became an assertion that auth could not work: the server issues an
+    // HttpOnly session cookie and `omit` meant the SPA could never hold it.
+    //
+    // The literal moved; the STRUCTURE did not, deliberately. Replacing this
+    // with "never `include`, never `Authorization`" was proposed and is the
+    // absence-claim failure this file has now hit five times — a pure negative
+    // passes for a missing option, for a typo, and for no `credentials` key at
+    // all, any of which silently restores the default. One allowed value,
+    // spelled out, with the negatives as companions underneath.
+    expect(code).toMatch(/credentials:\s*'same-origin'/);
+    expect(code).not.toMatch(/Authorization|credentials:\s*'(include|omit)'/i);
   });
 
   it('the guard above can fail — the patterns are not inert', () => {

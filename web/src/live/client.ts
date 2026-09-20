@@ -23,9 +23,23 @@ import type { ServiceId } from '@ops-dash/shared';
  *     our own source can decide where this process connects. The CSP in
  *     `index.html` says `connect-src 'self'` and this is the code-side half of
  *     that same claim.
- *   - **no credentials**. `fetch` defaults to `same-origin` credentials; there
- *     is no auth in Milestone 3 (`/api/health` reports `auth: {mode:'none'}`)
- *     and nothing here sends a header, a cookie by choice, or reads a secret.
+ *   - **same-origin credentials, and nothing else**. This said `omit` until
+ *     Milestone 4, and the paragraph explaining why said there was no auth and
+ *     that `/api/health` reported `auth: {mode:'none'}`. Both are now false:
+ *     `/api/session` is live and issues an `HttpOnly` session cookie. `omit`
+ *     was not neutral once that existed — it meant the SPA could never hold a
+ *     session the server was issuing, so `auth.authenticated` was permanently
+ *     false in the browser and the whole seam could not be exercised end to
+ *     end by anybody.
+ *
+ *     `same-origin` is the narrowest value that works, and it is spelled out
+ *     rather than defaulted so the choice is visible: never `include`, which
+ *     would attach credentials to a cross-origin request — impossible here
+ *     while `ApiPath` stays a union of paths, and the point is that it stays
+ *     impossible by two independent mechanisms rather than one. Nothing here
+ *     sends an `Authorization` header or reads a secret: the cookie is
+ *     `HttpOnly`, so no JavaScript in this app can see it, and the only code
+ *     that ever names it is the server's.
  *
  * ## It never throws
  *
@@ -155,10 +169,11 @@ async function request(path: string, signal?: AbortSignal): Promise<Fetched> {
   let response: Response;
   try {
     response = await fetch(path, {
-      // Spelled out rather than defaulted. `omit` is not the default, and a
-      // dashboard that quietly starts sending cookies the day something sets
-      // one is a dashboard that has acquired an auth surface nobody designed.
-      credentials: 'omit',
+      // Spelled out rather than defaulted, and `same-origin` rather than
+      // `include`: the session cookie must reach our own API and may never
+      // reach anything else. `ApiPath` already makes a cross-origin request
+      // unexpressible; this makes it harmless if that ever stopped being true.
+      credentials: 'same-origin',
       cache: 'no-store',
       headers: { accept: 'application/json' },
       ...(signal ? { signal } : {}),
