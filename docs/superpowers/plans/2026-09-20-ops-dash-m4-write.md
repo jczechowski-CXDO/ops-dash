@@ -74,10 +74,22 @@ So: one module publishes the answer, a guard restricts who may import the narrow
 export surface is pinned as a set. **Mechanical, not documentary** — this project has now
 watched three entirely accurate comments fail to prevent the thing they described, in one night.
 
-Open for John, and it changes the work: **is this a shared secret in the config file, or
-does it need to be real sign-in?** The honest recommendation is the former — it matches the
-single-operator reality and can be done in an evening — but it is his call, and the answer
-determines whether Task 1 is one task or a milestone of its own.
+**RULED 2026-09-20 by John: a local user.** Not federated sign-in, not Entra SSO — a
+credential this box owns. Wave 1 is unblocked and Task 1 is one task, not a milestone.
+
+The shape follows the pattern already proven here by the Graph credential: a file outside the
+repo at `~/.config/ops-dash/auth.json`, mode 600, read through an env var, holding a username
+and a **hash** — never a plaintext password, and never a path, hash or secret transcribed into
+source, which `web/src/guards.test.ts` already fails the build over. Sessions are a signed
+cookie with `HttpOnly`, `SameSite=Strict`, and `Secure` off only while this is plain HTTP on a
+LAN — which is itself a line on the release list, not a decision to forget.
+
+**One thing to get right that is not about auth at all.** The routes and the check will be
+written against two different ideas of what "authenticated" means unless one module publishes
+the answer and everything else is forbidden an opinion — the `publishedLevel`/`vendorLevel`
+fork, except the failure mode is a route that writes for someone who is not who they say they
+are. Define the seam before either half is built, pin the export surface as a set, and make the
+route-table guard the deliverable.
 
 ## Wave 2 — after the seam lands
 
@@ -157,11 +169,11 @@ rather than a wrong number.
    The result is that a resolved platform incident sits in the store for 180 days with no
    route to it. A history route is the honest fix and is M4-sized. **Do not fix it by widening
    the tile filter** — that trades an invisible row for a lie on four tiles.
-5. **Does `DemoModeProvider` die here?** The M1 plan says M4 removes it. But the 152
-   baselines and the offline proof are *built on* `?demo=`, so removing it deletes the
-   regression suite along with the affordance. **Recommendation: keep it, dev-gated, and
-   strike the M1 note** — the thing that made it a prototype smell was that it was the only
-   way to reach both states, and since M3 it is not. Do not remove it silently.
+5. ~~**Does `DemoModeProvider` die here?**~~ **RULED 2026-09-20: it stays.** The M1 plan's
+   instruction to delete it is struck, in the file itself. It read as a prototype smell only
+   because in M1 the toggle was the only way to reach both worlds; since M3 it is not, and
+   deleting it would take the 152 baselines and the offline proof with it. The control is
+   already dev-gated, which was the whole objection.
 
 ## Explicitly NOT in M4
 

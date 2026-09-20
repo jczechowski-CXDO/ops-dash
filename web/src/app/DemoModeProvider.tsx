@@ -26,8 +26,22 @@ export const DEMO_PARAM = 'demo';
  *  and the README both intend — in production the toggle is an affordance we do
  *  not want. It gates the CONTROL, not the mode: `?demo=` below works in every
  *  build, because Task 10A screenshots the production bundle and a mode nothing
- *  can reach there is a mode that ships unbaselined (G2 HIGH-2). Milestone 4
- *  deletes this provider along with the footer. */
+ *  can reach there is a mode that ships unbaselined (G2 HIGH-2).
+ *
+ *  RULED 2026-09-20 (John delegated the call): **this provider STAYS.** The M1
+ *  plan said Milestone 4 would delete it, and that instruction is now struck.
+ *
+ *  The reason it read as a prototype smell was that in Milestone 1 it was the
+ *  only way to reach both worlds, so the toggle *was* the product. Since M3 it
+ *  is not: the dashboard renders live vendor data and `?demo=` is the fixture
+ *  path beside it. What deleting it would actually remove is the 152 visual
+ *  baselines and the offline proof, both of which are built on `?demo=` — the
+ *  regression suite would go out with the affordance. The control is already
+ *  dev-gated, which was the whole of the objection.
+ *
+ *  Revisit only if the fixtures stop being the baseline mechanism. Until then a
+ *  deletion here is a deletion of the test suite, and the plan's instruction was
+ *  written before the thing that made it wrong existed. */
 export const DEMO_TOGGLE_VISIBLE = import.meta.env.DEV;
 
 /** A tripwire, not a lookup. If `DemoMode` gains a third world this object stops
