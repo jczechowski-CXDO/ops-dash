@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { SourceStatus } from '../poller/schedule.js';
 import { createSchedule } from '../poller/schedule.js';
-import { sourceStaleness, staleSources, staleThresholdMs, STALE_FLOOR_MS, STALE_INTERVALS } from './staleness.js';
+import { sourceStaleness, staleThresholdMs, STALE_FLOOR_MS, STALE_INTERVALS } from './staleness.js';
 
 const NOW = Date.UTC(2026, 8, 19, 12, 0, 0);
 const MINUTE = 60_000;
@@ -130,23 +130,6 @@ describe('a source that has never succeeded', () => {
   it('is stale rather than throwing when the timestamp is unreadable', () => {
     const s = sourceStaleness(status({ lastOkAt: 'not a date' }), NOW);
     expect(s).toEqual({ stale: true, reason: 'silent', thresholdMs: 3 * MINUTE });
-  });
-});
-
-describe('staleSources', () => {
-  it('names the stale ones and only the stale ones', () => {
-    const all: Record<string, SourceStatus> = {
-      'vendor:jira': status({ lastOkAt: agoMs(30_000) }),
-      'vendor:m365': status({ lastOkAt: undefined }),
-      'probe:zendesk': status({ lastOkAt: agoMs(20 * MINUTE) }),
-    };
-    const out = staleSources(all, NOW);
-    expect(Object.keys(out).sort()).toEqual(['probe:zendesk', 'vendor:m365']);
-    expect(out['vendor:m365']!.reason).toBe('never-succeeded');
-  });
-
-  it('is empty when every source is answering', () => {
-    expect(staleSources({ a: status(), b: status({ intervalMs: 15 * MINUTE }) }, NOW)).toEqual({});
   });
 });
 

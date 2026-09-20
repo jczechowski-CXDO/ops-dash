@@ -1482,7 +1482,9 @@ This generalises the corollary already in this file — *assert what a value mus
 what it must not be* — to guards specifically, where the temptation is strongest because an
 empty offender list is so obviously what success looks like:
 
-**A guard must assert what it CAN see, not only what it did not find.**
+**A guard must assert what it CAN see, not only what it did not find.** The API agent's own
+phrasing is sharper and is the one to keep: *an absence-claim fails by matching nothing, so
+it has to be anchored to something it must find.*
 
 Two further details from the same guard, both worth copying:
 
@@ -1509,3 +1511,51 @@ sets it to 64 MB on the connection that matters.
 decelerating but not flat. At a sustained 1 MB/minute that is 1.4 GB/day, which would be a
 leak; early Node growth from JIT and connection pools is also normal and does plateau. Only
 a longer run separates the two, which is the entire reason the long run exists.
+
+
+## 135 e2e tests had been failing since the commit that closed Milestone 1 (2026-09-20)
+
+The largest instance of this project's central lesson so far, and it was found by accident.
+
+`web/e2e/support.ts:113` kills CSS transitions with `page.addStyleTag({ content })`, an
+inline `<style>`. Milestone 1's Task 11A — the security review — added `style-src 'self'` to
+`web/index.html`. Inline styles have been refused ever since:
+
+```
+Error: page.addStyleTag: Applying inline style violates the following Content
+Security Policy directive 'style-src 'self''
+```
+
+135 failed, 22 passed, 1 skipped.
+
+**Nothing since M1 caused it.** `git diff 3b992c0..HEAD -- web/index.html web/e2e/support.ts`
+is empty: both files are byte-identical to the commit that closed the milestone. The web
+agent reproduced it independently at HEAD in a throwaway worktree before I had told them the
+cause, so the diagnosis is confirmed from two directions.
+
+M1 was closed claiming *"153 e2e tests, 152 visual baselines"* passing, and that claim became
+false **in the same commit that made it** — the security task added the CSP and the suite was
+never re-run. Milestones 2 and 3 were then verified against a suite that had already been
+dead for the whole of their duration, and I ran `npm test` perhaps forty times this session
+without once running `npm run test:e2e`.
+
+The lesson is not "run the e2e suite". It is the one already at the top of `CLAUDE.md`,
+applied to a whole suite rather than a single assertion: **a check that is not run is
+indistinguishable from a check that passes**, and the project's habit of trusting a green
+`npm test` made a 135-test hole invisible for two milestones. Anything that is part of the
+definition of done has to be part of the command that says done.
+
+### What the web agent did when the safety net turned out to be missing
+
+Worth recording separately, because the instinct is the point. With the visual suite
+unusable they did not proceed unverified and did not regenerate anything. They built HEAD
+and their own tree, served both, captured 9 routes x 2 worlds x 2 themes at 1440 from each,
+and hashed the results.
+
+That found **four real visual regressions from their own work** — a wrapper `div` that
+stopped the vendor card stretching to the row height, and an added "latest N ms" line — both
+fixed before commit.
+
+It also measured something useful: the noise floor of that improvised harness is non-zero,
+and HEAD-against-HEAD differs on one of the same captures — **precisely because
+`killTransitions` cannot run.** The broken thing was measurable through the hole it left.

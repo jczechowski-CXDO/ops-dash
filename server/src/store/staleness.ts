@@ -125,16 +125,3 @@ export function sourceStaleness(status: SourceStatus, now: Date | number): Stale
   const skippingNow = Number.isFinite(skipMs) && nowMs - skipMs <= thresholdMs;
   return { stale: true, reason: skippingNow ? 'wedged' : 'silent', ageMs, thresholdMs };
 }
-
-/** Every stale source, by name. The shape a health route wants: absent means
- *  nothing is stale, and a name present is a source not to be trusted. */
-export function staleSources(
-  all: Record<string, SourceStatus>,
-  now: Date | number,
-): Record<string, Staleness> {
-  return Object.fromEntries(
-    Object.entries(all)
-      .map(([name, st]) => [name, sourceStaleness(st, now)] as const)
-      .filter(([, s]) => s.stale),
-  );
-}
