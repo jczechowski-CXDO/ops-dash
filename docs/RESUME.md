@@ -2183,6 +2183,47 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## A shared branch moves faster than a message crosses it (2026-09-20)
+
+`m4-entra` counted it: **five of the last seven messages they received described a state that had
+already changed.** A `TS6133` fixed before it was reported. A syntax error fixed twenty minutes
+before four separate agents reported it. A guard narrowed twenty-six seconds after the commit
+that tripped it. Nobody was careless — with five agents committing, the tree moves faster than
+a report crosses the channel.
+
+**The habit, not a rule: re-run the check before acting on someone else's red, and state the
+timestamp you measured at.** Ninety seconds.
+
+### The worked example is mine, and it is the case where it changes the remedy
+
+A credential-shaped literal turned up in a test file. I assessed it and reported: *"untracked,
+never committed, nothing in `git log -S` history"* — and concluded benign. **The conclusion was
+right. One premise was false**: the file had been committed twenty-six seconds earlier.
+
+The separation that matters:
+
+| the question | answered by | stable? |
+|---|---|---|
+| **is it real?** | hash it against the live credential | **yes** — a value does not stop matching |
+| **where has it been?** | `git log`, `ls-files`, history search | **no** — volatile in seconds on this branch |
+
+I reported both with the same confidence and only one of them keeps. Had the value been real,
+*untracked* versus *committed* is the difference between deleting a file and rewriting a pushed
+history — so an assessment resting on the volatile half would have prescribed the wrong remedy
+**in a confident voice**, which is what makes a wrong remedy get followed.
+
+**So: for a possible-secret assessment, re-run the history half at the moment of acting, and
+carry the timestamp with the finding.**
+
+### And the handling that was right, recorded because the benign outcome is the trap
+
+`m4-email` found it, identified **which pattern fired and on which line**, **did not read the
+value**, and escalated it as urgent on the assumption it was real. It cost four minutes to
+disprove.
+
+**Treating an unknown as the bad case is correct even when the answer turns out benign —
+especially then.** A benign outcome is exactly what tempts the next person not to bother.
+
 ## Four ways a restore or a retry lies (2026-09-20)
 
 All four found inside one afternoon, all four by the instrument rather than by the work — and
