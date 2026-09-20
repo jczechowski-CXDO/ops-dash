@@ -12,6 +12,8 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @ops-dash/web",
+    "dev:server": "npm run build:server && node --watch server/dist/main.js",
+    "start": "npm run build:server && node server/dist/main.js",
     "build": "npm run build --workspace @ops-dash/web",
     "preview": "npm run preview --workspace @ops-dash/web",
     "pretest": "npm run typecheck",
@@ -21,7 +23,8 @@
     "test:e2e:update": "playwright test --config web/playwright.config.ts --update-snapshots",
     "typecheck": "tsc -b shared web server",
     "icons": "npm run icons --workspace @ops-dash/web",
-    "fonts": "npm run fonts --workspace @ops-dash/web"
+    "fonts": "npm run fonts --workspace @ops-dash/web",
+    "build:server": "tsc -p server/tsconfig.build.json && node server/scripts/copy-assets.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

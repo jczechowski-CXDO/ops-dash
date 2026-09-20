@@ -39,3 +39,6 @@ Thumbs.db
 
 # SDD workspace (scratch, per-plan)
 .superpowers/
+
+# Server build output
+server/dist/
