@@ -6,6 +6,7 @@ import type { SourceStatus } from '../poller/schedule.js';
 // would be a second place for a stale `operational` to leak out, and the two
 // would agree right up until the day they did not.
 import { currentLevel } from '../store/currentLevel.js';
+import { buildTile, type ServiceTile, type TileStore } from './tile.js';
 
 /**
  * The read-only API.
@@ -25,12 +26,15 @@ import { currentLevel } from '../store/currentLevel.js';
  *    six payloads and one error object. The transport succeeded; the source
  *    did not. Those are different facts and the status code describes the
  *    first one. A 5xx here would blank six healthy panels over one bad feed.
- *  - **Almost nothing is derived.** The store already returns the last good
- *    payload with the last failure attached; this file re-derives none of it.
- *    Branch on `error` for the stale badge and on `data` for whether there is
- *    anything to draw — never infer one from the other (amendment 9).
+ *  - **The vendor's payload is never derived from.** The store already returns
+ *    the last good payload with the last failure attached; this file re-derives
+ *    none of it. Branch on `error` for the stale badge and on `data` for
+ *    whether there is anything to draw — never infer one from the other
+ *    (amendment 9).
  *
- *    The one exception is `ServiceEntry.currentLevel`, and it sits BESIDE the
+ *    Two things are computed BESIDE the mirror, and neither touches it.
+ *
+ *    The first is `ServiceEntry.currentLevel`, and it sits BESIDE the
  *    envelope rather than inside it. A pure mirror hands the client
  *    `data.level: 'operational'` for a vendor we have not read since
  *    breakfast, and `statusColor()` takes exactly that field — so "every
@@ -39,6 +43,15 @@ import { currentLevel } from '../store/currentLevel.js';
  *    raw token", which cost this repo 42 contrast failures in one wave. The
  *    mirror stays byte for byte; the safe reading is served next to it, so
  *    getting it right is the easy path rather than the remembered one.
+ *
+ *    The second is our own half of each tile — `ours`, the latencies, the
+ *    sparkline, uptime, the incident count — which is not the vendor's claim at
+ *    all but a reading of our own store, and `tile.ts` owns every decision in
+ *    it. The one that matters: **an absent measurement crosses the wire as
+ *    `null`, never as 0 and never as an omitted key.** Five of the seven
+ *    services have no probe of their own today, so that is the common path
+ *    rather than the edge case, and a zero there would render as a real
+ *    measurement of a thing nobody measured.
  *
  * ## The auth seam, deliberately visible
  *
@@ -57,7 +70,7 @@ import { currentLevel } from '../store/currentLevel.js';
  *  one whose every read throws — the only honest way to exercise the store
  *  half of `/api/health`. `routes.test.ts` asserts the real `Store` satisfies
  *  this, so a rename in `db.ts` fails there rather than at composition. */
-export type ApiStore = {
+export type ApiStore = TileStore & {
   getSnapshot(source: string): SourceResult<unknown> | undefined;
   openIncidents(): Array<Record<string, unknown>>;
 };
@@ -71,6 +84,10 @@ export type ApiPoller = {
 
 export type ApiDeps = {
   store: ApiStore;
+  /** Injected for the same reason `correlate` takes `at`: a route that reads
+   *  the clock cannot be tested for what it does at a particular moment. The
+   *  30- and 90-day windows on every tile are measured from here. */
+  now?: () => Date;
   /** Optional: `index.ts` attaches one, a route test need not. Absent is
    *  reported as `configured: false, ok: false` — a poller that is not running
    *  is not a healthy poller. */
@@ -122,6 +139,22 @@ export type ServiceEntry = {
    *  one definition: the API and the correlator cannot disagree about whether
    *  a vendor is green. */
   currentLevel: StatusLevel;
+} & Omit<ServiceTile, 'error'> & {
+  /**
+   * `ServiceTile.error`, renamed at this boundary.
+   *
+   * The tile's fields are flattened onto the entry so that they carry the
+   * frozen contract's own names — `ours`, `latencyMs`, `spark`, `uptime30d`
+   * and the rest line up one-to-one with `ServiceStatus`, and a field the web
+   * forgets to map is a typecheck failure there rather than a blank stat. The
+   * one field that cannot keep its name is `error`, because `result.error` is
+   * already on this object and means something entirely different: that one is
+   * the vendor feed failing, this one is OUR STORE failing to answer.
+   *
+   * When it is present, every `null` above is ignorance rather than
+   * measurement, and the client must not render either as a number.
+   */
+  metricsError?: ServiceTile['error'];
 };
 
 export type ServicesResponse = {
@@ -314,9 +347,11 @@ function toIncident(row: Record<string, unknown>): ApiIncident {
 
 export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
   const { store, poller } = deps;
+  const clock = deps.now ?? (() => new Date());
 
   app.get('/api/services', async (): Promise<ServicesResponse> => {
-    const servedAt = now();
+    const at = clock();
+    const servedAt = at.toISOString();
     return {
       servedAt,
       services: SERVICE_ORDER.map((id) => {
@@ -331,9 +366,21 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
           // One service's read failing must not blank the other six.
           result = storeUnavailable(servedAt, cause);
         }
+        // Our own half. `buildTile` never throws — it catches its own reads,
+        // because one unreadable service must not blank the other six — and
+        // every absent measurement comes back as `null` rather than as a zero
+        // that would render as a reading. See `tile.ts` for each decision.
+        const { error: metricsError, ...tile } = buildTile(store, id, at);
         // Derived BESIDE the mirror, never instead of it: `result` is
         // untouched and `currentLevel` is the safe reading of it.
-        return { id, source, result, currentLevel: currentLevel(result) };
+        return {
+          id,
+          source,
+          result,
+          currentLevel: currentLevel(result),
+          ...tile,
+          ...(metricsError ? { metricsError } : {}),
+        };
       }),
     };
   });

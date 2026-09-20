@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import type { SourceResult } from '@ops-dash/shared';
+import type { CheckRun, SourceResult } from '@ops-dash/shared';
 import { openStore, type Store } from '../store/db.js';
 import { createSchedule, type Source, type SourceStatus } from '../poller/schedule.js';
 import {
@@ -62,6 +62,18 @@ const brokenStore = (): ApiStore => ({
   openIncidents() {
     throw new Error('database connection is not open');
   },
+  runsFor() {
+    throw new Error('database connection is not open');
+  },
+  percentiles() {
+    throw new Error('database connection is not open');
+  },
+  uptime() {
+    throw new Error('database connection is not open');
+  },
+  incidentsSince() {
+    throw new Error('database connection is not open');
+  },
 });
 
 const get = async (deps: { store: ApiStore; poller?: ApiPoller }, url: string) => {
@@ -84,6 +96,10 @@ describe('the API depends on the store only through a shape the store really has
     const widened: ApiStore = memStore();
     expect(typeof widened.getSnapshot).toBe('function');
     expect(typeof widened.openIncidents).toBe('function');
+    expect(typeof widened.runsFor).toBe('function');
+    expect(typeof widened.percentiles).toBe('function');
+    expect(typeof widened.uptime).toBe('function');
+    expect(typeof widened.incidentsSince).toBe('function');
   });
 });
 
@@ -225,6 +241,160 @@ describe('GET /api/services mirrors SourceResult outward unchanged', () => {
     expect(services).toHaveLength(7);
     expect(services.every((s) => s.result.error?.code === 'store_unavailable')).toBe(true);
     expect(services.every((s) => s.result.data === undefined)).toBe(true);
+  });
+});
+
+/* ------------------------------------------- /api/services: the whole tile */
+
+describe('GET /api/services serves our half as measurements or as nulls', () => {
+  /** Months away from the wall clock, on purpose. Dated today, every window
+   *  assertion below passed just as happily with the injected clock ignored. */
+  const NOW = new Date('2026-06-01T12:00:00.000Z');
+  const minutesBefore = (n: number) => new Date(NOW.getTime() - n * 60_000).toISOString();
+
+  const addRun = (store: Store, over: Partial<CheckRun> & { at: string }) =>
+    store.addRun({
+      serviceId: 'zendesk',
+      check: 'Help centre reachable',
+      region: 'us-east',
+      result: 'pass',
+      latencyMs: 120,
+      ...over,
+    });
+
+  const services = async (store: ApiStore) => {
+    const app = buildApi({ store, now: () => NOW });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/services' });
+      return { raw: res.body, entries: (res.json() as ServicesResponse).services };
+    } finally {
+      await app.close();
+    }
+  };
+
+  it('gives a service with no probe of its own nulls, not zeros — the common case', async () => {
+    // Five of the seven have no probe today. Every literal below is the value
+    // that must NOT be a number.
+    const [m365] = (await services(memStore())).entries.filter((s) => s.id === 'm365');
+    expect(m365).toMatchObject({
+      ours: {
+        level: 'unknown',
+        label: 'No checks',
+        note: 'No probe of ours has ever run for this service.',
+        passing: 0,
+        total: 0,
+      },
+      latencyMs: null,
+      p50Ms: null,
+      p95Ms: null,
+      spark: null,
+      uptime30d: null,
+      incidents90d: 0,
+      lastStateChange: null,
+    });
+    // Measurement absent is not the same as the store failing, and only one of
+    // the two may claim the operator's attention.
+    expect(m365!.metricsError).toBeUndefined();
+  });
+
+  it('carries the nulls over the wire as nulls, so a spread cannot restore a fixture', async () => {
+    // The decision this route turns on: `null`, not an omitted key. An omitted
+    // key survives `{ ...defaults, ...entry }` in the web layer and silently
+    // puts a fixture's 99.98% back on the tile. Asserted against the raw JSON
+    // body, not the parsed object, because that is where the difference lives.
+    const { raw } = await services(memStore());
+    const m365 = (JSON.parse(raw) as { services: Array<Record<string, unknown>> }).services.find(
+      (s) => s['id'] === 'm365',
+    )!;
+    expect(Object.keys(m365)).toEqual(
+      expect.arrayContaining(['uptime30d', 'p50Ms', 'p95Ms', 'spark', 'latencyMs', 'lastStateChange']),
+    );
+    expect(raw).toContain('"uptime30d":null');
+  });
+
+  it('serves the measurements it does have, beside the vendor mirror it does not touch', async () => {
+    const store = memStore();
+    store.putSnapshot(vendorSource('zendesk'), good('operational', '2026-09-19T11:59:00.000Z'));
+    addRun(store, { at: minutesBefore(3), latencyMs: 100 });
+    addRun(store, { at: minutesBefore(2), latencyMs: 200 });
+    addRun(store, { at: minutesBefore(1), latencyMs: 150 });
+
+    const zendesk = (await services(store)).entries.find((s) => s.id === 'zendesk')!;
+    expect(zendesk.ours.level).toBe('operational');
+    expect(zendesk.ours.total).toBe(1);
+    expect(zendesk.latencyMs).toBe(150);
+    expect(zendesk.spark).toEqual([100, 200, 150]);
+    expect(zendesk.uptime30d).toBe(1);
+    expect(zendesk.currentLevel).toBe('operational');
+    expect(zendesk.result.fetchedAt).toBe('2026-09-19T11:59:00.000Z');
+  });
+
+  it('measures its windows from the injected clock, not from the wall clock', async () => {
+    // One day before the INJECTED now, which is months before the wall clock.
+    // Read from the injected clock the run is inside the 30-day window and
+    // uptime is 1; read from `new Date()` it is long outside it and uptime is
+    // null. The two clocks give different answers, which is the only way this
+    // test can see the difference — with NOW set to the day it was written it
+    // passed with the injection removed.
+    const store = memStore();
+    addRun(store, { at: new Date(NOW.getTime() - 86_400_000).toISOString() });
+    const zendesk = (await services(store)).entries.find((s) => s.id === 'zendesk')!;
+    expect(zendesk.uptime30d).toBe(1);
+
+    // And the run really is outside a wall-clock window, so the assertion above
+    // is about the clock and not about the store holding nothing.
+    const wallClock = buildApi({ store });
+    try {
+      const res = await wallClock.inject({ method: 'GET', url: '/api/services' });
+      const entry = (res.json() as ServicesResponse).services.find((s) => s.id === 'zendesk')!;
+      expect(entry.uptime30d).toBe(null);
+    } finally {
+      await wallClock.close();
+    }
+  });
+
+  it('a store that throws reports metricsError and never a zero measurement', async () => {
+    const entries = (await services(brokenStore())).entries;
+    expect(entries).toHaveLength(7);
+    for (const entry of entries) {
+      expect(entry.metricsError).toEqual({
+        code: 'store_unavailable',
+        message:
+          'probe history: database connection is not open; incidents: database connection is not open',
+      });
+      expect(entry.ours).toEqual({
+        level: 'unknown',
+        label: 'Unknown',
+        note: 'Our probe history could not be read.',
+        passing: 0,
+        total: 0,
+      });
+      expect(entry.uptime30d).toBe(null);
+      expect(entry.latencyMs).toBe(null);
+      expect(entry.p50Ms).toBe(null);
+      expect(entry.p95Ms).toBe(null);
+      expect(entry.spark).toBe(null);
+      expect(entry.incidents90d).toBe(null);
+      expect(entry.lastStateChange).toBe(null);
+    }
+  });
+
+  it('one service’s unreadable history does not take the other six down with it', async () => {
+    const real = memStore();
+    addRun(real, { at: minutesBefore(1), latencyMs: 90 });
+    const store: ApiStore = {
+      ...real,
+      runsFor: (id, limit) => {
+        if (id === 'jira') throw new Error('disk I/O error');
+        return real.runsFor(id, limit);
+      },
+    };
+
+    const entries = (await services(store)).entries;
+    expect(entries.find((s) => s.id === 'jira')!.metricsError?.message).toBe('probe history: disk I/O error');
+    const zendesk = entries.find((s) => s.id === 'zendesk')!;
+    expect(zendesk.metricsError).toBeUndefined();
+    expect(zendesk.latencyMs).toBe(90);
   });
 });
 
