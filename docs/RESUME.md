@@ -2183,6 +2183,66 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## A magic string is the divergence nothing typechecks (2026-09-20)
+
+Three agents named one concept three different ways, without conferring:
+
+```
+entra_partial   adapters/entra/index.ts:377        registered
+epc_partial     adapters/endpoints/index.ts:204    NOT registered
+partial_read    adapters/email/index.ts:214        NOT registered
+```
+
+`PARTIAL_READ_CODES` had **one entry against three producers**, so the commit that fixed the
+partial-read defect fixed a third of it and said the class was closed. The severe case was
+Endpoints: two of the 213 real machines have no check-in time and always will, so that adapter
+takes the partial path on **every poll of the live estate** — the screen stays permanently
+blank, and the fix left it exactly as it was.
+
+**This is the `ageLabel`/`publishedLevel` family with a different tell, which is why the
+existing entries would not have prompted anyone to look.** Those were divergent
+*implementations* — two functions doing one job. This was divergence in **a string another
+module keys off**. A published helper cannot be spelled two ways by accident; a magic string
+can, and nothing typechecks it.
+
+**And the safe default is what hid it.** An unregistered code does not destroy history, it
+merely does not gain the feature — which is the right design and was argued for as a virtue.
+It is also why the gap failed as a silently blank screen rather than as something anyone
+trips over. **A safe default is not a substitute for being complete.**
+
+The cure is the familiar one — `db.test.ts` now greps the adapters for any partial-shaped
+code that is not registered and fails naming it, two independently-reachable definitions
+compared, neither derived from the other, anchored positively on both sides. Watched failing
+on the **real historical gap** rather than a synthetic one.
+
+**A threshold that did not fire, and why.** The lead set one: *at three entries, take it to the
+contract, because one entry is a special case and three is a category the type system should
+carry.* It reached three within the hour. It stays a closed set anyway — because the reason
+for wanting a contract field was **mechanical enforcement**, and the guard now provides that by
+comparing two reachable definitions, which is this repo's preferred form regardless. The
+threshold was right to set; the thing that would have justified the amendment arrived by
+another route.
+
+## Every walk-and-assert guard needs its corpus pinned, not a parallel one (2026-09-20)
+
+`m4-views` shipped this hole **twice in one day** and asked for it recorded as a pattern rather
+than as two incidents, which is the right instinct — the shape will outlive them.
+
+Both times the guard walked a file list, asserted "no offender found", and carried a
+non-vacuity check on a **separate call** to the corpus function rather than on the corpus the
+guard actually read. Pointing the walk at an empty list left every test green: *no offender
+found* is exactly what a walk over nothing reports, and a parallel computation being non-empty
+proves nothing about the one that matters.
+
+Both were found by mutation, neither by review — including once in a guard that had been
+reviewed.
+
+**So: a walk-and-assert guard needs a non-vacuity line covering BOTH the corpus and the match
+count.** Not that some list is non-empty — that *this* walk read these named files, and that
+the matcher found what it should have found. The existing entries in this file said "assert the
+positive set"; this is the same rule applied to the *input* rather than the output, and saying
+it that way is what makes it checkable.
+
 ## A shared branch moves faster than a message crosses it (2026-09-20)
 
 `m4-entra` counted it: **five of the last seven messages they received described a state that had
