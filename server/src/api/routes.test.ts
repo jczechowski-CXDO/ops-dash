@@ -21,6 +21,7 @@ import {
   type HealthResponse,
   CHECKS_PAGE,
 } from './routes.js';
+import type { SessionAuth } from '../auth/session.js';
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -82,6 +83,29 @@ const brokenStore = (): ApiStore => ({
   incidentsSince() {
     throw new Error('database connection is not open');
   },
+});
+
+/**
+ * A stand-in for the published decision, for the routes that are not about auth.
+ *
+ * It implements `SessionAuth` and answers one way, which is the point: these
+ * tests assert what a route DOES for a given answer, and the auth module's own
+ * tests assert how that answer is reached. A route test that had to build a
+ * real credential file and a real cookie to check a JSON shape would be testing
+ * both halves and telling you about neither.
+ *
+ * Note what it cannot do: it cannot make the hook let a `required` route
+ * through without a principal, because `decide` returning `authenticated: true`
+ * is the only path that sets one.
+ */
+const authAs = (username: string | null): SessionAuth => ({
+  decide: () =>
+    username === null
+      ? { authenticated: false, status: 401, error: { code: 'unauthenticated', message: 'this route needs a session; sign in first' } }
+      : { authenticated: true, principal: { username } },
+  login: () => ({ ok: false, status: 503, error: { code: 'not_in_this_test', message: 'login is exercised in auth/session.test.ts' } }),
+  logoutCookie: () => 'ops_dash_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+  configured: () => username !== null,
 });
 
 const get = async (deps: ApiDeps, url: string) => {
@@ -707,10 +731,16 @@ describe('GET /api/health reports the store and the poller separately', () => {
     expect(health.poller.ok).toBe(false);
   });
 
-  it('names the unfilled auth seam rather than pretending it is not there', async () => {
+  it('names the state of the auth seam, and says so about THIS host', async () => {
+    // Was `mode: 'none'` through M3 — the seam existed and nothing filled it,
+    // and this route said so rather than staying quiet. It is filled now, so
+    // the honest answer moved: `unconfigured` when this box has no operator
+    // credential (which is this test's world), `local-user` when it has one.
+    // The full pair, and the redaction that comes with it, are asserted end to
+    // end in `auth/session.test.ts`.
     const store = memStore();
-    const { body } = await get({ store }, '/api/health');
-    expect((body as HealthResponse).auth.mode).toBe('none');
+    const { body } = await get({ store, auth: authAs(null) }, '/api/health');
+    expect((body as HealthResponse).auth).toMatchObject({ mode: 'unconfigured', authenticated: false });
   });
 });
 
@@ -882,9 +912,13 @@ describe('GET /api/health watches the credential this process authenticates with
   });
   afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
+  /** Signed in, because the certificate block is disclosed to an operator only
+   *  — see the redaction tests below, which are about exactly that line. */
   const graph = async (deps: Partial<ApiDeps>, now: Date) => {
-    const { body } = await get({ store: memStore(), now: () => now, ...deps }, '/api/health');
-    return (body as HealthResponse).credential.graph;
+    const { body } = await get({ store: memStore(), now: () => now, auth: authAs('operator'), ...deps }, '/api/health');
+    const { graph: g } = (body as HealthResponse).credential;
+    if ('redacted' in g) throw new Error('the credential block came back redacted — this helper is meant to be signed in');
+    return g;
   };
   const DAY = 86_400_000;
 
@@ -938,6 +972,7 @@ describe('GET /api/health watches the credential this process authenticates with
     const { statusCode, body } = await get(
       {
         store: memStore(),
+        auth: authAs('operator'),
         graphCert: () => {
           throw new Error('ENOENT: no such file or directory');
         },
@@ -972,7 +1007,7 @@ describe('GET /api/health watches the credential this process authenticates with
     // A function and not a string, so the file can be replaced without a
     // restart — the one credential whose whole purpose is to be replaced.
     let calls = 0;
-    const deps = { store: memStore(), graphCert: () => { calls += 1; return PEM; } };
+    const deps = { store: memStore(), auth: authAs('operator'), graphCert: () => { calls += 1; return PEM; } };
     const app = buildApi(deps);
     try {
       await app.inject({ method: 'GET', url: '/api/health' });
@@ -984,42 +1019,32 @@ describe('GET /api/health watches the credential this process authenticates with
   });
 });
 
-/* ------------------------------------------------------------ read-only API */
+/* ------------------------------------------------------- reads and writes */
 
-describe('the API is read-only', () => {
-  /** Reads the REGISTERED routes, not the result of trying a request. A POST
-   *  that 404s proves only that one spelling is absent; this sees every route
-   *  the router actually has. */
-  const registered = async () => {
-    const store = memStore();
-    const app = buildApi({ store });
-    const seen: Array<{ url: string; methods: string[] }> = [];
-    app.addHook('onRoute', (route) => {
-      seen.push({
-        url: route.url,
-        methods: Array.isArray(route.method) ? [...route.method] : [route.method],
-      });
-    });
-    await app.ready();
-    await app.close();
-    return seen;
-  };
+/**
+ * **The route table's enumeration lives in `server/src/auth/routeTable.test.ts`,
+ * and only there.**
+ *
+ * This block used to assert "every registered route is GET and nothing else",
+ * which was true until M4 and is the claim the auth seam replaces: the API now
+ * has two non-GET routes and will have six. Two enumerations of one router in
+ * two files is the divergence this project keeps paying for — one of them gets
+ * updated and the other goes on describing a server that no longer exists — so
+ * the list is in the file whose whole job is that list, beside the fail-closed
+ * control that gives it teeth.
+ */
 
-  it('the route table this test reads is the real one', async () => {
-    // Control: without this the method assertion below passes vacuously on an
-    // empty list, which is exactly how a guard stops guarding.
-    const seen = await registered();
-    expect(seen.map((r) => r.url).sort()).toEqual(['/api/checks', '/api/health', '/api/incidents', '/api/services']);
-  });
-
-  it('every registered route is GET and nothing else', async () => {
-    for (const route of await registered()) {
-      expect(route.methods, route.url).toEqual(['GET']);
-    }
-  });
-
+describe('the shape of the router', () => {
   it('the plugin is the only thing that registers routes', () => {
     expect(typeof apiRoutes).toBe('function');
+  });
+
+  it('a read route is still served with no credential at all', async () => {
+    // The decision the seam records rather than changes: reads are open on this
+    // LAN, exactly as they were before M4. If this ever goes red by accident,
+    // the dashboard has stopped loading for everyone and the cause is here.
+    const { statusCode } = await get({ store: memStore() }, '/api/services');
+    expect(statusCode).toBe(200);
   });
 });
 

@@ -13,9 +13,26 @@ import { certExpiry, certNeedsAttention, type CertExpiry } from '../store/certEx
 // Type-only. The route never constructs one and never reads a file: the PEM
 // arrives as a parameter, and `store/certExpiry.ts` says why that is absolute.
 import type { X509Certificate } from 'node:crypto';
+// The ONE answer to "who is calling, and may they". This file may DECLARE a
+// policy per route and may read the resulting principal; it may not verify a
+// cookie, read a header or check a password, and `server/src/auth/guards.test.ts`
+// enforces that by name. A route with its own idea of "authenticated" is the
+// `publishedLevel`/`vendorLevel` fork with a much worse failure mode.
+import { createSessionAuth, principalOf, registerAuth, type SessionAuth } from '../auth/session.js';
 
 /**
- * The read-only API.
+ * The API.
+ *
+ * **It was read-only until M4 and is not any more**, which is the fact this
+ * file's header has to carry rather than leave to whoever greps for `app.post`.
+ * Every route declares an auth policy — `'public-read'`, `'login'` or
+ * `'required'` — as `config.auth` at its registration, and `auth/session.ts`
+ * decides what the declaration means. This file has no opinion about identity
+ * beyond naming the policy, and a route registered here without one is refused
+ * before its handler runs. `auth/routeTable.test.ts` holds the enumeration.
+ *
+ * The reads are deliberately `'public-read'`: that is what they were before the
+ * seam existed, now written down as a decision rather than left as an omission.
  *
  * One rule governs this file: **`SourceResult<T>` is mirrored outward
  * unchanged.** `fetchedAt`, `degraded`, `empty` and `error` reach the client
@@ -140,6 +157,17 @@ export type ApiDeps = {
    * be the same lie as rendering a missing probe as 100% uptime.
    */
   graphCert?: () => string | X509Certificate | undefined;
+  /**
+   * The auth seam. Optional so every existing caller — `index.ts`, and a
+   * hundred route tests — compiles and behaves unchanged; absent means the real
+   * one, reading the credential file located by `OPS_DASH_AUTH_CONFIG` per
+   * request.
+   *
+   * Absent AND no credential file is not "open": `required` routes answer 503
+   * `auth_unconfigured`. This seam has no state in which it lets someone
+   * through without knowing who they are.
+   */
+  auth?: SessionAuth;
 };
 
 /* ------------------------------------------------------------ source names */
@@ -274,9 +302,30 @@ export type HealthResponse = {
    *  product's thesis turned on itself — the M365 tile would go `unknown` with
    *  an auth error, and nobody watches the tile that says the watcher is
    *  broken. */
-  credential: { graph: CertHealth };
-  auth: { mode: 'none'; note: string };
+  credential: CredentialHealth;
+  /** What this process can do about identity, and what it made of THIS request.
+   *  `mode` is about the server; `authenticated` is about the caller, and they
+   *  are separate fields because "auth is configured" and "you are signed in"
+   *  are the two facts an operator staring at a 401 needs to tell apart. */
+  auth: { mode: 'local-user' | 'unconfigured'; authenticated: boolean; note: string };
 };
+
+/**
+ * The credential block, and the one thing on this route that the seam moved.
+ *
+ * The M1 review's release list carries `/api/health` as a disclosure: it names
+ * the Graph certificate's subject, issuer, thumbprint and expiry to anyone who
+ * can reach the port. **The liveness half stays public and the disclosure does
+ * not.** A health endpoint that needs a credential to answer "am I alive" is the
+ * wrong trade — that answer is wanted most by whoever cannot sign in — but
+ * nothing about our certificate is needed to answer it.
+ *
+ * `configured` survives redaction deliberately: "is a credential present" is
+ * the half an unauthenticated monitor legitimately needs, and it is not a fact
+ * about the certificate.
+ */
+export type RedactedCert = { configured: boolean; redacted: true; note: string };
+export type CredentialHealth = { graph: CertHealth } | { graph: RedactedCert };
 
 /**
  * The Graph certificate's health.
@@ -515,8 +564,22 @@ export function graphHealth(supplier: ApiDeps['graphCert'], now: Date): CertHeal
 export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
   const { store, poller } = deps;
   const clock = deps.now ?? (() => new Date());
+  const auth = deps.auth ?? createSessionAuth();
 
-  app.get('/api/services', async (): Promise<ServicesResponse> => {
+  /**
+   * Installed here, inside the plugin, so Fastify's encapsulation confines it
+   * to the routes below. `static.ts` registers the SPA on the root instance and
+   * must stay outside this — it serves files, it has no policy to declare, and
+   * pulling it in would mean either exempting it or teaching the hook about a
+   * second kind of route.
+   *
+   * Every route in this file declares `config.auth`, and one that does not is
+   * refused with 500 before its handler runs. That is the whole seam: this file
+   * declares, `auth/session.ts` decides.
+   */
+  registerAuth(app, auth, clock);
+
+  app.get('/api/services', { config: { auth: 'public-read' } }, async (): Promise<ServicesResponse> => {
     const at = clock();
     const servedAt = at.toISOString();
     return {
@@ -563,7 +626,7 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
     };
   });
 
-  app.get('/api/incidents', async (): Promise<IncidentsResponse> => {
+  app.get('/api/incidents', { config: { auth: 'public-read' } }, async (): Promise<IncidentsResponse> => {
     // `clock()`, like the other two. One route reading the wall clock while its
     // neighbours read an injected one is how a test comes to pass against a
     // clock it did not choose.
@@ -602,7 +665,7 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
    * store error is `error` with no `data` rather than an empty list. "We looked
    * and there are none" and "we could not look" must not render the same.
    */
-  app.get('/api/checks', async (request, reply): Promise<SourceResult<CheckRun[]>> => {
+  app.get('/api/checks', { config: { auth: 'public-read' } }, async (request, reply): Promise<SourceResult<CheckRun[]>> => {
     const servedAt = clock().toISOString();
     const asked = (request.query as { service?: unknown } | undefined)?.service;
 
@@ -638,7 +701,7 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
     }
   });
 
-  app.get('/api/health', async (): Promise<HealthResponse> => {
+  app.get('/api/health', { config: { auth: 'public-read' } }, async (request): Promise<HealthResponse> => {
     const at = clock();
     const servedAt = at.toISOString();
 
@@ -651,6 +714,14 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
     } catch (cause) {
       storeHealth = { ok: false, error: message(cause) };
     }
+
+    // `'public-read'`, so the hook set no principal — this route asks the
+    // question itself rather than being told, and it is the ONE reader of the
+    // published decision outside the hook. It does not verify anything: it
+    // calls the same `decide` the hook calls, so a health page and a write
+    // route can never disagree about whether this caller is signed in.
+    const signedIn = auth.decide(request, at).authenticated;
+    const configured = auth.configured();
 
     const sources = poller ? poller.allStatus() : {};
     const entries = Object.entries(sources);
@@ -677,14 +748,65 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
         staleness,
         sources,
       },
-      credential: { graph: graphHealth(deps.graphCert, at) },
+      credential: credentialHealth(graphHealth(deps.graphCert, at), signedIn),
       auth: {
-        mode: 'none',
-        note: 'No authentication. Milestone 4 fills this seam, with the mutating routes that need it.',
+        mode: configured ? 'local-user' : 'unconfigured',
+        authenticated: signedIn,
+        note: configured
+          ? 'A local operator credential. Reads are deliberately open on this LAN; every write needs a session.'
+          : 'No operator credential is configured on this host, so every route that needs one refuses rather than allows.',
       },
     };
   });
+
+  /**
+   * Sign in.
+   *
+   * `'login'` and not `'public-read'`: it is unauthenticated by necessity rather
+   * than by choice, and the route-table guard treats the two differently — the
+   * set of non-GET routes that may be reached without a session has exactly one
+   * member and adding a second is a failing test.
+   *
+   * **The reply says nothing a caller did not already know.** One message for a
+   * wrong username and a wrong password, and the cost is paid on both paths, so
+   * this route is not an oracle for which half was right.
+   */
+  app.post('/api/session', { config: { auth: 'login' } }, async (request, reply) => {
+    const outcome = auth.login(request.body, clock());
+    if (!outcome.ok) {
+      void reply.code(outcome.status);
+      return { error: outcome.error };
+    }
+    void reply.header('set-cookie', outcome.setCookie);
+    return { username: outcome.principal.username };
+  });
+
+  /**
+   * Sign out. `'required'`, which reads oddly for a logout until you see what
+   * the alternative costs: an unauthenticated route that sets a cookie is a
+   * route anyone can make a browser execute. There is nothing to log out of
+   * without a session, and the cookie the browser holds is dead either way.
+   */
+  app.delete('/api/session', { config: { auth: 'required' } }, async (request, reply) => {
+    void reply.header('set-cookie', auth.logoutCookie());
+    // `principalOf`, not a re-check: the hook already decided, and a second
+    // reading of the same request is a second definition of who was calling.
+    return { signedOut: principalOf(request)?.username ?? null };
+  });
 };
+
+/** Redaction, as its own function so the route reads as one decision and so a
+ *  test can reach it without a server. */
+export function credentialHealth(graph: CertHealth, authenticated: boolean): CredentialHealth {
+  if (authenticated) return { graph };
+  return {
+    graph: {
+      configured: graph.configured,
+      redacted: true,
+      note: 'the certificate’s details are disclosed to a signed-in operator only',
+    },
+  };
+}
 
 /**
  * The API instance. The only constructor, so its options are not something a
