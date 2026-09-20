@@ -53,27 +53,39 @@ export type Store = ReturnType<typeof openStore>;
  * REMEMBER to, because `db.test.ts` greps the adapters for a partial-shaped code
  * that is not registered here and fails naming it.
  *
- * ## THE THRESHOLD, and it is already met
+ * That guard exists because the first version of this set had one entry while
+ * there were already three producers, spelled three different ways:
+ * `entra_partial`, `epc_partial` and `partial_read`. A closed set keyed on
+ * strings that three agents each named independently is exactly the kind that
+ * silently stops covering things — and the guard's own first version was blind
+ * to a code hoisted to a constant, found by `m4-entra` testing it adversarially
+ * rather than reading it.
  *
- * The lead's ruling (2026-09-20): *"One entry is a special case. Three is a
+ * ## THE THRESHOLD — raised, met, and RULED ON. Do not re-open it by counting.
+ *
+ * The lead set one (2026-09-20): *"One entry is a special case. Three is a
  * category the type system should be carrying, and at that point the amendment
- * is worth John's time."* **There are three.** The ruling was written against a
- * set that had one, twenty minutes after it had grown to three, so the condition
- * it names is satisfied now and the decision is open rather than deferred — it
- * is with the lead and John, not with this file.
+ * is worth John's time."* It was written against a version of this set holding
+ * one entry, twenty minutes after it had grown to three — so the condition was
+ * already satisfied when the rule arrived, which is why it was raised at once
+ * rather than left to be noticed later. A threshold that reads as comfortably
+ * distant when it has already been crossed is worse than no threshold.
  *
- * The one argument that has appeared SINCE the ruling, and that should be
- * weighed rather than assumed: the ruling's case for the closed set was that it
- * "forces them to come and add an entry, which is a moment of thought", where a
- * contract boolean would be filled in without one. The gap guard now forces the
- * visit mechanically — so the set keeps the moment of thought AND no longer
- * depends on anyone remembering, which is the combination a boolean field cannot
- * offer. That strengthens the set rather than the amendment. It does not settle
- * it, and it is not this file's call. That guard exists because
- * the first version of this set had one entry and there were already three
- * producers, spelled three different ways: `entra_partial`, `epc_partial` and
- * `partial_read`. A closed set keyed on strings that three agents each named
- * independently is exactly the kind that silently stops covering things.
+ * **Ruled: the set stays and the threshold does not fire.** The case for a
+ * contract field at three was mechanical enforcement — "the type system should
+ * carry it". The gap guard in `db.test.ts` carries it, by comparing what the
+ * adapters emit against what this set registers as two independently-reachable
+ * definitions, which is this repo's preferred form over a type anyway.
+ *
+ * The argument that decided it, and the reason a FOURTH entry is not a trigger
+ * to re-open this: a closed set forces whoever writes an adapter to come here
+ * and decide whether their payload was measured or manufactured. The guard now
+ * forces that visit mechanically as well. So the set keeps the moment of thought
+ * AND stops depending on anyone remembering — a combination a contract flag
+ * cannot offer, because a flag is filled in once, by someone who may not have
+ * thought about it, and nothing ever asks again.
+ *
+ * Adding a fourth entry is ordinary work, not an escalation.
  */
 export const PARTIAL_READ_CODES: ReadonlySet<string> = new Set([
   'entra_partial',   // pollEntra hit its page budget
