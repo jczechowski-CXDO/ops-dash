@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CheckRun, ServiceId, SourceResult, StatusLevel } from '@ops-dash/shared';
+import { CHECK_RUN_RETENTION_DAYS, RESOLVED_INCIDENT_RETENTION_DAYS, cutoff } from './retention.js';
 
 // fileURLToPath, not URL.pathname — a repo path containing a space would come
 // back percent-encoded. Same defect as G-1, which cost a broken guard once.
@@ -101,6 +102,20 @@ export function openStore(path = 'ops-dash.sqlite') {
     incidentsSince: db.prepare(
       `SELECT * FROM incidents WHERE resolved_at IS NULL OR resolved_at >= ? ORDER BY opened_at DESC`,
     ),
+    // `at < ?` and not `<=`: the cutoff instant itself is inside the window a
+    // 30-day query may still ask for. See retention.ts for the windows.
+    deleteCheckRuns: db.prepare(`DELETE FROM check_runs WHERE at < ?`),
+    // Actions first, then the incidents they reference — `PRAGMA foreign_keys`
+    // is ON, so the other order fails on any incident that was ever acked.
+    // An OPEN incident is never pruned however old it is: it is still the
+    // operator's problem, and age is not resolution.
+    deleteIncidentActions: db.prepare(
+      `DELETE FROM incident_actions WHERE incident_id IN
+         (SELECT id FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?)`,
+    ),
+    deleteResolvedIncidents: db.prepare(
+      `DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?`,
+    ),
   };
 
   return {
@@ -198,6 +213,36 @@ export function openStore(path = 'ops-dash.sqlite') {
      *  the correlation window. */
     incidentsSince(since: string) {
       return stmt.incidentsSince.all(since) as Array<Record<string, unknown>>;
+    },
+
+    /**
+     * Delete what is older than the retention windows. Idempotent; safe to call
+     * on a schedule and safe to call twice.
+     *
+     * Returns the counts it actually deleted rather than void, for one reason:
+     * a retention function whose WHERE clause matches nothing is the classic
+     * version of this bug and is completely silent — the disk keeps growing and
+     * the daily log line still says "pruned". The caller should log these
+     * numbers, and the tests assert them against a store they filled.
+     *
+     * One transaction, because deleting the actions and leaving their incidents
+     * behind (or the reverse, which foreign_keys would refuse) is a worse state
+     * than deleting nothing.
+     */
+    prune(now: Date | number = new Date(), days: { checkRuns?: number; resolvedIncidents?: number } = {}) {
+      const checkRunsBefore = cutoff(now, days.checkRuns ?? CHECK_RUN_RETENTION_DAYS);
+      const incidentsBefore = cutoff(now, days.resolvedIncidents ?? RESOLVED_INCIDENT_RETENTION_DAYS);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const checkRuns = Number(stmt.deleteCheckRuns.run(checkRunsBefore).changes);
+        const incidentActions = Number(stmt.deleteIncidentActions.run(incidentsBefore).changes);
+        const incidents = Number(stmt.deleteResolvedIncidents.run(incidentsBefore).changes);
+        db.exec('COMMIT');
+        return { checkRuns, incidents, incidentActions, checkRunsBefore, incidentsBefore };
+      } catch (cause) {
+        db.exec('ROLLBACK');
+        throw cause;
+      }
     },
   };
 }

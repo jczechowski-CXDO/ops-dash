@@ -7,6 +7,15 @@
 
 PRAGMA journal_mode = WAL;   -- a read during a write must not block
 PRAGMA foreign_keys = ON;
+-- A bulk delete writes every touched page into the WAL, and WAL does not shrink
+-- back on its own: the review measured a 264 MB WAL during a one-year bulk load
+-- and the first prune after a long outage is the same shape of transaction.
+-- 64 MB is the checkpoint's high-water mark, after which the file is truncated.
+-- This is why retention does NOT run VACUUM: freed pages are reused by the next
+-- day's inserts, so the main file reaches a steady size on its own, and a VACUUM
+-- rewrites the whole database — a multi-second stall on a process whose job is to
+-- answer every minute — to reclaim space that is about to be refilled anyway.
+PRAGMA journal_size_limit = 67108864;
 
 -- Last-good SourceResult per source, so a failed poll serves a stale panel
 -- rather than an empty one. The payload is the whole envelope as JSON —
