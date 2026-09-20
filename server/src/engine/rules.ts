@@ -38,7 +38,94 @@ export type ServiceSignal = {
   ours: { passing: number; total: number };
 };
 
-export type RuleKey = 'vendor' | 'ourside' | 'blackout';
+/* ------------------------------------------------------- the identity input */
+
+/**
+ * What the identity rules see, and **why it is not `EntraSnapshot`**.
+ *
+ * `EntraSnapshot` is a frozen view-model, shaped for a screen, at the windows
+ * the screen wants. Letting a rule read it would make the rule a function of
+ * whatever the page happens to display — the same failure `ServiceSignal`'s
+ * comment above guards against one domain over.
+ *
+ * It is not a hypothetical. Measured on the live tenant, three of §7's four
+ * identity rules have a near-miss sitting in that snapshot, and **every one of
+ * the near-misses errs toward firing forever**:
+ *
+ *   | rule      | §7 asks for                 | the snapshot offers          | measured                                   |
+ *   |-----------|-----------------------------|------------------------------|--------------------------------------------|
+ *   | `spray`   | >500 failures in 15 min     | `failedSignIns24h` = 4535    | busiest 15-min bucket in 6h = **68**       |
+ *   | `secrets` | expiring within 14 days     | `expiring_credentials` = 20  | 19 of those already EXPIRED; future = **0**|
+ *   | `legacy`  | a SUCCESSFUL legacy sign-in | `legacy_auth` = 11 attempts  | successes in 24h = **0**                   |
+ *
+ * Wired to the near-misses, three permanently-on alarms. Wired to these fields,
+ * all three are correctly quiet. The general form is worth more than the three
+ * instances: **a standing-backlog signal and an alerting threshold are
+ * different quantities**, and the backlog number is always the one already in
+ * your hand.
+ *
+ * Two defences are built into the shape rather than asked for in a comment:
+ *
+ *   - **the window travels with the number.** `spray` asserts its count covers
+ *     fifteen minutes and `secrets` asserts its horizon is fourteen days, so a
+ *     caller who hands over a 24-hour count gets a loud, named refusal instead
+ *     of a silent permanent Sev2. A comment saying "must be 15 minutes" is the
+ *     kind this project has watched fail three times in one night.
+ *   - **the field names refuse the near-miss.** `successfulLegacySignIns`, not
+ *     `legacyAuth`. A name that cannot be confused with the wrong quantity is a
+ *     guard that costs nothing to maintain.
+ */
+export type IdentitySignal = {
+  /** When these were measured. The rules refuse to read a stale one — see
+   *  `IDENTITY_MAX_AGE_MS`. */
+  observedAt: string;
+  /** Failed sign-ins inside `windowMs`. NOT a 24-hour total. */
+  failedSignIns: { count: number; windowMs: number };
+  /** Credentials whose expiry is in the FUTURE and inside `horizonDays`.
+   *  Already-expired credentials are deliberately excluded: they are a standing
+   *  backlog, and on this tenant they are 19 of the 20 the dashboard counts. */
+  credentialsExpiring: { count: number; horizonDays: number };
+  /** Legacy-protocol sign-ins that SUCCEEDED. An attempt that was blocked is
+   *  the control working, not an incident. */
+  successfulLegacySignIns: number;
+  /** Accounts Identity Protection currently holds as confirmed compromised. */
+  confirmedCompromised: number;
+};
+
+/** §7: "> 500 failures in 15 min". Both halves are pinned, because a threshold
+ *  without its window is not a threshold. */
+export const SPRAY_WINDOW_MS = 15 * 60 * 1000;
+export const SPRAY_THRESHOLD = 500;
+
+/** §7: "within 14 days". */
+export const SECRETS_HORIZON_DAYS = 14;
+
+/**
+ * How old an `IdentitySignal` may be before the rules stop reading it.
+ *
+ * Three poll intervals. The Entra source polls every fifteen minutes and
+ * correlation runs every sixty seconds, so the signal is *expected* to be up to
+ * fifteen minutes old on any given tick and that must be entirely normal. Forty-
+ * five minutes tolerates one missed poll and refuses two — past that we are
+ * reasoning about an estate we have not looked at in three quarters of an hour,
+ * and the honest answer is to stop evaluating rather than to answer from
+ * memory.
+ *
+ * Stopping is safe in both directions only because of `evaluatedRules` in
+ * `correlate.ts`: a rule that is not evaluated cannot open an incident AND
+ * cannot resolve one. Without that, this staleness rule would silently close
+ * every identity incident on the first tick after a missed poll.
+ */
+export const IDENTITY_MAX_AGE_MS = 45 * 60 * 1000;
+
+/** The service the identity rules attach to. Entra IS the `m365` tile — the
+ *  contract names it 'Microsoft 365 / Entra ID' — so these land there rather
+ *  than on a synthetic id nothing renders. Unlike `blackout`, the four are
+ *  genuinely different conditions, so counting them separately on one tile is
+ *  information rather than the over-count `platform:` exists to collapse. */
+const IDENTITY_SERVICE: ServiceId = 'm365';
+
+export type RuleKey = 'vendor' | 'ourside' | 'blackout' | 'spray' | 'risky' | 'secrets' | 'legacy';
 
 /** One rule firing, before any identity or persistence is attached. Turning
  *  findings into `Incident`s — ids, windows, resolution — is `correlate.ts`. */
@@ -55,31 +142,134 @@ export type Finding = {
   blastRadius: BlastMetric[];
 };
 
-export const RULES: ReadonlyArray<AlertRule & { severity: Severity }> = [
-  {
+/**
+ * The registry, keyed by `RuleKey` so a rule cannot exist in the union and not
+ * here.
+ *
+ * **This is a `Record`, not an array, because the array let the two drift.**
+ * `RuleKey` gained four members before `RULES` gained four rows, and both `on()`
+ * and `severityOf()` did `RULES.find(...)!` — a non-null assertion over a lookup
+ * that had just become able to miss. Nothing crashed, because nothing called
+ * `on('spray')` yet; the first identity rule wired up without its row would have
+ * been a `TypeError` inside the correlation tick, once a minute, forever.
+ *
+ * `m4-store` found it and named the half I would not have: `rule_state` is a
+ * table of **overrides**, and an absent row means "use the rule's own default",
+ * which `on()` resolves from here. A `RuleKey` with no entry therefore has no
+ * default to fall back to — so the crash sits on the *fallback* path, which is
+ * a fresh database or an override the operator deleted. The path nobody clicks.
+ *
+ * As a `Record<RuleKey, …>` the shape is unrepresentable: a missing key fails
+ * the typecheck instead of the tick. Same treatment as `Column<R>`'s
+ * `key: keyof R & string` in Wave 1, one domain over, and for the same reason —
+ * the failure it prevents is silent.
+ */
+const REGISTRY: Record<RuleKey, AlertRule & { severity: Severity }> = {
+  vendor: {
     key: 'vendor',
     name: 'Vendor degraded and our check failing',
     detail: 'Vendor reports degraded or outage AND at least one of our probes is failing',
     enabled: true,
     severity: 1,
   },
-  {
+  ourside: {
     key: 'ourside',
     name: 'Our check failing, uncorroborated',
     detail: 'One of our probes is failing and no vendor advisory confirms it',
     enabled: true,
     severity: 2,
   },
-  {
+  blackout: {
     key: 'blackout',
     name: 'Platform blackout',
     detail: 'Every service on one vendor platform is unknown, and more than one service shares it',
     enabled: true,
     severity: 2,
   },
-];
+  spray: {
+    key: 'spray',
+    name: 'Failed sign-in spike',
+    detail: `More than ${SPRAY_THRESHOLD} failed sign-ins inside ${SPRAY_WINDOW_MS / 60_000} minutes`,
+    enabled: true,
+    severity: 2,
+    threshold: { failures: SPRAY_THRESHOLD, windowMinutes: SPRAY_WINDOW_MS / 60_000 },
+  },
+  risky: {
+    key: 'risky',
+    name: 'Risky sign-in confirmed compromised',
+    detail: 'Identity Protection holds at least one account as confirmed compromised',
+    enabled: true,
+    severity: 1,
+    threshold: { accounts: 1 },
+  },
+  secrets: {
+    key: 'secrets',
+    name: 'Secret or certificate expiring',
+    detail: `An application credential expires within ${SECRETS_HORIZON_DAYS} days`,
+    enabled: true,
+    severity: 3,
+    threshold: { days: SECRETS_HORIZON_DAYS },
+  },
+  legacy: {
+    key: 'legacy',
+    name: 'Successful legacy protocol sign-in',
+    detail: 'A sign-in over a legacy authentication protocol SUCCEEDED',
+    enabled: true,
+    severity: 2,
+    threshold: { signIns: 1 },
+  },
+};
 
-const severityOf = (key: RuleKey): Severity => RULES.find((r) => r.key === key)!.severity;
+/**
+ * The rules, in declaration order.
+ *
+ * `Object.values` rather than a second hand-written list: repeating the seven
+ * keys here would reintroduce exactly the drift the `Record` above just closed,
+ * one line further down. String keys enumerate in insertion order, and
+ * `rules.test.ts` pins that order as a literal.
+ */
+export const RULES: ReadonlyArray<AlertRule & { severity: Severity }> = Object.values(REGISTRY);
+
+/* ------------------------------------------------- the identity rules’ gate */
+
+/** Thrown when a caller hands the engine a number measured over the wrong
+ *  window. Named, and its own class, so a test can catch it by name rather than
+ *  by matching a message that will be reworded one day. */
+export class WrongWindowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WrongWindowError';
+  }
+}
+
+/**
+ * Is this signal recent enough to reason from?
+ *
+ * `undefined` is not stale, it is absent, and both mean the same thing here:
+ * do not evaluate. They are separated anyway because a caller debugging "why is
+ * my rule quiet" needs to know which.
+ */
+export function identityIsFresh(identity: IdentitySignal | undefined, at: string): boolean {
+  if (identity === undefined) return false;
+  const observed = Date.parse(identity.observedAt);
+  const now = Date.parse(at);
+  if (!Number.isFinite(observed) || !Number.isFinite(now)) return false;
+  // A signal from the future is not fresh, it is wrong — a clock we cannot
+  // trust is not evidence. One minute of tolerance for ordinary skew.
+  if (observed > now + 60_000) return false;
+  return now - observed <= IDENTITY_MAX_AGE_MS;
+}
+
+/** The rules whose input was present this tick — what `correlate` needs to tell
+ *  "looked and found nothing" from "could not look". The three service rules are
+ *  always evaluable because `services` is always supplied. */
+export function evaluatedRuleKeys(identity: IdentitySignal | undefined, at: string): Set<RuleKey> {
+  const keys: RuleKey[] = ['vendor', 'ourside', 'blackout'];
+  if (identityIsFresh(identity, at)) keys.push('spray', 'risky', 'secrets', 'legacy');
+  return new Set(keys);
+}
+
+const severityOf = (key: RuleKey): Severity => REGISTRY[key].severity;
 
 /* --------------------------------------------------------------- the halves */
 
@@ -260,8 +450,14 @@ const nameOf = (s: ServiceSignal) => s.label ?? s.serviceId;
 export function evaluate(
   services: readonly ServiceSignal[],
   enabled: Readonly<Record<string, boolean>> = {},
+  /** The identity half. Absent means the four identity rules are not evaluated
+   *  — which is NOT the same as finding nothing, and `correlate` is told the
+   *  difference via `evaluatedRuleKeys`. An options object so both existing
+   *  call sites keep compiling untouched. */
+  options: { identity?: IdentitySignal; at?: string } = {},
 ): Finding[] {
-  const on = (key: RuleKey) => enabled[key] ?? RULES.find((r) => r.key === key)!.enabled;
+  // No `!`: `REGISTRY` is total over `RuleKey`, so this cannot miss.
+  const on = (key: RuleKey) => enabled[key] ?? REGISTRY[key].enabled;
   const findings: Finding[] = [];
 
   if (on('vendor')) {
@@ -362,6 +558,117 @@ export function evaluate(
             note: `every service on ${platform}: ${names}`,
             level: 'error',
           },
+        ],
+      });
+    }
+  }
+
+  /* ------------------------------------------------------ the identity rules */
+
+  // Evaluated only when we have a signal we are willing to reason from. A stale
+  // one is not evidence, and answering from a 45-minute-old estate is the same
+  // mistake as answering from a 24-hour count.
+  const at = options.at;
+  const identity = options.identity;
+  if (identity !== undefined && at !== undefined && identityIsFresh(identity, at)) {
+    const seenAt = identity.observedAt;
+
+    if (on('spray')) {
+      // The window assertion, and it THROWS rather than declining. A rule that
+      // quietly stops firing when handed the wrong quantity is indistinguishable
+      // from a rule that is broken — and the wrong quantity here is the 24-hour
+      // count sitting in `EntraSnapshot`, which is 4535 on an ordinary day and
+      // would hold this Sev2 open forever. Same precedent as `parseSeverity`:
+      // our own bug is thrown, never defaulted.
+      if (identity.failedSignIns.windowMs !== SPRAY_WINDOW_MS) {
+        throw new WrongWindowError(
+          `spray needs failures over ${SPRAY_WINDOW_MS / 60_000} minutes and was given a count over ` +
+            `${Math.round(identity.failedSignIns.windowMs / 60_000)}; a 24-hour total answers a different question ` +
+            `and would fire permanently`,
+        );
+      }
+      const { count } = identity.failedSignIns;
+      if (count > SPRAY_THRESHOLD) {
+        findings.push({
+          ruleKey: 'spray',
+          serviceId: IDENTITY_SERVICE,
+          severity: severityOf('spray'),
+          title: `Failed sign-in spike — ${count} in ${SPRAY_WINDOW_MS / 60_000} minutes`,
+          summary:
+            `${count} sign-ins failed in the last ${SPRAY_WINDOW_MS / 60_000} minutes, against a threshold of ` +
+            `${SPRAY_THRESHOLD}. A rate this far above normal is a password spray or a credential-stuffing run ` +
+            `rather than people mistyping. The count is a real fifteen-minute window, not a daily total divided ` +
+            `down, so it reflects what is happening now.`,
+          metaParts: [`Sev 2`, 'Entra ID', `${count} failures / ${SPRAY_WINDOW_MS / 60_000} min`],
+          blastRadius: [
+            { label: 'Failed sign-ins', value: String(count), note: `in the ${SPRAY_WINDOW_MS / 60_000} minutes to ${seenAt}`, level: 'error' },
+            { label: 'Threshold', value: `${SPRAY_THRESHOLD}`, note: 'DATA_CONTRACTS section 7', level: 'warning' },
+          ],
+        });
+      }
+    }
+
+    if (on('risky') && identity.confirmedCompromised > 0) {
+      const n = identity.confirmedCompromised;
+      findings.push({
+        ruleKey: 'risky',
+        serviceId: IDENTITY_SERVICE,
+        severity: severityOf('risky'),
+        title: `${n} account${n === 1 ? '' : 's'} confirmed compromised`,
+        summary:
+          `Identity Protection holds ${n} account${n === 1 ? '' : 's'} at riskState confirmedCompromised. That is ` +
+          `not a risk score or a suspicion — it is a compromise somebody or something has already confirmed, and ` +
+          `it stays true until the account is remediated and the risk state dismissed.`,
+        metaParts: [`Sev 1`, 'Entra ID', `${n} confirmed`],
+        blastRadius: [
+          { label: 'Accounts', value: String(n), note: 'riskState confirmedCompromised', level: 'error' },
+        ],
+      });
+    }
+
+    if (on('secrets')) {
+      if (identity.credentialsExpiring.horizonDays !== SECRETS_HORIZON_DAYS) {
+        throw new WrongWindowError(
+          `secrets needs credentials expiring within ${SECRETS_HORIZON_DAYS} days and was given a ` +
+            `${identity.credentialsExpiring.horizonDays}-day horizon; a wider one, or one that counts credentials ` +
+            `that have ALREADY expired, would fire permanently`,
+        );
+      }
+      const n = identity.credentialsExpiring.count;
+      if (n > 0) {
+        findings.push({
+          ruleKey: 'secrets',
+          serviceId: IDENTITY_SERVICE,
+          severity: severityOf('secrets'),
+          title: `${n} application credential${n === 1 ? '' : 's'} expire${n === 1 ? 's' : ''} within ${SECRETS_HORIZON_DAYS} days`,
+          summary:
+            `${n} app registration secret${n === 1 ? ' or certificate' : 's or certificates'} will expire inside ` +
+            `${SECRETS_HORIZON_DAYS} days. This counts only credentials still in the future: already-expired ones ` +
+            `are a standing backlog rather than something about to break, and folding them in would leave this ` +
+            `alert permanently on.`,
+          metaParts: [`Sev 3`, 'Entra ID', `${n} expiring`],
+          blastRadius: [
+            { label: 'Credentials', value: String(n), note: `expiring within ${SECRETS_HORIZON_DAYS} days`, level: 'warning' },
+          ],
+        });
+      }
+    }
+
+    if (on('legacy') && identity.successfulLegacySignIns > 0) {
+      const n = identity.successfulLegacySignIns;
+      findings.push({
+        ruleKey: 'legacy',
+        serviceId: IDENTITY_SERVICE,
+        severity: severityOf('legacy'),
+        title: `${n} legacy-protocol sign-in${n === 1 ? '' : 's'} SUCCEEDED`,
+        summary:
+          `${n} sign-in${n === 1 ? '' : 's'} over a legacy authentication protocol succeeded. Legacy protocols ` +
+          `cannot carry multi-factor authentication, so a success is a password alone getting through. Blocked ` +
+          `attempts are deliberately NOT counted here — those are the control working, and counting them would ` +
+          `make this alert permanent.`,
+        metaParts: [`Sev 2`, 'Entra ID', `${n} succeeded`],
+        blastRadius: [
+          { label: 'Successful sign-ins', value: String(n), note: 'over a legacy protocol, no MFA possible', level: 'error' },
         ],
       });
     }

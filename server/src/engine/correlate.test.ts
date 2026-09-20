@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import type { Incident, Severity } from '@ops-dash/shared';
-import type { ServiceSignal } from './rules.js';
+import type { IdentitySignal, ServiceSignal } from './rules.js';
 import { correlate, serializeSeverity, parseSeverity, toStoreRow, WINDOW_MS } from './correlate.js';
 
 const T0 = '2026-09-19T12:00:00.000Z';
@@ -355,5 +355,69 @@ describe('the row the store gets', () => {
   it('writes severity as the digit, and an unresolved incident as SQL NULL', () => {
     const [inc] = correlate({ at: T0, services: [jiraWith('outage')] });
     expect(toStoreRow(inc!)).toMatchObject({ severity: '1', resolvedAt: null, ruleKey: 'vendor', serviceId: 'jira' });
+  });
+});
+
+describe('the identity rules through correlate, including the stale tick', () => {
+  const ident = (over: Partial<IdentitySignal> = {}): IdentitySignal => ({
+    observedAt: T0,
+    failedSignIns: { count: 68, windowMs: 15 * 60 * 1000 },
+    credentialsExpiring: { count: 0, horizonDays: 14 },
+    successfulLegacySignIns: 0,
+    confirmedCompromised: 0,
+    ...over,
+  });
+
+  it('opens a Sev1 on a confirmed compromise and gives it a stable id', () => {
+    const first = correlate({ at: T0, services: [], identity: ident({ confirmedCompromised: 1 }) });
+    expect(first).toHaveLength(1);
+    expect(first[0]!.severity).toBe(1);
+    expect(first[0]!.ruleKey).toBe('risky');
+    const again = correlate({
+      at: plus(60_000), services: [], identity: ident({ observedAt: plus(60_000), confirmedCompromised: 1 }), open: first,
+    });
+    expect(again[0]?.id ?? first[0]!.id).toBe(first[0]!.id);
+  });
+
+  it('does NOT resolve it on the fourteen ticks where the snapshot is merely old', () => {
+    // The whole reason both halves of this work had to land together. The Entra
+    // source polls every fifteen minutes and correlation runs every sixty
+    // seconds, so a signal that is minutes old is the NORMAL case — and before
+    // `evaluatedRules` the rule produced no finding and the incident was
+    // resolved, with a timeline entry announcing a recovery that never happened.
+    const open = correlate({ at: T0, services: [], identity: ident({ confirmedCompromised: 1 }) });
+    // Ten minutes later: still inside the 45-minute window, so it is evaluated
+    // and still firing.
+    const warm = correlate({
+      at: plus(600_000), services: [], open, identity: ident({ confirmedCompromised: 1 }),
+    });
+    expect(warm.every((i) => i.resolvedAt === undefined)).toBe(true);
+    // An hour later with NO fresh signal: not evaluated, so carried untouched.
+    const blind = correlate({ at: plus(3_600_000), services: [], open, identity: ident({ confirmedCompromised: 1 }) });
+    expect(blind).toEqual([]);
+    // And with no identity at all — the cold start, or a dead source.
+    expect(correlate({ at: plus(3_600_000), services: [], open })).toEqual([]);
+  });
+
+  it('DOES resolve it when a fresh signal says the compromise is gone', () => {
+    // The other half. Without it, "carry when stale" could be implemented as
+    // "never resolve an identity incident" and the test above would still pass.
+    const open = correlate({ at: T0, services: [], identity: ident({ confirmedCompromised: 1 }) });
+    const cleared = correlate({
+      at: plus(600_000), services: [], open,
+      identity: ident({ observedAt: plus(600_000), confirmedCompromised: 0 }),
+    });
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]!.resolvedAt).toBe(plus(600_000));
+    expect(cleared[0]!.timeline[0]!.kind).toBe('resolved');
+  });
+
+  it('a service incident still resolves normally while identity is blind', () => {
+    // Per-rule, end to end: one stale input must not freeze the estate.
+    const open = correlate({ at: T0, services: [jiraWith('outage')] });
+    const out = correlate({ at: plus(60_000), services: [svc()], open });   // no identity at all
+    expect(out).toHaveLength(1);
+    expect(out[0]!.ruleKey).toBe('vendor');
+    expect(out[0]!.resolvedAt).toBe(plus(60_000));
   });
 });

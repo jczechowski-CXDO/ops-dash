@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Incident, Severity, TimelineEntry } from '@ops-dash/shared';
-import { evaluate, type Finding, type ServiceSignal } from './rules.js';
+import { evaluate, evaluatedRuleKeys, type Finding, type IdentitySignal, type ServiceSignal } from './rules.js';
 
 /**
  * Findings -> `Incident[]`, with identity and resolution.
@@ -65,6 +65,16 @@ export type CorrelateInput = {
    * it so the next person meets a test rather than a mystery.
    */
   evaluatedRules?: ReadonlySet<string>;
+  /**
+   * The identity half of the estate, for section 7's four rules.
+   *
+   * Absent means those four are not evaluated — which, thanks to
+   * `evaluatedRules` above, means they can neither open an incident nor resolve
+   * one. `correlate` derives the evaluated set from this rather than making the
+   * caller compute it, so there is exactly one opinion about what "stale" means
+   * and it lives in `rules.ts` beside the rules that depend on it.
+   */
+  identity?: IdentitySignal;
 };
 
 const identity = (ruleKey: string, serviceId: string) => `${ruleKey}\u0000${serviceId}`;
@@ -105,8 +115,15 @@ function stillOwns(prior: Incident, at: string, windowMs: number): boolean {
 }
 
 export function correlate(input: CorrelateInput): Incident[] {
-  const { at, services, open = [], enabledRules, windowMs = WINDOW_MS, evaluatedRules } = input;
-  const findings = evaluate(services, enabledRules);
+  // `identitySignal`, not `identity` — this module already has a local
+  // `identity(ruleKey, serviceId)` that builds the prior-lookup key, and
+  // shadowing it inside `correlate` is a silent behaviour change the typechecker
+  // catches only because the shadowed thing happens to be called.
+  const { at, services, open = [], enabledRules, windowMs = WINDOW_MS, identity: identitySignal } = input;
+  const findings = evaluate(services, enabledRules, { ...(identitySignal ? { identity: identitySignal } : {}), at });
+  // Explicit wins, so the field stays independently testable; otherwise derived,
+  // so a caller supplying `identity` never has to restate what it implies.
+  const evaluatedRules = input.evaluatedRules ?? evaluatedRuleKeys(identitySignal, at);
 
   // Most recent prior per rule+service. A store that somehow holds two is not
   // a reason to open a third.
