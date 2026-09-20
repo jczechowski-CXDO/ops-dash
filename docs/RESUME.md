@@ -1605,3 +1605,34 @@ The collected shape of all four, which is worth stating once:
 
 Every one of them reads as a working guard and reports success. **The only reliable form is
 to assert the positive set — what must be found, and exactly what may be there.**
+
+
+## Reuse the agent that wrote the file (2026-09-20)
+
+A lead practice, recorded because I got it wrong repeatedly in one session and the cost is
+invisible unless you look for it.
+
+**What I did:** closed `m3-web` after it built `web/src/live/**`, then twenty minutes later
+spawned a fresh `ops-view` to extend `parse.ts`, `DataSource.tsx` and `ServiceDetail.tsx` —
+the exact files the closed agent had just written. Also spawned a second `ops-shell` to
+extend `routes.ts` while the one that built it sat idle and alive, and ran three separate
+`ops-reviewer`s that each re-read `RESUME.md` and the whole tree from scratch.
+
+**What it costs**, in increasing order of importance:
+
+1. the prompt cache, and the wall-clock of re-reading
+2. the re-derivation — a new agent rebuilds an understanding that already existed
+3. **the reasoning that was never written down.** The previous agent knew why `parse.ts`
+   reads every key explicitly instead of spreading, because it made that choice. The
+   replacement sees only the code. Most of what an agent knows at the end of a task is not
+   in its commit message.
+
+**The rule:** before dispatching, check `ListAgents`. If an idle agent owns the files the
+task touches, send it the task. Spawn a new one when the work is genuinely a different
+domain, when the previous agent's context is exhausted or polluted, or when you want a
+deliberately fresh reading — a reviewer re-reviewing its own work is worth nothing.
+
+**The trap that produced this:** a stale roster of finished agents looks like waste, so the
+instinct is to close everything. The fix for a stale roster is to close the ones with no
+follow-on work, not to close all of them and respawn. Closing an agent is throwing away
+context; do it when the context has no further use, not to tidy a list.
