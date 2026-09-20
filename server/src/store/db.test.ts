@@ -233,11 +233,14 @@ describe('a partial read is not a failed read', () => {
    * genuinely is nothing to keep; wrong for `pollEntra`'s partial, which is a
    * successful read of most of the answer plus an honest note about the rest.
    */
-  const partial = (at: string, count: number): SourceResult<unknown> => ({
+  const partial = (at: string, count: number, which = 'one page'): SourceResult<unknown> => ({
     data: { signals: count },
     fetchedAt: at,
     degraded: true,
-    error: { code: 'entra_partial', message: 'These counts are lower bounds: one page failed.' },
+    // The message names WHICH page failed, so two partials are distinguishable.
+    // With one fixed message a stale-message bug is unkillable: the assertion
+    // passes whichever poll the sentence came from.
+    error: { code: 'entra_partial', message: `These counts are lower bounds: ${which} failed.` },
   });
 
   it('keeps the payload AND the error when both are present', () => {
@@ -285,6 +288,34 @@ describe('a partial read is not a failed read', () => {
     const back = s.getSnapshot('entra');
     expect(back?.data, 'the message and the numbers must describe one poll').toEqual({ signals: 9 });
     expect(back?.fetchedAt).toBe('2026-09-20T12:00:00.000Z');
+    expect(back?.error?.message, 'and the sentence is that poll\u2019s sentence')
+      .toBe('These counts are lower bounds: one page failed.');
+  });
+
+  it('a partial after a partial pairs the NEW numbers with the NEW sentence', () => {
+    // The sequence assertion in the form that can actually fail. The test above
+    // has only one message in play, so it cannot distinguish "the sentence came
+    // from this poll" from "there is only one sentence" — two partials with
+    // DIFFERENT messages can. This is the shape the lead asked for: assert the
+    // message and the numbers came from the same poll, not merely that both are
+    // present.
+    const s = open(':memory:');
+    s.putSnapshot('entra', { data: { signals: 3 }, fetchedAt: '2026-09-20T11:00:00.000Z', degraded: false });
+    s.putSnapshot('entra', partial('2026-09-20T12:00:00.000Z', 9, 'the groups page'));
+    s.putSnapshot('entra', partial('2026-09-20T12:05:00.000Z', 12, 'the sign-in page'));
+
+    const back = s.getSnapshot('entra');
+    expect(back?.data).toEqual({ signals: 12 });
+    expect(back?.error?.message).toBe('These counts are lower bounds: the sign-in page failed.');
+    expect(back?.fetchedAt).toBe('2026-09-20T12:05:00.000Z');
+    // The column too, independently: payload and last_error must have moved
+    // together. If only one of the two writes landed, the API would compose a
+    // mismatched pair and every assertion above that reads through getSnapshot
+    // could still agree with itself.
+    const raw = s.db.prepare('SELECT payload, last_error FROM snapshots WHERE source = ?')
+      .get('entra') as { payload: string; last_error: string };
+    expect(JSON.parse(raw.payload).data).toEqual({ signals: 12 });
+    expect(JSON.parse(raw.last_error).message).toContain('sign-in page');
   });
 
   it('still drops nothing when a TRANSPORT failure follows a partial', () => {
