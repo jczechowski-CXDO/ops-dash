@@ -161,13 +161,26 @@ and then had six messages delivered in a single batch at its next turn boundary,
 four from the peer it had just described as silent. Both directions had worked the whole
 time; only the timing was wrong, and only inbound.
 
-That is **one controlled observation**, and the agent that made it asked for this paragraph
-to say so rather than assert a mechanism — which is the right instinct and this file's own
-standard. What corroborates it is weaker but consistent: every teammate message the lead has
-received all session arrived batched at a turn boundary, and both agents repeatedly reported
-messages "crossing in flight" with their own. Nobody has seen the transport. Treat the
-consequences below as sound and the cause as unproven; if a message ever does arrive
-mid-turn, this paragraph is the thing to correct.
+The agent that measured it asked for this paragraph to say so rather than assert a
+mechanism, which is the right instinct and this file's own standard. Since then the other
+side of that exchange corroborated it independently, and **the direction of the failure is
+now settled by evidence neither agent could have manufactured**:
+
+- The receiving agent got two messages **in one batch** that had been sent roughly fifty
+  minutes apart, then two more batched with a third.
+- Sends never failed either way. The proof is in the commits: `d495367`'s message contains
+  the other agent's phrasing verbatim — "interpolating a measurement nobody took",
+  "`0` is a measurement, not a hole", "asserted in markup, unverified on screen". Those
+  arrived between `0c593af` (21:50:37) and `d495367` (21:53:05), so a message landed
+  **between two commits** two and a half minutes apart.
+- A receiver deep in a two-minute Playwright run is many minutes from its next tool round,
+  which is why "I committed without hearing back" was accurate when written and wrong by the
+  time it was read.
+
+**So the constraint is delay, not delivery.** Both agents' accounts were true. Nobody has
+seen the transport, so treat batched-at-a-boundary as the observed pattern rather than a
+guaranteed mechanism; the consequences below hold regardless, because they follow from the
+delay alone.
 
 Three consequences, all of which cost real time before they were understood:
 
@@ -184,7 +197,8 @@ Three consequences, all of which cost real time before they were understood:
   say plainly in the commit that the open questions remain open and the file is yours to
   change on their word. That is what made a late reply cost nothing. Had the first version
   renamed a prop or changed a render path, answers arriving afterwards would have meant
-  rework in files the author does not own.
+  rework in files the author does not own. Both agents arrived at this independently and it
+  is the pattern that makes a laggy channel safe rather than reckless.
 
 A good check before dispatching: *if I spawn this, will there be two live agents of
 this type, and is the second one doing something the first genuinely cannot?* If the

@@ -1743,3 +1743,30 @@ The fix was not "ignore that line" but *"if that baseline moves, it is a regress
 and say so"*, which is a **stricter** criterion than the wrong one it replaced. Worth
 noticing: correcting a false permission usually makes the other agent's job easier, not
 harder, because a false permission is always a permission to skip something.
+
+
+## Read the diff count before you re-run (2026-09-20)
+
+A single Playwright capture — `fidelity.spec.ts:43 interactive states > nav item · dark` —
+failed on the first full run after the sparkline wiring, and passed on two full runs after.
+Nothing in either commit touches a sidebar nav item.
+
+**The diagnosis was destroyed by the next action.** Playwright cleans
+`node_modules/.playwright-results` at the start of a run, so re-running wiped the pixel
+delta before anyone read it — and that number is the entire diagnosis. Near the noise floor
+means a hover captured mid-transition; far from it means something real. Without it there is
+no way to tell a flake from a regression that happens not to reproduce.
+
+The likely cause, recorded as a hypothesis rather than a finding: another agent committed
+**during** that run. The unit phase of the same command had two failures in
+`dashboard.test.tsx` with a `TypeError` shaped like a torn read, and both vanished on the
+next run once the commit had landed. A tree changing underneath a build-and-preview run
+explains both. Nobody verified it.
+
+The rule: **read the failure's numbers before taking the action that clears them.** It is
+the same shape as the rest of this file — a measurement that existed, was not looked at, and
+cannot be recovered. And it has a companion worth remembering: **do not run the visual suite
+while another agent is committing.** A build-and-preview run reads the tree for two minutes;
+anything landing inside that window is a torn read.
+
+If `nav item · dark` fails again, capture the delta first. It is not new.
