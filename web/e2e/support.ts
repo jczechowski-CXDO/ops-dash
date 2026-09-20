@@ -51,6 +51,9 @@ export type RouteName = (typeof ROUTES)[number][0];
  *  baseline is a false diff waiting to happen. */
 export const FROZEN = new Date('2026-09-18T09:41:02Z');
 
+/** Budget for the install→pauseAt round trip. See `prepare`. */
+const PAUSE_SLACK_MS = 1000;
+
 /**
  * Select the world by query parameter, because the sidebar's segmented control
  * is `import.meta.env.DEV`-gated and is stripped from the production build we
@@ -72,13 +75,22 @@ export function urlFor(path: string, world: World): string {
  * is the check that would have caught it.
  */
 export async function prepare(page: Page, theme: Theme): Promise<void> {
-  await page.clock.install({ time: FROZEN });
+  // Install one second BEFORE the instant we photograph, then pause AT it.
+  //
   // install() alone does not stop time — measured: Date.now() was 270ms past
   // the installed instant by the time the page was up, which is a header clock
   // and a 30-second countdown free to move between one screenshot and the next.
-  // Pause at the same instant, BEFORE the first navigation: pauseAt fast-
-  // forwards, and "fast-forward to the past" is an error once the page has
-  // been open for a moment.
+  // So we pause, BEFORE the first navigation. But pauseAt only fast-FORWARDS:
+  // installing at FROZEN and pausing at FROZEN gives the round trip between the
+  // two calls a budget of zero, and when the box is loaded the clock is already
+  // past it — "Cannot fast-forward to the past", an intermittent harness error
+  // on an arbitrary capture, which reads like a visual regression and is not one.
+  // Reproduced by widening that window to 300ms; it throws every time.
+  //
+  // The second of slack makes the pause always forward. FROZEN itself is
+  // unchanged, so every baseline still renders the same instant: the probe that
+  // set this line asserted Date.now() in the page is exactly FROZEN afterwards.
+  await page.clock.install({ time: new Date(FROZEN.getTime() - PAUSE_SLACK_MS) });
   await page.clock.pauseAt(FROZEN);
   await page.addInitScript((t) => {
     try {
