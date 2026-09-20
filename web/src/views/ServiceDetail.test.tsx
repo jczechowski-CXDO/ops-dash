@@ -325,6 +325,15 @@ describe('the view and the chart agree about whether anything answered', () => {
    * So the assertion is the equivalence across several shapes, not the two
    * current values — the form `allOperational`/`isAffirmed` already uses. A
    * divergent copy fails this even when it happens to agree on today's data.
+   *
+   * **Observed, not hoped.** Both drifts were run against this file by the
+   * owner of the other definition, who reported the names rather than a count:
+   * a chart that treats `0` as a hole reddens `a zero measurement` and `zero
+   * among holes`; a chart that stops excluding holes reddens `every probe
+   * failed` — and leaves `no series at all` green, because an empty array still
+   * takes the component's early return and emits no frame to catch. The
+   * survivor matters as much as the kill: a fix that reddened both would have
+   * been firing for the wrong reason.
    */
   const SHAPES: Array<{ name: string; spark: Array<number | null> | null }> = [
     { name: 'no series at all', spark: null },
