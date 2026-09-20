@@ -5,6 +5,101 @@ import { describeThrown } from './describeThrown.js';
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
+ * What this helper returns: a `SourceResult`, plus one fact the contract has no
+ * room for.
+ *
+ * **`shared/src/contracts.ts` is NOT amended and does not need to be.** This is
+ * a subtype: `{ code, message, retryAfterMs? }` is assignable to
+ * `{ code, message }`, so every existing caller typed on `SourceResult<T>`
+ * compiles untouched and sees exactly the two fields the contract promises. The
+ * extra one is visible only to a caller that goes looking for it. That is the
+ * difference between widening what one module hands back and changing what the
+ * contract means, and only the second needs John.
+ *
+ * **Why it is on `error` rather than at the top level.** A retry hint exists
+ * only when something went wrong, so hanging it off `error` makes it
+ * unreachable in the success case by construction rather than by discipline.
+ * It also keeps the shape of a successful result byte-identical to what it was
+ * before, which matters because `store/db.ts` persists these.
+ *
+ * **One behaviour change, stated rather than buried:** `db.ts` stores a failed
+ * read as `JSON.stringify(result.error)`, so a 429 or 503 that carried the
+ * header now persists `retryAfterMs` alongside the code and the message. That
+ * is a gain — "the vendor told us to wait sixty seconds" is exactly the kind of
+ * fact this project would rather have on the record than swallow — but it is a
+ * change to what lands in the store and it should be seen, not discovered.
+ */
+export type FetchOutcome<T> = Omit<SourceResult<T>, 'error'> & {
+  error?: {
+    code: string;
+    message: string;
+    /**
+     * What the server's `Retry-After` header asked for, in milliseconds.
+     *
+     * **Absent when there was no header, or one we could not read** — never
+     * `0`, because a caller reading `0` would retry immediately, which is the
+     * opposite of what a missing instruction means. `0` IS emitted for an
+     * HTTP-date already in the past, because that is a real instruction
+     * meaning "now" rather than an absence. Those two cases look identical in
+     * a number and are not the same fact.
+     *
+     * Reported, not obeyed. This module says what the server said; how long a
+     * caller is actually willing to wait is the caller's policy.
+     */
+    retryAfterMs?: number;
+  };
+};
+
+/**
+ * `Retry-After`, in milliseconds, or `undefined`.
+ *
+ * Both RFC 9110 forms are handled, and **`Date.parse` is the hazard in both
+ * directions**, which is why this is two guarded branches and not one clever
+ * one. Measured in this V8, not assumed:
+ *
+ *   Date.parse('60')   -> 1960-01-01, i.e. -315594000000
+ *   Date.parse('1.5')  -> 2001-01-05, a perfectly valid date in the past
+ *
+ * So the order matters: delta-seconds is tested first, because otherwise the
+ * single commonest header value there is — `60` — comes back as sixty-six years
+ * ago. And the date branch has to be FENCED as well as second, because a
+ * malformed delta-seconds like `1.5` falls through to it, parses cleanly as a
+ * date already past, and returns **`0`** — which this field defines as "retry
+ * immediately". That is the absent-becomes-zero failure this whole type exists
+ * to prevent, reintroduced inside the parser meant to prevent it. Caught by the
+ * test below on the first run, not by review.
+ *
+ * The fence: an HTTP-date always contains a month name and a weekday, so a
+ * value with no letter in it is never one. Exported for its own test, because a
+ * parser is the one kind of code whose wrong answer is a plausible number
+ * rather than a crash.
+ */
+export function parseRetryAfter(header: string | null | undefined, now: number): number | undefined {
+  if (header === null || header === undefined) return undefined;
+  const value = header.trim();
+  if (value === '') return undefined;
+
+  // delta-seconds: RFC 9110 says a non-negative integer and nothing else. A
+  // negative number, a decimal or `60s` is a header we cannot read, which is
+  // `undefined` — not `0`. Guessing at a malformed instruction is how a
+  // misparse becomes a hot loop against a server already asking for quiet.
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds * 1000 : undefined;
+  }
+
+  // The fence. Without it `1.5`, `1e3` and every other malformed delta-seconds
+  // that V8 will accept as a date arrives here and comes back as 0.
+  if (!/[A-Za-z]/.test(value)) return undefined;
+
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return undefined;
+  // A date in the past is "you may retry now", which is a measurement of zero
+  // rather than an absence of one. See `retryAfterMs`.
+  return Math.max(0, at - now);
+}
+
+/**
  * The body cap, and why a cap exists at all.
  *
  * 5 MB is about fifty times the largest thing we actually fetch — Zendesk's
@@ -39,6 +134,10 @@ const MAX_REDIRECTS = 3;
  *   body over the cap        -> error, code `body_too_large`
  *   target or redirect unsafe-> error, code from `refuseTarget`
  *
+ * A non-2xx additionally carries `error.retryAfterMs` when the response said
+ * `Retry-After` and we could read it — reported, never obeyed here. See
+ * `FetchOutcome`.
+ *
  * These are per-transport, not per-vendor, which is why they are not in each
  * adapter. `guards.test.ts` fails the build on a bare `fetch(` anywhere else in
  * `server/src`, because an adapter with its own error mapping has bypassed all
@@ -65,7 +164,7 @@ export async function fetchJson<T>(
     body?: string;
     headers?: Record<string, string>;
   } = {},
-): Promise<SourceResult<T>> {
+): Promise<FetchOutcome<T>> {
   const { fetchImpl = fetch, timeoutMs = 10_000, maxBytes = MAX_BODY_BYTES, method = 'GET', body: reqBody, headers: extraHeaders } = opts;
   const fetchedAt = new Date().toISOString();
   const controller = new AbortController();
@@ -112,7 +211,12 @@ export async function fetchJson<T>(
       }
       const location = response.headers.get('location');
       if (!location) {
-        return err(fetchedAt, `http_${response.status}`, `${response.status} with no Location header`);
+        return err(
+          fetchedAt,
+          `http_${response.status}`,
+          `${response.status} with no Location header`,
+          parseRetryAfter(response.headers.get('retry-after'), Date.now()),
+        );
       }
       // Resolved against the current target, so a relative Location works — and
       // is then re-validated like any other, rather than inheriting trust from
@@ -122,7 +226,16 @@ export async function fetchJson<T>(
     }
 
     if (!response.ok) {
-      return err(fetchedAt, `http_${response.status}`, `${response.status} ${response.statusText}`);
+      // The one place a server gets to tell us how long to stay away. Captured
+      // for every non-2xx rather than only for 429: a 503 carrying the header
+      // is making the same statement, and this module's job is to report what
+      // was said and not to decide which statuses are allowed to say it.
+      return err(
+        fetchedAt,
+        `http_${response.status}`,
+        `${response.status} ${response.statusText}`,
+        parseRetryAfter(response.headers.get('retry-after'), Date.now()),
+      );
     }
 
     const read = await readCapped(response, maxBytes);
@@ -229,10 +342,20 @@ async function readCapped(
   return { tooLarge: false, text: new TextDecoder().decode(joined) };
 }
 
-function err<T>(fetchedAt: string, code: string, message: string): SourceResult<T> {
+function err<T>(
+  fetchedAt: string,
+  code: string,
+  message: string,
+  retryAfterMs?: number,
+): FetchOutcome<T> {
   // No `data` key at all rather than `data: undefined` —
   // exactOptionalPropertyTypes makes those different types, and a consumer
   // destructuring `data` should get nothing rather than a present-but-empty
-  // field it might spread.
-  return { fetchedAt, degraded: false, error: { code, message } } as SourceResult<T>;
+  // field it might spread. The same rule governs `retryAfterMs`: absent when
+  // there was no usable header, never present-and-zero.
+  return {
+    fetchedAt,
+    degraded: false,
+    error: { code, message, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) },
+  } as FetchOutcome<T>;
 }

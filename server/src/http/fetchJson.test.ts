@@ -1,15 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchJson, type FetchLike } from './fetchJson.js';
+import { fetchJson, parseRetryAfter, type FetchLike } from './fetchJson.js';
 
 /** A stub Response good enough for the four rules. Deliberately hand-built
  *  rather than using undici's: the point is to control the exact body and
  *  status a hostile or broken feed would send. */
-const res = (body: string, init: { status?: number; contentType?: string } = {}): Response =>
+const res = (
+  body: string,
+  init: { status?: number; contentType?: string; headers?: Record<string, string> } = {},
+): Response =>
   ({
     ok: (init.status ?? 200) >= 200 && (init.status ?? 200) < 300,
     status: init.status ?? 200,
     statusText: 'stub',
-    headers: new Headers({ 'content-type': init.contentType ?? 'application/json' }),
+    headers: new Headers({ 'content-type': init.contentType ?? 'application/json', ...init.headers }),
     text: async () => body,
   }) as unknown as Response;
 
@@ -355,5 +358,112 @@ describe('a thrown value that resists being stringified', () => {
       expect(typeof result.error?.message).toBe('string');
       expect(result.fetchedAt).toBeTruthy();
     }
+  });
+});
+
+describe('Retry-After — what the server said, reported and not obeyed', () => {
+  describe('the parser', () => {
+    const NOW = Date.parse('2026-09-20T12:00:00Z');
+
+    it('reads delta-seconds as seconds, NOT as a year', () => {
+      // The trap this function is arranged around. `Date.parse('60')` is the
+      // first of January **1960** in this V8 — a bare integer is a valid date
+      // string — so a date-first parser turns the commonest header value there
+      // is into sixty-six years ago. Measured, not assumed: my first draft of
+      // this comment said 2060 and the assertion below is what corrected it.
+      expect(parseRetryAfter('60', NOW)).toBe(60_000);
+      expect(parseRetryAfter('0', NOW)).toBe(0);
+      expect(parseRetryAfter('  120  ', NOW)).toBe(120_000);
+      // The control for the claim in the name: a bare integer IS a parseable
+      // date, and it is nowhere near a minute from now.
+      expect(Date.parse('60')).not.toBeNaN();
+      expect(Math.abs(Date.parse('60') - NOW)).toBeGreaterThan(60_000 * 1000);
+    });
+
+    it('reads the HTTP-date form as a distance from now', () => {
+      expect(parseRetryAfter('Sun, 20 Sep 2026 12:00:30 GMT', NOW)).toBe(30_000);
+      expect(parseRetryAfter('Sun, 20 Sep 2026 12:05:00 GMT', NOW)).toBe(300_000);
+    });
+
+    it('a date already past is ZERO, and an unreadable header is ABSENT', () => {
+      // The distinction the whole field rests on, and the two cases look
+      // identical in a number. A past date is a real instruction meaning "now";
+      // a header we cannot read is no instruction at all, and a caller reading
+      // `0` for it would retry immediately against a server asking for quiet.
+      expect(parseRetryAfter('Sun, 20 Sep 2026 11:00:00 GMT', NOW)).toBe(0);
+      expect(parseRetryAfter(null, NOW)).toBeUndefined();
+      expect(parseRetryAfter(undefined, NOW)).toBeUndefined();
+      expect(parseRetryAfter('', NOW)).toBeUndefined();
+      expect(parseRetryAfter('   ', NOW)).toBeUndefined();
+      expect(parseRetryAfter('soon', NOW)).toBeUndefined();
+      expect(parseRetryAfter('-30', NOW)).toBeUndefined();     // RFC says non-negative
+      expect(parseRetryAfter('60s', NOW)).toBeUndefined();
+      // These four are the ones that found a real bug. Each is a malformed
+      // delta-seconds that V8 accepts as a DATE — `Date.parse('1.5')` is the
+      // fifth of January 2001 — so before the letter fence they fell through to
+      // the date branch, landed in the past, and came back as `0`: "retry
+      // immediately", against a server that had just asked for quiet. The
+      // absent-becomes-zero failure, inside the parser written to prevent it.
+      expect(parseRetryAfter('1.5', NOW)).toBeUndefined();
+      expect(parseRetryAfter('1e3', NOW)).toBeUndefined();
+      expect(parseRetryAfter('0x10', NOW)).toBeUndefined();
+      expect(parseRetryAfter('1/2', NOW)).toBeUndefined();
+    });
+
+    it('refuses an integer too large to be exact rather than rounding it', () => {
+      expect(parseRetryAfter('9'.repeat(25), NOW)).toBeUndefined();
+    });
+  });
+
+  describe('through fetchJson', () => {
+    it('a 429 carrying the header reports it in milliseconds', async () => {
+      const out = await fetchJson('https://x/y', {
+        fetchImpl: stub(res('slow down', { status: 429, headers: { 'retry-after': '30' } })),
+      });
+      expect(out.error?.code).toBe('http_429');
+      expect(out.error?.retryAfterMs).toBe(30_000);
+      // And the invariant that outranks all of this: it did not throw, and the
+      // two fields the frozen contract promises are exactly as they were.
+      expect(out.error?.message).toBe('429 stub');
+      expect(out.data).toBeUndefined();
+      expect(out.degraded).toBe(false);
+    });
+
+    it('a 503 carrying the header reports it too — not just 429', async () => {
+      // This module says what the server said. Deciding which statuses are
+      // allowed to ask for quiet is a caller's policy, and one made here would
+      // be invisible to the caller making it.
+      const out = await fetchJson('https://x/y', {
+        fetchImpl: stub(res('later', { status: 503, headers: { 'retry-after': '5' } })),
+      });
+      expect(out.error?.code).toBe('http_503');
+      expect(out.error?.retryAfterMs).toBe(5_000);
+    });
+
+    it('a non-2xx WITHOUT the header carries no key at all — not a zero', async () => {
+      const out = await fetchJson('https://x/y', { fetchImpl: stub(res('nope', { status: 500 })) });
+      expect(out.error?.code).toBe('http_500');
+      expect(out.error).not.toHaveProperty('retryAfterMs');
+      // `toHaveProperty` rather than `toBeUndefined`, because `{ retryAfterMs:
+      // undefined }` satisfies the latter and is a different type under
+      // exactOptionalPropertyTypes — and would spread into a caller's object.
+      expect(Object.keys(out.error!).sort()).toEqual(['code', 'message']);
+    });
+
+    it('a successful read is byte-identical to what it was before', async () => {
+      // The widening must be unreachable on the success path by construction.
+      const out = await fetchJson<{ ok: number }>('https://x/y', { fetchImpl: stub(res('{"ok":1}')) });
+      expect(Object.keys(out).sort()).toEqual(['data', 'degraded', 'fetchedAt']);
+    });
+
+    it('still never throws, header or no header', async () => {
+      // The invariant that outranks every addition to this file.
+      for (const header of ['30', 'Sun, 20 Sep 2026 12:00:30 GMT', 'nonsense', '-1', '']) {
+        const out = await fetchJson('https://x/y', {
+          fetchImpl: stub(res('x', { status: 429, headers: { 'retry-after': header } })),
+        });
+        expect(out.error?.code).toBe('http_429');
+      }
+    });
   });
 });

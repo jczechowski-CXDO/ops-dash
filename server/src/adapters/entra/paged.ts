@@ -80,13 +80,19 @@ export const MAX_PAGES = 20;
  * all-or-nothing rule that one status cost the entire snapshot. Graph throttles
  * the sign-in log hard and a 1000-row page is an expensive question to ask it.
  *
- * **`Retry-After` is not readable from here.** `fetchJson` returns a code and a
- * message and no headers, deliberately — it is the one door and it narrows what
- * comes back through it. So this is a fixed exponential backoff rather than the
- * interval Microsoft actually asked for, which is the conservative substitute
- * and not the correct one. Widening `fetchJson`'s return to carry `Retry-After`
- * is a change to a file this adapter does not own; it is reported rather than
- * made.
+ * **The server's own number is preferred over this, when it gives one.**
+ * `fetchJson` now reports a parsed `Retry-After` as `error.retryAfterMs`, so
+ * the exponential below is the FALLBACK — what we do when Microsoft declined to
+ * say. Waiting an interval we invented when the server named one is guessing
+ * over a measurement.
+ *
+ * `RETRY_AFTER_CEILING_MS` is the other half, and it is policy rather than
+ * fact: `fetchJson` reports what was said, and this decides how long we are
+ * willing to wait. Past the ceiling we **stop retrying** rather than clamping.
+ * Clamping would wait two minutes against a server that asked for an hour and
+ * then ask again, which earns a second 429 and tells the operator nothing; the
+ * honest answer is to report the throttle with the server's own number in it
+ * and let the poller come back on its next tick.
  *
  * **The numbers are measured, not guessed.** A first attempt at 2s/4s/8s was
  * still too short: the live 429 survived all fourteen seconds. Polling the
@@ -100,6 +106,9 @@ export const MAX_PAGES = 20;
  */
 export const MAX_RETRIES = 4;
 export const RETRY_BASE_MS = 5_000;
+/** The longest wait this adapter will sit through inside one poll. Beyond it,
+ *  the throttle is reported rather than waited out — see above. */
+export const RETRY_AFTER_CEILING_MS = 120_000;
 
 export type Row = Record<string, unknown>;
 
@@ -120,10 +129,16 @@ export async function readAll(
   url: string,
   token: string,
   fetchImpl: FetchLike | undefined,
-  opts: { maxPages?: number; maxRetries?: number; sleep?: (ms: number) => Promise<void> } = {},
+  opts: {
+    maxPages?: number;
+    maxRetries?: number;
+    ceilingMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): Promise<PagedRead> {
   const maxPages = opts.maxPages ?? MAX_PAGES;
   const maxRetries = opts.maxRetries ?? MAX_RETRIES;
+  const ceiling = opts.ceilingMs ?? RETRY_AFTER_CEILING_MS;
   // Injected so the retry tests cost milliseconds rather than fourteen seconds,
   // and so a test can COUNT the waits instead of inferring them from a clock.
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((done) => { setTimeout(done, ms); }));
@@ -174,7 +189,23 @@ export async function readAll(
     // telling us the pace is wrong, and coming back in fifteen minutes to ask
     // the identical question is not an answer to that.
     for (let attempt = 0; attempt < maxRetries && result.error?.code === 'http_429'; attempt += 1) {
-      await sleep(RETRY_BASE_MS * 2 ** attempt);
+      const asked = result.error.retryAfterMs;
+      if (asked !== undefined && asked > ceiling) {
+        // Longer than we are prepared to hold a poll open. Reported with the
+        // server's own figure, so the operator sees what Microsoft actually
+        // asked for rather than our decision about it.
+        return {
+          ok: false,
+          error: {
+            code: 'entra_http_429',
+            message: `throttled, and Retry-After asked for ${Math.round(asked / 1000)}s — longer than the ${Math.round(ceiling / 1000)}s this poll will wait, so it was not waited out`,
+          },
+        };
+      }
+      // The server's number when there is one; our exponential only when there
+      // is not. `asked` may legitimately be 0 — an HTTP-date already past —
+      // which is why this tests for `undefined` and not for falsiness.
+      await sleep(asked ?? RETRY_BASE_MS * 2 ** attempt);
       result = await fetchJson<unknown>(next, {
         headers: { authorization: `Bearer ${token}` },
         ...(fetchImpl ? { fetchImpl } : {}),

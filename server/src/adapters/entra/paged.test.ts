@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FetchLike } from '../../http/fetchJson.js';
-import { GRAPH_BETA, MAX_PAGES, MAX_RETRIES, RETRY_BASE_MS, readAll } from './paged.js';
+import { GRAPH_BETA, MAX_PAGES, MAX_RETRIES, RETRY_AFTER_CEILING_MS, RETRY_BASE_MS, readAll } from './paged.js';
 
 // fileURLToPath, not URL.pathname — G-1 in docs/RESUME.md.
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -211,7 +211,101 @@ describe('paging a Graph collection', () => {
     }
   });
 
+  it('waits exactly what Retry-After asked for, in preference to our exponential', async () => {
+    // The server named an interval; waiting one we invented instead is guessing
+    // over a measurement. 7s and 3s are neither of them values the exponential
+    // can produce, so this cannot pass by coincidence.
+    const waits: number[] = [];
+    let calls = 0;
+    const impl: FetchLike = async () => {
+      calls += 1;
+      if (calls === 1) return new Response('slow', { status: 429, headers: { 'retry-after': '7' } });
+      if (calls === 2) return new Response('slow', { status: 429, headers: { 'retry-after': '3' } });
+      return new Response(JSON.stringify({ value: [{ id: 'DEMO-SIGNIN-0001' }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const result = await readAll(START, 'stub-token', impl, { sleep: async (ms) => { waits.push(ms); } });
+    expect(result.ok).toBe(true);
+    expect(waits).toEqual([7_000, 3_000]);
+    // And not the fallback, which would have been these.
+    expect(waits).not.toEqual([RETRY_BASE_MS, RETRY_BASE_MS * 2]);
+  });
+
+  it('falls back to the exponential only when the server named nothing', async () => {
+    // The other half. Without it, "prefer Retry-After" could be implemented as
+    // "always use Retry-After" and every 429 with no header would wait
+    // `undefined` milliseconds — which `setTimeout` treats as zero, i.e. a hot
+    // loop against a server asking for quiet.
+    const waits: number[] = [];
+    let calls = 0;
+    const impl: FetchLike = async () => {
+      calls += 1;
+      if (calls <= 2) return new Response('slow', { status: 429 });   // no header
+      return new Response(JSON.stringify({ value: [] }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const result = await readAll(START, 'stub-token', impl, { sleep: async (ms) => { waits.push(ms); } });
+    expect(result.ok).toBe(true);
+    expect(waits).toEqual([5_000, 10_000]);
+    for (const w of waits) expect(Number.isFinite(w)).toBe(true);
+  });
+
+  it('honours a Retry-After of ZERO rather than treating it as no header', async () => {
+    // An HTTP-date already past parses to 0, which is a real instruction
+    // meaning "now". A `??`-versus-`||` slip here silently restores the
+    // five-second fallback and nothing else in the suite would notice.
+    const waits: number[] = [];
+    let calls = 0;
+    const past = new Date(Date.now() - 60_000).toUTCString();
+    const impl: FetchLike = async () => {
+      calls += 1;
+      if (calls === 1) return new Response('slow', { status: 429, headers: { 'retry-after': past } });
+      return new Response(JSON.stringify({ value: [] }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const result = await readAll(START, 'stub-token', impl, { sleep: async (ms) => { waits.push(ms); } });
+    expect(result.ok).toBe(true);
+    expect(waits).toEqual([0]);
+  });
+
+  it('refuses to wait out a Retry-After past the ceiling, and says the server’s number', async () => {
+    // Clamping would wait two minutes against a server that asked for an hour
+    // and then ask again, earning a second 429 and telling the operator
+    // nothing. Reporting it names the real figure.
+    const waits: number[] = [];
+    let calls = 0;
+    const impl: FetchLike = async () => {
+      calls += 1;
+      return new Response('slow', { status: 429, headers: { 'retry-after': '3600' } });
+    };
+    const result = await readAll(START, 'stub-token', impl, { sleep: async (ms) => { waits.push(ms); } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('entra_http_429');
+    expect(result.error.message).toContain('3600s');
+    expect(result.error.message).toContain('120s');
+    expect(waits).toEqual([]);      // it did not wait at all
+    expect(calls).toBe(1);          // and it did not ask again
+  });
+
+  it('waits out a Retry-After exactly AT the ceiling — the boundary', async () => {
+    // The other side of the comparison. `>` rather than `>=` is deliberate and
+    // a test that only ever used 3600 could not tell the two apart.
+    const waits: number[] = [];
+    let calls = 0;
+    const impl: FetchLike = async () => {
+      calls += 1;
+      if (calls === 1) return new Response('slow', { status: 429, headers: { 'retry-after': '120' } });
+      return new Response(JSON.stringify({ value: [] }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const result = await readAll(START, 'stub-token', impl, { sleep: async (ms) => { waits.push(ms); } });
+    expect(result.ok).toBe(true);
+    expect(waits).toEqual([RETRY_AFTER_CEILING_MS]);
+  });
+
   it('the backoff constants are real numbers', () => {
+    expect(RETRY_AFTER_CEILING_MS).toBeGreaterThan(RETRY_BASE_MS);
     expect(MAX_RETRIES).toBeGreaterThan(0);
     expect(RETRY_BASE_MS).toBeGreaterThan(0);
   });
