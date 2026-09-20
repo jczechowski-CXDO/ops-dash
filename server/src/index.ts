@@ -330,11 +330,27 @@ export function createApp(opts: AppOptions = {}) {
  * stops being true, the symptom is a blank title, which is visible, rather than
  * a type error nobody ever saw.
  *
- * `ack` and `muted` are absent because the schema has no column for them: they
- * are Milestone 4, and an ack recorded today would not survive a restart. That
- * is a known gap, not an oversight — it is also why incident ids are a hash of
- * the condition rather than a counter, so the ack has a stable row to land on
- * when M4 adds the column.
+ * `ack` and `muted` are absent, and **the reason has changed — do not "fix" this.**
+ *
+ * It used to be a gap: no column existed, and an ack would not have survived a
+ * restart. Milestone 4 closed that; `incident_actions` is real and
+ * `store.allIncidentFlags()` folds it. The reason now is a rule:
+ *
+ * **The engine must not become a function of operator actions.** This mapper
+ * feeds `correlate` and nothing else — it never reaches the wire (the API's own
+ * `toIncident` in `api/routes.ts` is the single join site, and that one DOES
+ * carry the flags). If `correlate` could see `ack`, an acknowledged incident
+ * would be capable of behaving differently from an identical unacknowledged one,
+ * and detection that changes because somebody clicked a button is not detection.
+ *
+ * Same principle as `ServiceSignal` being deliberately narrower than
+ * `ServiceStatus` one layer out: a rule handed more than it needs eventually
+ * becomes a function of it.
+ *
+ * The ids being a hash of the condition rather than a counter is still what makes
+ * the ack land on a stable row — and it is why a recurrence inside the window
+ * arrives still-acked while one outside it arrives clean. Both are tested in
+ * `store/incidentActions`.
  */
 export function rowToIncident(row: Record<string, unknown>): Incident {
   const resolvedAt = row['resolved_at'] ?? row['resolvedAt'];

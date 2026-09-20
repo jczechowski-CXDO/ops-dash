@@ -33,7 +33,7 @@ need rather than editing it.
 |---|---|---|---|---|
 | 1 | **Auth seam** — local user, route-table guard | `m4-auth` | `server/src/auth/**`, `server/src/api/routes.ts` | running · blocks 2, 3 |
 | 2 | **Ack / mute / resolve, persisted** | `m4-store` | `server/src/store/**` | running · store half only |
-| 3 | **Settings toggles a rule** | `m4-store` | `server/src/store/**` | queued behind 2 |
+| 3 | **Settings toggles a rule** | — | — | **store half was ALREADY DONE** (`db.ts` + 9 green tests + `index.ts:260` reads it every tick). Only the route (`m4-auth`) and rendering a disabled rule as disabled (`m4-views`) remain |
 | 4 | **Entra adapter** | `m4-entra` | `server/src/adapters/entra/**` | **DONE** `b5dc9f2`, live |
 | 5 | **Endpoints adapter** | — | — | **BLOCKED**: no EPC credential |
 | 6 | **Email adapter** | — | — | **BLOCKED**: no Hornetsecurity CP credential |
@@ -42,6 +42,8 @@ need rather than editing it.
 | 9 | `retryAfterMs` on the wire — amend or strip | lead | `DATA_CONTRACTS.md` / `routes.ts` | lead's call |
 | 10 | Seam round-trip test, now unblocked by the shared stub | lead | `server/src/entraSource.test.ts` | lead |
 | 11 | Resolved platform incidents reachable nowhere | — | needs a history route | queued behind 1 |
+| 12 | `Panel.tsx` has no member for *fresh data, partial read* | — | `web/src/components/**` | **change request, deliberately deferred.** `degraded:true` + data + a fresh `fetchedAt` classifies as `stale`, so the headline reads "a few seconds old" when the news is "these counts are lower bounds". True but a buried lede. Widening a shared type while four agents are mid-flight is how one vocabulary becomes four readings of it — do it when the wave is quiet |
+| 13 | Resolve-then-reopen needs a sentence on screen | `m4-views` | `web/src/views/**` | queued behind 1. Resolving a still-firing condition reopens it on the next tick, same id, ack intact. Correct, and unreadable as anything but a bug unless the button says so |
 
 **Why these four in parallel and not one queue.** They touch four disjoint directories and the
 seams between them are narrow and written into each brief. That is the case the agent-team
