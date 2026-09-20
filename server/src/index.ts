@@ -39,11 +39,12 @@ import { correlate, toStoreRow, parseSeverity, WINDOW_MS } from './engine/correl
 import type { ServiceSignal } from './engine/rules.js';
 import { buildApi, vendorSource, SERVICE_ORDER } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
-import { pollEntra } from './adapters/entra/index.js';
+import { pollEntraWithIdentity } from './adapters/entra/index.js';
 import { pollEndpoints } from './adapters/endpoints/index.js';
 import type { EpcTokenSource } from './adapters/endpoints/token.js';
 import { ENDPOINTS_SOURCE } from './api/routes.js';
 import type { EntraSnapshot } from '@ops-dash/shared';
+import type { IdentitySignal } from './engine/rules.js';
 
 
 export const VENDOR_INTERVAL_MS = 60_000;
@@ -80,6 +81,23 @@ export const ENTRA_INTERVAL_MS = 15 * 60_000;
  *  and folding it into a vendor key would put a Graph failure on the m365 tile —
  *  which has its own feed, saying something else. */
 export const ENTRA_SOURCE = 'entra';
+
+/**
+ * Where the identity facts live between the poll that produces them and the
+ * correlation tick that reads them.
+ *
+ * **A store key, deliberately not a `Source`.** Nobody polls it and nothing
+ * should judge its health — the colon keeps it from colliding with a
+ * `vendorSource()` key, and because `/api/health` derives its list from
+ * `schedule.allStatus()` rather than from stored keys, it cannot appear there
+ * as a source that never runs. Checked rather than assumed.
+ *
+ * **Written only on success.** A failed Entra poll leaves the last good
+ * identity in place rather than replacing it with an error row: `ENTRA_SOURCE`
+ * already tells that story, and `correlate` reads a missing or stale signal as
+ * *not evaluated*, which can neither open an incident nor clear one.
+ */
+export const ENTRA_IDENTITY_SOURCE = 'entra:identity';
 
 /**
  * Endpoint Central polls every fifteen minutes, like Entra and for the same
@@ -231,7 +249,7 @@ export function createApp(opts: AppOptions = {}) {
             const stored = store.getSnapshot(ENTRA_SOURCE);
             const previous = stored?.data !== undefined ? (stored.data as EntraSnapshot) : undefined;
 
-            const result = await pollEntra({
+            const { result, identity } = await pollEntraWithIdentity({
               tokens: opts.tokens!,
               ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
               now,
@@ -241,6 +259,16 @@ export function createApp(opts: AppOptions = {}) {
             // `putSnapshot` branches on `error`, so a failed read records the
             // attempt without overwriting the last good payload.
             store.putSnapshot(ENTRA_SOURCE, result);
+            // Success only — `identity` is absent whenever `result.data` is,
+            // because facts assembled from a half-failed poll are facts about
+            // nothing.
+            if (identity) {
+              store.putSnapshot(ENTRA_IDENTITY_SOURCE, {
+                data: identity,
+                fetchedAt: result.fetchedAt,
+                degraded: false,
+              });
+            }
             return result;
           },
         },
@@ -334,7 +362,22 @@ export function createApp(opts: AppOptions = {}) {
     // not on the next restart. An absent key is "no override" and `evaluate`
     // falls back to the rule's own default — see `store.ruleState`.
     const enabledRules = store.ruleState();
-    const incidents = correlate({ at, services: signals(), open, enabledRules, windowMs: WINDOW_MS });
+    // Read back from the store like everything else, so the engine sees what
+    // was actually kept rather than a value handed to it. `getSnapshot` returns
+    // undefined before the first Entra poll and `correlate` reads that as *the
+    // identity rules were not evaluated* — so the cold start is handled by the
+    // same mechanism as a stale signal, and neither can open an incident or
+    // clear one.
+    const storedIdentity = store.getSnapshot(ENTRA_IDENTITY_SOURCE);
+    const identity = storedIdentity?.data as IdentitySignal | undefined;
+    const incidents = correlate({
+      at,
+      services: signals(),
+      open,
+      enabledRules,
+      windowMs: WINDOW_MS,
+      ...(identity ? { identity } : {}),
+    });
     for (const incident of incidents) store.putIncident(toStoreRow(incident));
     return incidents;
   }

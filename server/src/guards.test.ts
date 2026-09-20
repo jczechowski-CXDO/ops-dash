@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RULES } from './engine/rules.js';
 
 /**
  * Repository guards for `server/`.
@@ -367,72 +366,3 @@ describe('the engine reads no operator action', () => {
   });
 });
 
-/* ------------------------------------------- the four identity rules are not wired */
-
-/**
- * **`spray`, `risky`, `secrets` and `legacy` cannot fire in production, and this
- * test exists so that nobody discovers it by trusting them.**
- *
- * G6 HIGH-3. The engine implements all four correctly — the window travels with
- * the number, the thresholds are asserted, a wrong window is refused loudly.
- * `correlate` accepts an `IdentitySignal`. What does not exist is a **producer**:
- * nothing in `server/` outside `engine/` builds one, so `correlateNow` never
- * passes `identity`, `evaluatedRuleKeys` excludes all four, and they can neither
- * open an incident nor resolve one.
- *
- * **It fails safe, and that is exactly why it needs a test rather than a note.**
- * A rule that silently never fires is indistinguishable from an estate that is
- * quiet — the same shape as the wrong-greens this project keeps finding, one
- * layer up. `RULES` declares seven rows with `enabled: true`, and Settings
- * renders that, so an operator is currently told we are watching for a confirmed
- * compromised account. We are not.
- *
- * **This is a deliberate deferral, not an oversight**, and it is pinned here
- * rather than written in a plan because a deferral in a document is a deferral
- * that goes stale silently — this repo has counted four accurate comments that
- * failed to prevent what they described.
- *
- * **What closes it:** `m4-entra`'s approved `pollEntraWithIdentity` returning
- * `{ result, identity }`, the composition root storing the identity under its own
- * key on success only, and `correlateNow` reading it back. One known obstacle is
- * already recorded: the adapter's `EXPIRY_HORIZON_DAYS` is 30 and
- * `SECRETS_HORIZON_DAYS` is 14, so the engine will throw `WrongWindowError` until
- * the producer supplies a 14-day count — which is the refusal design working, not
- * a bug to route around.
- *
- * **This test goes RED the day somebody wires it.** That is the point: whoever
- * closes the gap is forced to come here and say so, rather than leaving a stale
- * claim behind them.
- */
-describe('the identity rules are declared but not yet reachable', () => {
-  const IDENTITY_RULES = ['spray', 'risky', 'secrets', 'legacy'];
-
-  it('nothing outside the engine builds an IdentitySignal — so the four rules never run', () => {
-    const producers = sources()
-      .filter((f) => !rel(f.path).startsWith('server/src/engine/'))
-      .filter((f) => rel(f.path) !== 'server/src/guards.test.ts')
-      .filter((f) => /\bIdentitySignal\b/.test(f.code))
-      .map((f) => rel(f.path));
-    // When this goes red, the gap has CLOSED. Delete this describe block, wire
-    // `correlateNow`, and record it — do not add the new file to an allowlist.
-    expect(producers).toEqual([]);
-  });
-
-  it('and the engine really does declare all four, so this is not passing over a typo', () => {
-    // NON-VACUITY. The assertion above is an absence claim and would pass
-    // perfectly if the rules had been renamed or removed — in which case the
-    // deferral it documents would be describing something that no longer exists.
-    const declared = RULES.map((r) => r.key);
-    for (const key of IDENTITY_RULES) expect(declared).toContain(key);
-  });
-
-  it('all four still read as enabled, which is the operator-facing half of the gap', () => {
-    // The reason this is HIGH rather than a chore. Settings renders `enabled`,
-    // so today the screen asserts coverage the process does not provide. Pinned
-    // so that "make them fire" and "stop claiming they do" are both visible
-    // options rather than one being forgotten.
-    for (const key of IDENTITY_RULES) {
-      expect(RULES.find((r) => r.key === key)?.enabled).toBe(true);
-    }
-  });
-});
