@@ -7,7 +7,14 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useSearchParams } from 'react-router';
 import { fixtures, type DemoMode, type FixtureBundle } from '../fixtures/index.js';
 
-const Ctx = createContext<{ mode: DemoMode; setMode: (m: DemoMode) => void; bundle: FixtureBundle } | null>(null);
+const Ctx = createContext<{
+  mode: DemoMode;
+  setMode: (m: DemoMode) => void;
+  bundle: FixtureBundle;
+  /** Whether this session is showing a demo world at all, as opposed to which
+   *  one. Sticky across navigation for the same reason `mode` is — see below. */
+  isDemo: boolean;
+} | null>(null);
 
 /** Which world we show when nothing asks for one. */
 export const DEFAULT_MODE: DemoMode = 'sev1';
@@ -45,15 +52,35 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
   const [params] = useSearchParams();
   const requested = parseDemoMode(params.get(DEMO_PARAM));
   const [mode, setMode] = useState<DemoMode>(requested ?? DEFAULT_MODE);
+  /**
+   * Whether we are in a demo world at all — a separate question from which one,
+   * and the reason this lives here rather than being re-derived.
+   *
+   * `DataSourceSwitch` used to read `?demo=` from the URL itself on every
+   * render. It agreed with this provider on the first paint and disagreed the
+   * moment anything navigated, because in-app links are `/services/${id}` and
+   * drop the parameter: `mode` stayed put, `isDemo` flipped to false, and one
+   * click on a tile left the fixtures, mounted the live provider and started
+   * fetching `/api/*` — which in a preview build nothing serves, so the page
+   * fell back to a generic title.
+   *
+   * Two components answering "which world am I in" with two implementations is
+   * the same defect this codebase has now hit four times. There is one answer
+   * and it is here.
+   */
+  const [isDemo, setIsDemo] = useState<boolean>(requested !== null);
 
   // An explicit request wins, including when it arrives by navigation rather
   // than on first load. With no parameter the current mode stands, so the
   // sidebar control keeps working and a plain link does not reset the view.
   useEffect(() => {
-    if (requested) setMode(requested);
+    if (requested) {
+      setMode(requested);
+      setIsDemo(true);
+    }
   }, [requested]);
 
-  const value = useMemo(() => ({ mode, setMode, bundle: fixtures[mode] }), [mode]);
+  const value = useMemo(() => ({ mode, setMode, bundle: fixtures[mode], isDemo }), [mode, isDemo]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

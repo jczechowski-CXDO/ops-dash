@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
-import { DEMO_PARAM, parseDemoMode } from '../app/DemoModeProvider.js';
+import { useDemoMode } from '../app/DemoModeProvider.js';
 import { LiveDataProvider } from './DataSource.js';
 
 /**
@@ -24,7 +23,9 @@ import { LiveDataProvider } from './DataSource.js';
  * which is why wiring the live path cost no existing test a change.
  */
 export function DataSourceSwitch({ children }: { children: ReactNode }) {
-  const [params] = useSearchParams();
-  const demo = parseDemoMode(params.get(DEMO_PARAM)) !== null;
-  return demo ? <>{children}</> : <LiveDataProvider>{children}</LiveDataProvider>;
+  // Asks the provider rather than re-reading the URL. Re-deriving it here made
+  // this component disagree with `DemoModeProvider` after any in-app
+  // navigation, because links drop `?demo=` — see `isDemo` there.
+  const { isDemo } = useDemoMode();
+  return isDemo ? <>{children}</> : <LiveDataProvider>{children}</LiveDataProvider>;
 }
