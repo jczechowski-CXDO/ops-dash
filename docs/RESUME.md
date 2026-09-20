@@ -2036,6 +2036,52 @@ and no amount of mutation testing inside that vocabulary would have surfaced it.
 argument for the soak, and it arrived fifteen minutes in.** A definition of done that lists
 "survives a night" is not asking for an uptime figure — this is what it is for.
 
+## What the Graph app can actually do, measured (2026-09-20)
+
+`m4-entra` probed the live tenant before building against the notes, and three recorded facts
+were wrong. Shapes only — no directory values in any transcript or committed file.
+
+- **The grant is ~80 roles, and every one is `*.Read*`.** No write scope anywhere, so the
+  read-only premise is held **mechanically** rather than by everyone remembering it. That is
+  worth more than the prose claim it replaces.
+- **`IdentityRiskEvent.Read.All` IS granted** and `/identityProtection/riskDetections` returns
+  200. The note saying it 403s is stale; struck.
+- **The cardinalities in `CLAUDE.md` are not directory cardinalities, and both numbers are
+  true.** `~512 users` is licensed staff. The directory holds **1658 users** (2 pages at
+  `$top=999`), **514 guests**, 981 rows in `userRegistrationDetails`, 104 directory roles and
+  **1473 app registrations**. Do not "correct" one into the other — an adapter must page
+  against 1658, and the business description is about 512. Also measured: `$count=true` with
+  `ConsistencyLevel: eventual` returns **no** `@odata.count` on signIns, so every sign-in count
+  has to be reached by paging.
+
+**And a real capability gap: v1.0 sign-in logs cannot answer the question the contract asks.**
+`signInEventTypes` is beta-only, so `/v1.0/auditLogs/signIns` is silently interactive-only.
+Measured over one 24h window: v1.0 reports **153 failed sign-ins across 44 accounts**; the beta
+query including non-interactive returned a **full 1000-row first page and was still going**. A
+v1.0 adapter would ship a confident, wrong, low number — the exact reads-plausible-and-is-false
+shape. Ruled: **use beta**, with the v1.0 `400` pinned in a test so the reason survives someone
+tidying the URL back. The beta risk is the safe failure — a shape change returns an error and
+the panel says "we could not look"; v1.0 fails the other way, silently and forever.
+
+## The cold start is now a checklist item, not a lesson (2026-09-20)
+
+Three times in two days, in three unrelated components:
+
+1. `INC-119d4dc7` — the blackout rule read four `never_polled` services as a correlated
+   failure, minting a phantom Sev2 on every restart.
+2. The `ourside` rule would have done the same an hour after that fix was written: the store
+   holds probe history across a restart while the vendor snapshot is still `null`, so an
+   uncorroborated-failure rule opens a Sev2 at every boot. Caught before shipping only because
+   the first one was fresh.
+3. `EntraSignal.mfa_gap.delta24h` is computed against a stored previous snapshot — which does
+   not exist on the first poll, so the "solution" reintroduces the choice between a `0` and an
+   omission that it was meant to avoid.
+
+**So: assume every new component has a cold-start case until you have written the test that
+proves it does not.** In all three the honest answer was the same — absence is expressible when
+the shape is a list (omit the entry) and not when the shape is a required number, which is why
+`stats` is all-or-nothing and `signals[]` is not.
+
 ## Three overstatements in one night, all leaning the same way (2026-09-20)
 
 Worth recording as a pattern rather than three corrections, because the direction was constant
