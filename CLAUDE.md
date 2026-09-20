@@ -242,6 +242,31 @@ session and using the ones you need is fine. The waste is an agent that will nev
 be touched again left open, not the count. Closing is throwing away context, so it
 is a decision about the context.
 
+**Never mutate a file you do not own while its owner is awake.** A mutation battery is a
+scripted multi-file write against a tree other people are reading. Send the mutation to the
+owner and let them run it — the finding travels fine, and it is running it yourself that
+creates the collision.
+
+This is not theoretical and it was not an agent. The lead ran
+`sed -i 's/if (answered.length === 0) return null;/if (false) return null;/'` on a
+component owned by a live agent, to reproduce a finding rather than take it on trust. The
+restore fired and both runs ended green — and the owner still found the mutant in their
+working tree minutes later, spent twenty minutes reconstructing how it got there, and
+concluded it must have been the other agent's battery. It was not. They were about to write
+a rule blaming a peer who had done everything right.
+
+**A restore that works is not sufficient.** The hazard is the window between the edit and
+the restore, and it exists however reliable the restore is. So the rule is not "restore in a
+`finally`" — though do that too — it is do not open the window at all on a file someone else
+is reading.
+
+**And the lead is not exempt.** Verifying is not a category that excuses a write; a `sed` is
+a write whatever its purpose.
+
+What kept it out of the history was staging by path. A single `git add -A` in that window
+would have committed a deliberately broken component under a commit message about tests,
+in someone else's file, with their name on it.
+
 **Force-stop them; do not rely on the protocol.** `shutdown_request` needs the agent
 to reply with a `shutdown_response`, which it cannot do if `SendMessage` is missing
 from its allowlist — ten agents once approved shutdown in prose and none were ever
