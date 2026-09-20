@@ -254,32 +254,22 @@ describe('nothing reaches off-box', () => {
 });
 
 /**
- * What a **fabricated** value looks like in this repo, in one place.
+ * **No placeholder exemption, deliberately, and this replaces an earlier
+ * version of this file that had one.**
  *
- * This guard exists to stop a real secret entering a history that is pushed. It
- * is not, and must not become, a rule against the word `secret` appearing near
- * a string — because the adapters that handle credentials have to be tested,
- * and a test asserting an observed `authorization` header has to pin a LITERAL.
- * Rewriting such an assertion as `\`Zoho-oauthtoken ${token}\`` would make it
- * compute its expectation from the value under test, which is the tautology
- * this project forbids in three separate places. **A guard that can only be
- * satisfied by weakening a test is a guard that will be switched off**, and the
- * comment on `INLINE_BEARER` already said so: it refused to add `Bearer`
- * precisely because `'Bearer stub-token'` assertions are "obviously fake and
- * legitimately literal".
+ * I narrowed these rules to exempt values that *look* fabricated — `DEMO-`,
+ * `stub-`, `test-` — to unblock two adapter tests. team-lead ruled against it
+ * and the ruling is right: the rule is *no credential assigned to a literal*,
+ * and **a guard that infers "this looks fake" waves through the one that does
+ * not look fake enough**. A false positive costs two minutes. A false negative
+ * costs a credential rotation and a rewritten history on a repo that is pushed.
  *
- * So the exemption is stated once, positively, as the vocabulary this repo
- * already uses for fabricated values — `DEMO-*` is CLAUDE.md's own redaction
- * convention — rather than being widened per-file as each new adapter test
- * trips it. Two narrowings in five minutes is how a guard erodes; one rule with
- * controls in both directions is not.
- *
- * A real secret that happens to begin `DEMO-` would slip through. That is
- * accepted: the value would have to be fabricated-looking on purpose, and the
- * guard's job is to catch a transcribed secret, not an adversary inside the
- * repo choosing a disguise.
+ * The remedy for a test that must pin a literal credential-shaped string is the
+ * one this file's own controls use: **assemble it from fragments**. That keeps
+ * the assertion literal — so it stays a real assertion rather than one
+ * computing its expectation from the value under test — while keeping the
+ * forbidden shape out of the tree. It costs one line at each site.
  */
-const PLACEHOLDER = /^(DEMO-|stub-|fake-|test-|example-|redacted|changeme|xxx)/i;
 
 /** A secret's own VALUE, however it got into the file: a PEM block or a
  *  hard-coded Windows secrets path is a secret whether or not anything was
@@ -293,15 +283,27 @@ const VALUE_SHAPES_PATTERN = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
  *  about the guard it is named after. That is not hypothetical: the edit that
  *  hoisted these replaced the CONTROL's copy and silently missed the GUARD's,
  *  so for one run the control passed against a pattern the guard did not use. */
-const INLINE_BEARER_PATTERN = new RegExp(
-  `Zoho-oauthtoken\\s+(?!\\$\\{)(?!${PLACEHOLDER.source.slice(1)})[A-Za-z0-9._-]{8}`,
-);
+const INLINE_BEARER_PATTERN = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
 
-/** `name: "..."` / `name = '...'` assigned a literal that is not a placeholder. */
-const ASSIGNED_LITERAL_PATTERN = new RegExp(
-  `\\b(client_secret|refresh_token|api_key)\\b\\s*[:=]\\s*['"\`](?!${PLACEHOLDER.source.slice(1)})`,
-  'i',
-);
+/**
+ * A credential field assigned a literal, **in JS or in JSON**.
+ *
+ * H-2, found at the gate. The walk was widened to read `.json` under
+ * `server/src` precisely because a credential could hide in a committed
+ * fixture — and then this pattern was narrowed to require the field name to be
+ * followed DIRECTLY by `:` or `=`. A quoted key is not. So JSON, the one syntax
+ * the walk was widened to reach, was the one form the pattern could not see:
+ * the two halves of that change cancelled, and a real refresh token in a
+ * fixture would have been committed and pushed with every check green.
+ *
+ * The optional quotes around the name, and the optional `]`, are what close it:
+ * `{"refresh_token": "…"}`, `"api_key" : "…"` and `{ ["refresh_token"]: "…" }`
+ * all fire. Reading a field off a config object still does not — `cfg.api_key`,
+ * `{ client_secret }`, `grant_type: 'refresh_token'` — because none of those
+ * assigns a literal TO the field.
+ */
+const ASSIGNED_LITERAL_PATTERN =
+  /["'`]?\b(client_secret|refresh_token|api_key)\b["'`]?\s*\]?\s*[:=]\s*['"`]/i;
 
 describe('no credentials, ever', () => {
   /** Everything a human might paste while wiring an adapter up. */
@@ -381,27 +383,26 @@ describe('no credentials, ever', () => {
     expect(fires('const { client_id, client_secret, refresh_token } = raw;')).toBe(false);
     expect(fires('grant_type: ' + q + 'refresh_token' + q)).toBe(false);
     expect(fires('authorization: `Zoho-oauthtoken ${token}`')).toBe(false);
-    // The placeholder exemption, in both directions. A fake token in a test
-    // assertion is not a secret; a real-looking one still is, however it is
-    // spelled. Assembled for the same reason as the positive case above.
-    const scheme = ['Zoho', 'oauthtoken'].join('-');
-    for (const fake of ['stub-token', 'fake-token-1', 'test-token-abc', 'example-token', 'redacted', 'DEMO-TOKEN']) {
-      expect(fires(`expect(seen.auth).toBe('${scheme} ${fake}')`), fake).toBe(false);
-    }
-    // The same exemption on the assigned-literal rule, which is where the
-    // Endpoints adapter's fabricated config trips it. `DEMO-` is CLAUDE.md's
-    // own redaction convention, so a test config using it is the repo obeying
-    // its own rule, not breaking this one.
-    for (const fake of ['DEMO-SECRET', 'stub-secret', 'changeme', 'xxx']) {
-      expect(fires(`client_secret: ${q}${fake}${q}`), fake).toBe(false);
-      expect(fires(`refresh_token: ${q}${fake}${q}`), fake).toBe(false);
-    }
-    // …and a real-looking one still fires, however it is spelled.
-    for (const real of ['1000.abcdef0123456789', 'sk-live-000111222', 'demonstrably-real-9f3a']) {
-      expect(fires(`api_key: ${q}${real}${q}`), real).toBe(true);
-    }
-    for (const real of ['1000.deadbeefcafe', 'stubbery.9f3a1c', 'testing.9f3a1c22']) {
-      expect(fires(`authorization: \`${scheme} ${real}\``), real).toBe(true);
+    // H-2: the JSON form, which the narrowed pattern could not see at all.
+    // These four are the whole reason the walk reads `.json` under `server/src`
+    // — a credential hiding in a committed fixture — and every one of them was
+    // MISSED while the five unquoted controls above reported the rule safe. A
+    // control set that cannot distinguish the old pattern from the new one is
+    // not a control set. Assembled from fragments, like the others, so this
+    // file does not trip its own rule.
+    const key = (name: string) => q + name + q;
+    const val = q + '1000.9f8e7d6c5b4a3210' + q;
+    expect(fires('{' + key('refresh_token') + ': ' + val + '}')).toBe(true);
+    expect(fires('{' + key('client_secret') + ': ' + val + '}')).toBe(true);
+    expect(fires('  ' + key('api_key') + ' : ' + val)).toBe(true);
+    expect(fires('const t = { [' + key('refresh_token') + ']: ' + val + ' };')).toBe(true);
+    // A fabricated value is refused exactly as a real one is. The guard cannot
+    // tell them apart and must not try: a rule that waves through what looks
+    // fake waves through the real secret that does not look fake enough. A test
+    // needing a literal assembles it, as every line in this block does.
+    for (const fake of ['DEMO-SECRET', 'stub-token', 'changeme']) {
+      expect(fires('client_secret: ' + q + fake + q), fake).toBe(true);
+      expect(fires('{' + key('refresh_token') + ': ' + q + fake + q + '}'), fake).toBe(true);
     }
     expect(fires('body.set(' + q + 'refresh_token' + q + ', cfg.refresh_token);')).toBe(false);
     expect(fires('if (!cfg.client_secret) return missing(' + q + 'client_secret' + q + ');')).toBe(false);
@@ -490,6 +491,16 @@ describe('fixtures stay redacted', () => {
       'server/src/adapters/entra/__fixtures__/applications.json',
       'server/src/adapters/entra/__fixtures__/directory-audits.json',
       'server/src/adapters/vendorstatus/__fixtures__/msgraph-health-overviews.json',
+      // The Email fixtures, pinned at `m4-email`'s request. This is the
+      // likeliest place in the repo for a real subject line or a real address
+      // to be committed: that page's whole job is to display attacker-authored
+      // content and the upstream data is genuine mail. They are in scope and
+      // being read today — but without being named here, a silent rename would
+      // drop them from the walk and every redaction assertion would go on
+      // passing over a directory nobody was reading.
+      'server/src/adapters/email/__fixtures__/search-blocked.json',
+      'server/src/adapters/email/__fixtures__/statistics-by-type.json',
+      'server/src/adapters/email/__fixtures__/README.md',
     ]) {
       expect(scanned).toContain(required);
     }
