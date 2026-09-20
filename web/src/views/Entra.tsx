@@ -3,6 +3,8 @@ import type { AuditEvent, BlastMetric, EntraSignal, EntraSnapshot } from '@ops-d
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { Card } from '../components/Card.js';
 import { Panel, type PanelState } from '../components/Panel.js';
+import { useEntra } from '../live/DataSource.js';
+import { panelStateFor } from '../live/model.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
@@ -135,62 +137,137 @@ const auditColumns: Column<AuditEvent>[] = [
   { key: 'target', label: 'Target', align: 'right' },
 ];
 
+/**
+ * The sentence the MFA figure needs and cannot carry in its own label.
+ *
+ * `mfaCoverage` is **members only**. Over the whole directory the same tenant
+ * reads 0.367, which is not a worse number but a meaningless one: B2B guests
+ * register their methods in their home tenant, so counting them measures
+ * somebody else's rollout. The honest figure is the members-only one, and a
+ * figure that is honest only if you already know its denominator is one an
+ * operator will reasonably read as covering everybody.
+ *
+ * It is stated here rather than folded into the StatCard's label because the
+ * label renders on the fixture path too, where it would move visual baselines.
+ * No denominator is quoted: the member count is not on the frozen contract, and
+ * recovering it from `mfaUnregistered / (1 - mfaCoverage)` would be a number
+ * this view invented out of two it was given.
+ */
+export const MFA_BASIS =
+  'MFA coverage counts member accounts only — B2B guests register their methods in their home tenant.';
+
 export default function Entra({ snapshot }: { snapshot?: EntraSnapshot } = {}) {
   const { bundle } = useDemoMode();
-  // The same seam Task 9 prescribes for Email, applied to all three screens: the
-  // production path renders `<Entra />` and reads the demo bundle; a test can
-  // hand in a constructed snapshot and assert a relationship over shapes the two
-  // fixtures do not contain.
-  const { stats, signals, audit } = snapshot ?? bundle.entra;
+  /**
+   * Three sources, and which one is in play is decided here once.
+   *
+   *   `snapshot` given      the test seam — a constructed shape, no panel states
+   *   `useEntra() === null` the fixture path: no live provider above us, which
+   *                         is how `?demo=` and the 152 baselines render
+   *                         Milestone 1's code unchanged
+   *   otherwise             the live poll, with all four of its states
+   *
+   * The hook is called unconditionally and before any branch, because it is a
+   * hook. An injected snapshot simply wins over its answer.
+   */
+  const polled = useEntra();
+  const live = snapshot === undefined ? polled : null;
+
+  /**
+   * The snapshot to render, and the one line where a wrong-green would live.
+   *
+   * There is deliberately no `?? bundle.entra` on the live branch. Falling back
+   * to fixtures when the API has not answered would paint a working tenant over
+   * a dead one — the fixture Entra page is a *quiet* screen, so the failure
+   * would render as good news. On the live path an absent snapshot renders
+   * nothing at all, and the Panel above says why.
+   */
+  const data = snapshot ?? (live === null ? bundle.entra : live.data);
+
+  /**
+   * One panel for the whole page, because the source is all-or-nothing.
+   *
+   * `stats` is eight required numbers with nowhere in the frozen contract to
+   * write "we could not look" into two of them, so the adapter returns an error
+   * and **no data** when any constituent Graph read fails — and the signals and
+   * the audit rows come off that same snapshot. There is no arrangement of this
+   * page where half of it can be true, so there is one panel rather than three
+   * that would always agree.
+   *
+   * No page-level `empty` predicate: a snapshot always carries eight stats, so
+   * "we looked and there is nothing" is not a fact about the page. It is a fact
+   * about each TABLE, and `TableSection` renders it there, twice, in the two
+   * places it can actually be true.
+   */
+  const state: PanelState = live === null ? { kind: 'ready' } : panelStateFor(live, 'Entra');
 
   return (
     <div data-testid="view-entra" style={VIEW_STACK}>
-      <div data-testid="entra-stats" style={STAT_GRID}>
-        <StatCard
-          label="Risky sign-ins (24h)"
-          value={stats.riskySignIns24h.toLocaleString('en-US')}
-          note={`${stats.riskyConfirmedCompromised.toLocaleString('en-US')} confirmed compromised`}
-          valueColor={blastTextColor(riskyTone(stats))}
-        />
-        <StatCard
-          label="Failed sign-ins (24h)"
-          value={stats.failedSignIns24h.toLocaleString('en-US')}
-          note={`against ${stats.failedSignInAccounts.toLocaleString('en-US')} accounts`}
-          valueColor={blastTextColor(stats.failedSignIns24h > 0 ? 'warning' : 'normal')}
-        />
-        <StatCard
-          label="MFA coverage"
-          value={`${(stats.mfaCoverage * 100).toFixed(1)}%`}
-          note={`${stats.mfaUnregistered.toLocaleString('en-US')} users unregistered`}
-          // Full coverage is 'normal', not a green claim: 'good' is not a member
-          // of this union, and inventing a family mapping in a view is the exact
-          // bypass that produced the G3 failures.
-          valueColor={blastTextColor(stats.mfaUnregistered > 0 ? 'warning' : 'normal')}
-        />
-        <StatCard
-          label="Privileged accounts"
-          value={stats.privilegedAccounts.toLocaleString('en-US')}
-          note={`${stats.globalAdmins.toLocaleString('en-US')} Global Administrators`}
-        />
-      </div>
+      <Panel state={state}>
+        {data === undefined ? null : (
+          // A fragment, not a wrapping div: on the fixture path the Panel is
+          // `ready` and renders a fragment too, so these three sections stay
+          // DIRECT children of the VIEW_STACK above and the rendered DOM is
+          // byte-for-byte what the 152 baselines were taken against.
+          <>
+            <div data-testid="entra-stats" style={STAT_GRID}>
+              <StatCard
+                label="Risky sign-ins (24h)"
+                value={data.stats.riskySignIns24h.toLocaleString('en-US')}
+                note={`${data.stats.riskyConfirmedCompromised.toLocaleString('en-US')} confirmed compromised`}
+                valueColor={blastTextColor(riskyTone(data.stats))}
+              />
+              <StatCard
+                label="Failed sign-ins (24h)"
+                value={data.stats.failedSignIns24h.toLocaleString('en-US')}
+                note={`against ${data.stats.failedSignInAccounts.toLocaleString('en-US')} accounts`}
+                valueColor={blastTextColor(data.stats.failedSignIns24h > 0 ? 'warning' : 'normal')}
+              />
+              <StatCard
+                label="MFA coverage"
+                value={`${(data.stats.mfaCoverage * 100).toFixed(1)}%`}
+                note={`${data.stats.mfaUnregistered.toLocaleString('en-US')} users unregistered`}
+                // Full coverage is 'normal', not a green claim: 'good' is not a member
+                // of this union, and inventing a family mapping in a view is the exact
+                // bypass that produced the G3 failures.
+                valueColor={blastTextColor(data.stats.mfaUnregistered > 0 ? 'warning' : 'normal')}
+              />
+              <StatCard
+                label="Privileged accounts"
+                value={data.stats.privilegedAccounts.toLocaleString('en-US')}
+                note={`${data.stats.globalAdmins.toLocaleString('en-US')} Global Administrators`}
+              />
+            </div>
 
-      <TableSection
-        title="Signals · last 24 hours"
-        count={signals.length}
-        noun="signal"
-        emptyMessage="No signals in the last 24 hours."
-      >
-        <Table columns={signalColumns} rows={signals} dense getRowKey={(row) => row.key} />
-      </TableSection>
+            {live === null ? null : (
+              <p
+                data-testid="entra-mfa-basis"
+                style={{ margin: 0, fontSize: 12.5, color: 'var(--text-secondary)' }}
+              >
+                {MFA_BASIS}
+              </p>
+            )}
 
-      <TableSection
-        title="Directory audit"
-        count={audit.length}
-        noun="event"
-        emptyMessage="No directory changes recorded."
-      >
-        <Table columns={auditColumns} rows={audit} dense />
-      </TableSection>
+            <TableSection
+              title="Signals · last 24 hours"
+              count={data.signals.length}
+              noun="signal"
+              emptyMessage="No signals in the last 24 hours."
+            >
+              <Table columns={signalColumns} rows={data.signals} dense getRowKey={(row) => row.key} />
+            </TableSection>
+
+            <TableSection
+              title="Directory audit"
+              count={data.audit.length}
+              noun="event"
+              emptyMessage="No directory changes recorded."
+            >
+              <Table columns={auditColumns} rows={data.audit} dense />
+            </TableSection>
+          </>
+        )}
+      </Panel>
     </div>
   );
 }

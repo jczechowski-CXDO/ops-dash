@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import type { FixtureBundle, HistoryRow } from '../fixtures/index.js';
-import type { CheckRun } from '@ops-dash/shared';
+import type { CheckRun, EntraSnapshot } from '@ops-dash/shared';
 import { isServiceId } from '../lib/serviceNames.js';
 import { apiClient, type ApiClient, type ApiPath, type Fetched } from './client.js';
-import { parseChecks, parseIncidents, parseServices, type Parsed } from './parse.js';
+import { parseChecks, parseEntra, parseIncidents, parseServices, type Parsed } from './parse.js';
 import { ready, serviceViewOf, type IncidentView, type Load, type ServiceView } from './model.js';
 
 /**
@@ -251,6 +251,37 @@ const NOT_ASKED: Parsed<never> = {
   ok: false,
   error: { code: 'bad_payload', message: 'no service to ask about' },
 };
+
+/* ------------------------------------------------------------- /api/entra */
+
+/**
+ * The Entra snapshot, or `null` for "this page owns its own data".
+ *
+ * Shaped after `useChecks` and for the same reasons. It is NOT part of
+ * `Dashboard`: that context is read by every screen on every route, and one
+ * page's fifteen-minute Graph snapshot has no business being polled behind the
+ * six screens that never show it. So the provider publishes the client and this
+ * is the one consumer, exactly as `useChecks` is for the per-service route.
+ *
+ * `null` is the fixture path — no live provider above us — and it is how
+ * `?demo=quiet|sev1` and all 152 visual baselines keep rendering Milestone 1's
+ * code. It is not an empty load and not a failure.
+ *
+ * There is no per-route argument here, so no id to narrow and no unreachable
+ * branch: the source is the tenant, and there is exactly one.
+ */
+export function useEntra(): Load<EntraSnapshot> | null {
+  const source = useContext(SourceCtx);
+  const client = source === null ? null : source.client;
+  const load = useEndpoint<EntraSnapshot>(
+    client,
+    '/api/entra',
+    get('/api/entra'),
+    parseEntra,
+    source?.intervalMs ?? REFRESH_MS,
+  );
+  return client === null ? null : load;
+}
 
 export function LiveDataProvider({
   children,

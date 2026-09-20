@@ -1,4 +1,4 @@
-import type { BlastMetric, CheckRun, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
+import type { AuditEvent, BlastMetric, CheckRun, EntraSignal, EntraSnapshot, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
 import { SERVICE_NAMES, serviceLabel } from '../lib/serviceNames.js';
 import { firstSentence, type IncidentView, type Load, type ServiceView } from './model.js';
 
@@ -363,4 +363,190 @@ export function parseChecks(
     runs.push(view);
   }
   return { ok: true, value: { servedAt, value: runs, ...(resultError === null ? {} : { error: resultError }) } };
+}
+
+/* ---------------------------------------------------------------- /api/entra */
+
+/**
+ * The Entra snapshot, validated field by field, with **`stats` all-or-nothing**.
+ *
+ * The adapter already refuses to serve a partial `stats` — `EntraSnapshot.stats`
+ * is eight required numbers, the contract is frozen, and there is nowhere in it
+ * to write "we could not look" into one of them, so a failed constituent read
+ * comes back as an error with no `data` at all. This side keeps that property
+ * rather than re-deciding it: a payload whose `stats` we cannot read whole is
+ * refused, because the only alternative is a `0`, and on this screen a zero
+ * reads as *good news* — no risky sign-ins, no failed sign-ins, nobody
+ * unregistered. `num()` returning `null` here would put exactly that lie on the
+ * page through the other door.
+ *
+ * `signals[]` gets the opposite treatment for the opposite reason: a list CAN
+ * express absence. `mfa_gap` is omitted entirely on a cold start, because its
+ * `delta24h` is the one figure Graph cannot answer retrospectively — and an
+ * omitted signal is not a signal at zero. Nothing here invents a row for it;
+ * the count it would have carried is `stats.mfaUnregistered`, which is present
+ * from the first poll.
+ */
+
+/** The frozen union as a `Record`, for the reason `RESULTS` is one: a ninth
+ *  signal key in the contract stops this compiling, where an array of eight
+ *  strings would go on quietly refusing the new member as unreadable. */
+const SIGNAL_KEYS: Record<EntraSignal['key'], true> = {
+  risky_signin: true,
+  failed_spike: true,
+  legacy_auth: true,
+  mfa_gap: true,
+  expiring_credentials: true,
+  role_change: true,
+  guest_access: true,
+  ca_change: true,
+};
+
+function isSignalKey(v: unknown): v is EntraSignal['key'] {
+  return typeof v === 'string' && Object.hasOwn(SIGNAL_KEYS, v);
+}
+
+const AUDIT_RESULTS: Record<AuditEvent['result'], true> = { success: true, failure: true };
+
+function isAuditResult(v: unknown): v is AuditEvent['result'] {
+  return typeof v === 'string' && Object.hasOwn(AUDIT_RESULTS, v);
+}
+
+/**
+ * One signal row.
+ *
+ * `key` is refused rather than defaulted — it is the row's identity and its
+ * React key, and a ninth key we do not recognise is a row we cannot label. The
+ * counts are refused rather than zeroed for the same reason `stats` is
+ * all-or-nothing. `severity` goes through the shared `decodeSeverity`, so an
+ * unreadable one shows as Sev 1 and not as the mildest thing on the page.
+ */
+export function entraSignalView(raw: unknown): EntraSignal | null {
+  if (!isRecord(raw)) return null;
+  const key = raw['key'];
+  const label = str(raw['label']);
+  const count = num(raw['count']);
+  const delta24h = num(raw['delta24h']);
+  const lastSeen = str(raw['lastSeen']);
+  if (!isSignalKey(key) || label === null || count === null || delta24h === null || lastSeen === null) {
+    return null;
+  }
+  return { key, label, count, delta24h, severity: decodeSeverity(raw['severity']), lastSeen };
+}
+
+/**
+ * One audit row.
+ *
+ * `result` is refused rather than defaulted, and that is the load-bearing line:
+ * defaulting to `success` renders a failed directory change identically to one
+ * that went through, and defaulting to `failure` invents an alarm the tenant
+ * never recorded. Neither is a reading.
+ */
+export function auditEventView(raw: unknown): AuditEvent | null {
+  if (!isRecord(raw)) return null;
+  const at = str(raw['at']);
+  const actor = str(raw['actor']);
+  const action = str(raw['action']);
+  const target = str(raw['target']);
+  const result = raw['result'];
+  if (at === null || actor === null || action === null || target === null || !isAuditResult(result)) {
+    return null;
+  }
+  return { at, actor, action, target, result };
+}
+
+/** The eight stats, whole or not at all. Returns `null` if any one of them is
+ *  absent or non-numeric; `0` is a real reading and is kept. */
+export function entraStats(raw: unknown): EntraSnapshot['stats'] | null {
+  if (!isRecord(raw)) return null;
+  const riskySignIns24h = num(raw['riskySignIns24h']);
+  const riskyConfirmedCompromised = num(raw['riskyConfirmedCompromised']);
+  const failedSignIns24h = num(raw['failedSignIns24h']);
+  const failedSignInAccounts = num(raw['failedSignInAccounts']);
+  const mfaCoverage = num(raw['mfaCoverage']);
+  const mfaUnregistered = num(raw['mfaUnregistered']);
+  const privilegedAccounts = num(raw['privilegedAccounts']);
+  const globalAdmins = num(raw['globalAdmins']);
+  if (
+    riskySignIns24h === null ||
+    riskyConfirmedCompromised === null ||
+    failedSignIns24h === null ||
+    failedSignInAccounts === null ||
+    mfaCoverage === null ||
+    mfaUnregistered === null ||
+    privilegedAccounts === null ||
+    globalAdmins === null
+  ) {
+    return null;
+  }
+  return {
+    riskySignIns24h,
+    riskyConfirmedCompromised,
+    failedSignIns24h,
+    failedSignInAccounts,
+    mfaCoverage,
+    mfaUnregistered,
+    privilegedAccounts,
+    globalAdmins,
+  };
+}
+
+/**
+ * `{ servedAt, result }`, the same envelope `/api/incidents` serves.
+ *
+ * Amendment 9 applies here as it does there: a snapshot AND an error is
+ * stale-with-last-good — or, on this source, the adapter's `entra_partial`,
+ * where the counts are lower bounds and it says so — and both travel on to the
+ * caller together. Only a payload with no readable snapshot is a failure, and
+ * then the error is reported in its own words.
+ */
+export function parseEntra(
+  json: unknown,
+): Parsed<{ servedAt: string; value: EntraSnapshot; error?: { code: string; message: string } }> {
+  if (!isRecord(json)) return bad('the response was not an object');
+  const servedAt = str(json['servedAt']);
+  if (servedAt === null) return bad('the response carried no servedAt');
+  const result = isRecord(json['result']) ? json['result'] : null;
+  if (result === null) return bad('the response carried no result envelope');
+  const resultError = errorOf(result['error']);
+  const data = isRecord(result['data']) ? result['data'] : null;
+  if (data === null) {
+    // "We could not look" arrives here, and it is the COMMON failure on this
+    // source: one failed Graph read costs the whole snapshot by design. The
+    // reason is the server's, verbatim, because it names which question went
+    // unanswered.
+    return resultError === null ? bad('the result carried no Entra snapshot') : { ok: false, error: resultError };
+  }
+  const stats = entraStats(data['stats']);
+  if (stats === null) return bad('the Entra statistics could not be read');
+  const rawSignals = data['signals'];
+  const rawAudit = data['audit'];
+  if (!Array.isArray(rawSignals)) return bad('the snapshot carried no signals array');
+  if (!Array.isArray(rawAudit)) return bad('the snapshot carried no audit array');
+
+  const signals: EntraSignal[] = [];
+  for (const entry of rawSignals) {
+    const view = entraSignalView(entry);
+    // Louder than dropping the row: a signals table quietly one row short looks
+    // exactly like a signal with no evidence behind it, which is a fact about
+    // the tenant rather than about our parsing — and this source expresses that
+    // fact by omission, so the two would be indistinguishable.
+    if (view === null) return bad('a signal could not be read');
+    signals.push(view);
+  }
+  const audit: AuditEvent[] = [];
+  for (const entry of rawAudit) {
+    const view = auditEventView(entry);
+    if (view === null) return bad('an audit event could not be read');
+    audit.push(view);
+  }
+
+  return {
+    ok: true,
+    value: {
+      servedAt,
+      value: { stats, signals, audit },
+      ...(resultError === null ? {} : { error: resultError }),
+    },
+  };
 }

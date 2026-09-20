@@ -205,7 +205,16 @@ describe('Entra', () => {
     // bar. It is words this rules out.
     for (const opts of [{}, { mode: 'quiet' as const }]) {
       const { container, unmount } = at(opts);
-      const offenders = [...container.querySelectorAll<HTMLElement>('*')]
+      const words = [...container.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.color !== '');
+      // The positive control, and it is not decoration. A scan reporting zero
+      // offenders is exactly what a scan over an EMPTY PAGE reports: M4's
+      // mutation battery (the live-Entra task) made `useEntra` never return
+      // null, which left this view rendering a loading skeleton and no words at
+      // all — and this test stayed green over it while seven of its neighbours
+      // went red. The floor is the four stat values plus the severity word on
+      // every signal row, so it cannot be met by a page that failed to render.
+      expect(words.length, 'the -main scan found no painted words to examine').toBeGreaterThanOrEqual(5);
+      const offenders = words
         .filter((el) => /-main\)/.test(el.style.color))
         .map((el) => `${el.textContent?.slice(0, 30)} => ${el.style.color}`);
       expect(offenders).toEqual([]);
