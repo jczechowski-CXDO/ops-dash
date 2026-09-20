@@ -344,17 +344,50 @@ describe('the view and the chart agree about whether anything answered', () => {
       const viewSaysNothing = sparkSamples(spark).values.length === 0;
 
       // The component's own answer, reached WITHOUT calling sparkSamples: render
-      // it and look for a line. Computing both sides from one helper is the
-      // tautology this file's siblings were caught by.
+      // it and look at what came out. Computing both sides from one helper is
+      // the tautology this file's siblings were caught by.
       const { container, unmount } = render(
         <Sparkline values={spark ?? []} color="var(--success-main)" height={26} viewBoxHeight={26} />,
       );
-      const chartDrewNothing = container.querySelector('polyline') === null;
+      // `firstChild === null`, NOT "is there a polyline".
+      //
+      // `m3-prims` found this blind spot by running a mutation I predicted and
+      // watching it redden nothing of mine: a chart that stops excluding holes
+      // emits an empty `<svg>` — no polyline, but a 26px frame — and a guard
+      // asking only about lines calls that "drew nothing" and agrees with a
+      // view that is about to print an empty state over a rendered chart. It is
+      // the same "returns nothing versus returns an empty frame" distinction
+      // that survived in `Sparkline`'s own suite an hour earlier, for the same
+      // reason: every assertion on both sides reached for a `polyline`.
+      const chartRenderedNothing = container.firstChild === null;
+      // And the companion, which is what makes the empty frame fail HERE rather
+      // than only in the component's own tests: anything rendered must be a
+      // chart with a line in it. A frame with no line is neither answer.
+      if (!chartRenderedNothing) expect(container.querySelector('polyline')).not.toBeNull();
       unmount();
 
-      expect(viewSaysNothing).toBe(chartDrewNothing);
+      expect(viewSaysNothing).toBe(chartRenderedNothing);
     });
   }
+
+  it('the chart-side predicate can tell an empty frame from nothing at all', () => {
+    // The canary for the assertion above, and the reason the guard changed
+    // shape: the DOM a hole-keeping `Sparkline` emits is an `<svg>` with no
+    // polyline in it. Built here as literal DOM rather than by mutating the
+    // component, so this proves the PREDICATE can distinguish the two cases
+    // whatever the component does — an assertion that answered "nothing
+    // rendered" for both would make every equivalence above vacuous in one
+    // direction, which is exactly how the old version passed over S3.
+    const nothing = render(<>{null}</>);
+    expect(nothing.container.firstChild).toBeNull();
+    nothing.unmount();
+
+    const emptyFrame = render(<svg viewBox="0 0 100 26" />);
+    expect(emptyFrame.container.firstChild).not.toBeNull();
+    // ...and it is invisible to the question the guard used to ask.
+    expect(emptyFrame.container.querySelector('polyline')).toBeNull();
+    emptyFrame.unmount();
+  });
 
   it('the battery contains both answers, so the equivalence is not vacuous', () => {
     // Without this, a `sparkSamples` that returned no values for everything
