@@ -207,11 +207,24 @@ describe('Sparkline', () => {
       expect(xs(container).at(-1)).toBe('90.0');
     });
 
-    it('draws no line at all when nothing answered', () => {
+    it('renders nothing at all when nothing answered — not an empty frame', () => {
+      // `m3-runs` found this: disabling the early return survived both suites,
+      // because every sparkline test reaches for a `polyline` and an empty
+      // `<svg>` has none. Rendered, the difference is "" versus a 26px frame.
+      // The contract to the views is that empty and all-null return NOTHING and
+      // the views phrase the two cases; a frame would take 26px of a 190px tile
+      // and push the copy that explains the absence out of position.
       const { container } = render(
         <Sparkline values={[null, null, null]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
       );
-      expect(container.querySelector('polyline')).toBeNull();
+      expect(container.firstChild).toBeNull();
+    });
+
+    it('renders nothing at all for an empty series — not an empty frame', () => {
+      const { container } = render(
+        <Sparkline values={[]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      expect(container.firstChild).toBeNull();
     });
 
     it('leaves a series with no holes byte-identical, so no baseline can move', () => {
