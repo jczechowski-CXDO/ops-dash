@@ -89,6 +89,14 @@ export async function prepare(page: Page, theme: Theme): Promise<void> {
   }, theme);
 }
 
+export const KILL_TRANSITIONS_CSS = '*, *::before, *::after { transition: none !important; }';
+
+/** Same-origin so `style-src 'self'` admits it, and under `/__e2e__/` so it can
+ *  never collide with a real asset in `web/public/`. Nothing serves this path —
+ *  the route below is what answers it — which keeps the harness out of the
+ *  production build entirely. */
+export const KILL_TRANSITIONS_URL = '/__e2e__/kill-transitions.css';
+
 /**
  * Settle every CSS transition instantly, and here is why it is not optional.
  *
@@ -111,9 +119,51 @@ export async function prepare(page: Page, theme: Theme): Promise<void> {
  * is still animating at all.
  */
 export async function killTransitions(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content: '*, *::before, *::after { transition: none !important; }',
-  });
+  // `addStyleTag({ content })` injects an INLINE <style>, which index.html's
+  // `style-src 'self'` has refused since Task 11A landed the CSP (that is what
+  // silently broke 135 of these tests). `addStyleTag({ url })` injects a
+  // <link rel=stylesheet> instead; a same-origin stylesheet satisfies 'self',
+  // and the bytes it applies are identical to what the inline tag applied, so
+  // the baselines mean the same thing. The CSP is not relaxed for the tests.
+  await page.route(KILL_TRANSITIONS_URL, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/css', body: KILL_TRANSITIONS_CSS }),
+  );
+  await page.addStyleTag({ url: KILL_TRANSITIONS_URL });
+  await assertTransitionsKilled(page);
+}
+
+/**
+ * Prove the stylesheet is in effect, rather than that no error was thrown.
+ *
+ * Without this, a fix that quietly injected nothing — a 404 swallowed, a route
+ * pattern that stopped matching, a CSP that refuses <link> too — would leave
+ * every baseline test passing and every one of them free to catch a render
+ * mid-transition again. So: MEASURE. A probe with a one-second transition of
+ * its own must compute to 0s, which is only true if `transition: none
+ * !important` is actually cascading over it.
+ *
+ * The probe's declarations are set through CSSOM (`el.style.x = ...`), not as a
+ * `style` attribute: `style-src 'self'` blocks the attribute and leaves CSSOM
+ * alone. assertRealFace measures the same way for the same reason.
+ */
+export async function assertTransitionsKilled(page: Page): Promise<void> {
+  const [href, duration] = await page.evaluate((url) => {
+    const sheet = [...document.styleSheets].find((s) => (s.href ?? '').endsWith(url));
+    const el = document.createElement('div');
+    el.style.position = 'absolute';
+    el.style.left = '-9999px';
+    el.style.transition = 'color 1s linear';
+    document.body.appendChild(el);
+    const d = getComputedStyle(el).transitionDuration;
+    el.remove();
+    return [sheet?.href ?? null, d] as const;
+  }, KILL_TRANSITIONS_URL);
+  expect(href, `no stylesheet ending in ${KILL_TRANSITIONS_URL} is attached to the page`).not.toBeNull();
+  expect(
+    duration,
+    'a probe declaring `transition: color 1s` still computes to ' +
+      `${duration}: the kill-transitions stylesheet is attached but not winning the cascade`,
+  ).toBe('0s');
 }
 
 /** The theme the app actually applied, not the one we asked for. */
