@@ -16,7 +16,9 @@ self-hosted. Read-only upstream; the only writes are to our own store.
 | `npm run test:e2e` | Playwright — 152 visual baselines, interaction, the offline proof |
 | `npm run test:e2e:update` | regenerate baselines. **Look at them before committing** |
 | `npm run icons` | regenerate `web/src/components/aurora/icons.generated.ts` from the Aurora bundle |
-| `node --watch server/src/index.ts` | run the server: store + poller + adapters + engine + API, one process |
+| `npm start` | build the server and run it: store + poller + adapters + engine + API, one process |
+| `npm run build:server` | emit `server/dist` **and copy the runtime assets** — `tsc` alone produces an artefact that cannot start |
+| `npm run dev:server` | the same, under `node --watch` |
 | `npm run fonts` | re-vendor Plus Jakarta Sans (only if the font is replaced; one outbound call) |
 
 ## Layout
@@ -27,12 +29,16 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   data, `theme/` the token helpers, `lib/` the URL guard.
 - `web/e2e/` — Playwright. Baselines are **platform-sensitive**; these were generated
   on Linux and will not match Windows.
-- `server/` — the API and the detection chain. `http/fetchJson.ts` is the only way out
-  to the network; `adapters/vendorstatus/` reads the five vendor status feeds and
-  `adapters/synthetic/` runs the reachability probes; `store/` is `node:sqlite`;
-  `poller/` schedules; `engine/` holds the two correlation rules; `api/` serves them
-  read-only; `index.ts` composes all of it and is the only file that knows the shape of
-  the whole.
+- `server/` — the API and the detection chain. `http/fetchJson.ts` is the only way out to
+  the network and `http/safeTarget.ts` vets every URL it opens; `adapters/vendorstatus/`
+  reads the six vendor status feeds and `adapters/synthetic/` runs the reachability probes;
+  `store/` is `node:sqlite` plus the pure judgements that belong beside it (`currentLevel`,
+  `staleness`, `retention`, `certExpiry`); `poller/` schedules; `engine/` holds the two
+  correlation rules; `api/` serves them read-only; `services.ts` is the one platform map
+  both the root and the API import; `index.ts` composes it all and `main.ts` runs it.
+- **`server/src/main.ts` starts the process; `server/src/index.ts` only composes it.** That
+  split is why every test can build the whole chain without binding a port or arming a
+  timer. Keep it.
 - `server/src/__integration__/` — the chain end to end on the committed real payloads,
   with only `fetch` stubbed. **This is where a seam defect shows up**; three did.
 - `design_handoff_it_ops_dashboard/` — the design spec of record. Read-only.
@@ -79,6 +85,16 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   cannot pick the address for us. `web/src/guards.test.ts` enforces this by grepping for bare `fetch`. There is
   exactly one exemption, `adapters/synthetic/probe.ts`, and it is argued in a block
   comment there: a reachability probe asks a different question and must not read a body.
+- **`vendorLevel` is the one honest reading of a service's level.** `publishedLevel` answers
+  the narrower question "what did the vendor say"; a guard in `server/src/guards.test.ts`
+  stops anything but its own module importing it. Two sibling functions that both sounded
+  like the answer produced the same disagreement twice, which is why the third defence is
+  mechanical rather than another comment.
+- **Absent is not zero, and it crosses the wire as explicit `null`.** No probe data is not
+  100% uptime, an empty sparkline is not a flat line at zero, and a service with no checks
+  has `ours.total === 0` rather than "passing". An omitted key survives a spread in the web
+  layer and silently restores a fixture's number; `null` overrides it and the typechecker
+  forces the handling.
 - **Nothing in `server/` throws to signal failure**, so nothing may treat a resolved
   promise as success. A `Source.run` that resolves with an errored `SourceResult` has
   failed. This was a shipped defect — the poller counted a source whose feed 503'd every
@@ -125,6 +141,8 @@ status feeds, runs four synthetic probes, correlates two rules, and serves the r
 read-only. It has been run against the live internet and detects a simulated outage end
 to end. Only `m365` has no adapter — its own is the first that needs a credential.
 
-Milestone 3 — the msgraph adapter and live UI wiring plus auth — gets its own plan under
+Milestone 3 (live) is in progress: the server runs as a process, `/api/services` serves a
+whole tile, retention and staleness and certificate expiry are watched, and the operator's
+rule overrides are read every tick. The SPA wiring is the remaining piece. Plans live under
 `docs/superpowers/plans/`. **The server needs Node 24**:
 the store is `node:sqlite`, a built-in.
