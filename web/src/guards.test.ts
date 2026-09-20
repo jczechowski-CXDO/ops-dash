@@ -997,6 +997,11 @@ describe('no optional contract field is carried by a fixture and read by nothing
   const DELIBERATELY_UNREAD: Record<string, string> = {
     empty: 'SourceResult envelope. No adapter exists until Milestone 2, so no fixture carries one.',
     error: 'Same: SourceResult envelope, Milestone 2.',
+    lastSuccessfulPoll:
+      'ServiceStatus.vendor.lastSuccessfulPoll is DERIVED by parse.ts rather than read off the ' +
+      'wire, deliberately: the honest definition on the wire is "the snapshot carries a payload, ' +
+      'so some poll succeeded, and fetchedAt is when". Reading a served field would let a server ' +
+      'that stopped sending it silently blank the provenance line ServiceDetail branches on.',
     threshold:
       'AlertRule.threshold is the machine-readable form of the same fact AlertRule.detail states ' +
       'in prose, and Settings renders detail. Rendering both would show one threshold twice. It ' +
@@ -1019,6 +1024,16 @@ describe('no optional contract field is carried by a fixture and read by nothing
       'started. Owner: view-service.',
     scheduledUntil:
       'Same window, and the more useful half — when does it end. Owner: view-service.',
+    url:
+      'VendorIncident.url and vendor.url — the link to the advisory itself, dropped by parse.ts ' +
+      'so it cannot reach a screen on the live path at all. Note for whoever renders it: it ' +
+      'would be the FIRST href in web/src, so it lands on the URL-attribute guard above and is ' +
+      'a conversation rather than a diff. It is also vendor-authored, which is why that guard ' +
+      'exists. Found by the parser-side guard below.',
+    title:
+      'VendorIncident.title — the advisory headline. Same cause as url: the whole ' +
+      'incidentsSince[] array is dropped at the parser, so no part of a vendor advisory reaches ' +
+      'the live UI. Found by the parser-side guard below.',
   };
 
   function optionalContractFields(): string[] {
@@ -1076,6 +1091,117 @@ describe('no optional contract field is carried by a fixture and read by nothing
       );
 
     expect(unread).toEqual([]);
+  });
+
+  /**
+   * The second half of this rule, and the half that would have caught the one
+   * that actually shipped.
+   *
+   * The guard above is gated on **a fixture carrying the field**. `ack` and
+   * `muted` have been declared on `Incident` since Milestone 1 and **no fixture
+   * carries either** — that is accepted finding M-9 — so this guard was
+   * structurally blind to precisely the two fields that went wrong. When
+   * `/api/incidents` began hydrating them, `parse.ts` dropped both on the
+   * floor: `Overview.tsx` dims an acknowledged row, credits `incident.ack.by`
+   * and disables its Acknowledge button, and every one of those was dead on the
+   * live path. An operator's acknowledgement rendered as untouched.
+   *
+   * Nobody was wrong. The parser was correct when written because nothing
+   * served the fields, and it became wrong when the other side started. **What
+   * failed is that no artefact spanned the two workspaces** — and there is
+   * exactly one that could, the contract. Proposed by `m4-auth` after finding
+   * the mirror image of the same defect on the server side.
+   *
+   * So: for every contract type the live layer names, every optional field must
+   * be READ by the parser that builds it. The gate is "does the web reference
+   * this type", not "does a fixture carry this value", which is what makes it
+   * fire the day a field is declared rather than the day someone fills it.
+   */
+  const CONTRACTS = join(REPO, 'shared/src/contracts.ts');
+
+  /** Each exported object type, by name, with its body — brace-matched rather
+   *  than line-scanned, so a nested object cannot end a block early. */
+  function contractBlocks(): Record<string, string> {
+    const text = read(CONTRACTS);
+    const out: Record<string, string> = {};
+    for (const m of text.matchAll(/export type (\w+)\s*=\s*\{/g)) {
+      const start = m.index! + m[0].length - 1;
+      let depth = 0;
+      for (let j = start; j < text.length; j += 1) {
+        if (text[j] === '{') depth += 1;
+        else if (text[j] === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            out[m[1]!] = text.slice(start + 1, j);
+            break;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function optionalsIn(body: string): string[] {
+    const names = [...body.matchAll(/^\s+([a-zA-Z]\w*)\?:/gm)].map((m) => m[1]!);
+    // Fields declared INSIDE an optional object are required-within-optional,
+    // so they never appear as `name?:` — `muted?: { by; until }` is the case
+    // that motivated this, and a top-level scan misses exactly the open loop.
+    for (const m of body.matchAll(/^\s+[a-zA-Z]\w*\?:\s*\{([^}]*)\}/gm)) {
+      for (const inner of m[1]!.matchAll(/([a-zA-Z]\w*)\s*:/g)) names.push(inner[1]!);
+    }
+    return [...new Set(names)];
+  }
+
+  /** `raw['name']` or `x.name` in the parser. Property ACCESS, not an object
+   *  key — the distinction that made the guard above real when it was tightened. */
+  const readsField = (source: string, name: string): boolean =>
+    new RegExp(`\\[['"\`]${name}['"\`]\\]|\\.${name}\\b`).test(source);
+
+  /** The types the live layer names at all. A new parser importing
+   *  `EmailSnapshot` brings its optional fields into scope with no edit here,
+   *  which is what stops this list rotting. */
+  const liveTypeNames = (): string[] => {
+    const live = ['parse.ts', 'model.ts', 'DataSource.tsx', 'client.ts']
+      .map((f) => read(join(WEB, 'src/live', f)))
+      .join('\n');
+    return Object.keys(contractBlocks()).filter((name) => new RegExp(`\\b${name}\\b`).test(live));
+  };
+
+  it('every optional field of a contract type the live layer names is read by the parser', () => {
+    const blocks = contractBlocks();
+    const parser = stripComments(read(join(WEB, 'src/live/parse.ts')));
+    const unread: string[] = [];
+    for (const name of liveTypeNames()) {
+      for (const field of optionalsIn(blocks[name]!)) {
+        if (field in DELIBERATELY_UNREAD || field in OPEN_LOOPS) continue;
+        if (!readsField(parser, field)) unread.push(`${name}.${field}`);
+      }
+    }
+    expect(unread).toEqual([]);
+  });
+
+  it('that guard can fail, and is reading real types — it cannot pass vacuously', () => {
+    // Non-vacuity on BOTH halves, because "no offender found" is what an empty
+    // walk reports and I have shipped that hole twice in this file already.
+    const blocks = contractBlocks();
+    expect(Object.keys(blocks).length, 'no contract types parsed').toBeGreaterThan(10);
+    expect(liveTypeNames(), 'the live layer names no contract types').toContain('Incident');
+    expect(optionalsIn(blocks['Incident']!), 'Incident has no optional fields').toEqual(
+      expect.arrayContaining(['ack', 'muted', 'resolvedAt']),
+    );
+
+    // The decision, over inputs the tree cannot supply. `ack` is READ today —
+    // it was not before `8e034c1`, and this guard is the thing that would have
+    // said so on the day the field was declared.
+    const parser = stripComments(read(join(WEB, 'src/live/parse.ts')));
+    expect(readsField(parser, 'ack')).toBe(true);
+    expect(readsField(parser, 'muted')).toBe(true);
+    expect(readsField(parser, 'resolvedAt')).toBe(true);
+    expect(readsField(parser, 'aFieldNobodyDeclared')).toBe(false);
+    // An object KEY is not a read. This is the tightening that made the guard
+    // above real, asserted here rather than inherited on trust.
+    expect(readsField('const m = { maintenance: 1 };', 'maintenance')).toBe(false);
+    expect(readsField("const v = raw['maintenance'];", 'maintenance')).toBe(true);
   });
 
   it('the allowlist names real contract fields and carries a reason for each', () => {
