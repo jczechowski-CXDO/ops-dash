@@ -4,12 +4,49 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CheckRun, ServiceId, SourceResult, StatusLevel } from '@ops-dash/shared';
 import { CHECK_RUN_RETENTION_DAYS, RESOLVED_INCIDENT_RETENTION_DAYS, cutoff } from './retention.js';
+import {
+  foldActions,
+  UnknownIncident,
+  type ActionKind,
+  type ActionRow,
+  type IncidentFlags,
+} from './incidentActions.js';
 
 // fileURLToPath, not URL.pathname — a repo path containing a space would come
 // back percent-encoded. Same defect as G-1, which cost a broken guard once.
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export type Store = ReturnType<typeof openStore>;
+
+/** One `incident_actions` row, out of SQLite's untyped record and into the
+ *  shape the pure fold takes. `until` is coerced to `string | null` and never
+ *  to `undefined`: absent is not zero and it crosses every boundary in this
+ *  codebase as an explicit null. */
+function toActionRow(raw: unknown): ActionRow {
+  const row = raw as Record<string, unknown>;
+  const until = row['until'];
+  return {
+    action: row['action'] as ActionKind,
+    actor: String(row['actor']),
+    at: String(row['at']),
+    until: typeof until === 'string' ? until : null,
+  };
+}
+
+/**
+ * Is this SQLite's foreign-key refusal, as opposed to any other write failure?
+ *
+ * Matched on the error CODE, not on the message text. `node:sqlite` puts
+ * `SQLITE_CONSTRAINT_FOREIGNKEY` on `errcode`/`code`, and a message-substring
+ * match would quietly start reporting a CHECK violation as a missing incident
+ * the day the wording changed — turning "you sent an action verb that does not
+ * exist" into a 404 about an incident that is sitting right there.
+ */
+function isForeignKeyViolation(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null) return false;
+  const e = cause as { code?: unknown; errcode?: unknown };
+  return e.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || e.errcode === 787;
+}
 
 /**
  * The store, opened once per process.
@@ -119,6 +156,30 @@ export function openStore(path = 'ops-dash.sqlite') {
       `INSERT INTO rule_state (key, enabled) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET enabled = excluded.enabled`,
     ),
+    // The operator's actions against one incident, append-only. `until` is
+    // meaningful for `mute` and NULL for everything else — a column that is
+    // null for three of four verbs, rather than four tables.
+    addAction: db.prepare(
+      `INSERT INTO incident_actions (incident_id, action, actor, at, until) VALUES (?, ?, ?, ?, ?)`,
+    ),
+    // ORDER BY at, rowid. `at` alone is not a total order — two actions can
+    // share a millisecond, and "the last instruction wins" is meaningless
+    // without a tiebreak. rowid is insertion order and is the only thing here
+    // that cannot tie.
+    actionsFor: db.prepare(
+      `SELECT action, actor, at, until FROM incident_actions
+       WHERE incident_id = ? ORDER BY at, rowid`,
+    ),
+    allActions: db.prepare(
+      `SELECT incident_id, action, actor, at, until FROM incident_actions ORDER BY at, rowid`,
+    ),
+    // `resolved_at IS NULL` in the WHERE: resolving twice must not move the
+    // first resolution's timestamp forward. The row already exists — the action
+    // insert's foreign key proved it — so zero changes here means "already
+    // resolved", which is not an error.
+    markResolved: db.prepare(
+      `UPDATE incidents SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL`,
+    ),
     // `at < ?` and not `<=`: the cutoff instant itself is inside the window a
     // 30-day query may still ask for. See retention.ts for the windows.
     deleteCheckRuns: db.prepare(`DELETE FROM check_runs WHERE at < ?`),
@@ -134,6 +195,51 @@ export function openStore(path = 'ops-dash.sqlite') {
       `DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?`,
     ),
   };
+
+  /* --------------------------------------------------- operator actions */
+
+  /**
+   * Record one action against one incident.
+   *
+   * `actor` and `at` are both PARAMETERS. The store holds no opinion about who
+   * the user is — that answer belongs to exactly one module and this is not it
+   * — and it reads no clock, because a hidden `new Date()` here is a second
+   * clock beside the one the poller and the API already inject, and two clocks
+   * is how a test comes to pass against a time it did not choose.
+   *
+   * Throws `UnknownIncident` when the id names nothing. That is the foreign key
+   * doing its job, translated: a route can answer 404 from it, where SQLite's
+   * own message would become a 500 with the constraint name in it.
+   * `api/routes.ts` already rules that the write path throws and the read path
+   * degrades, and this is the write path.
+   *
+   * Declared here rather than as a method so the siblings below can call it
+   * without `this` — a store method pulled off the object (`const { mute } =
+   * store`) would otherwise break, and nothing in the type says it would.
+   */
+  const recordAction = (a: {
+    incidentId: string;
+    action: ActionKind;
+    actor: string;
+    at: string;
+    until?: string | null;
+  }): void => {
+    try {
+      stmt.addAction.run(a.incidentId, a.action, a.actor, a.at, a.until ?? null);
+    } catch (cause) {
+      // Narrow: only the FK failure becomes UnknownIncident. A CHECK violation
+      // or a disk error is a different fact and must not be reported as a
+      // missing incident.
+      if (isForeignKeyViolation(cause)) throw new UnknownIncident(a.incidentId, { cause });
+      throw cause;
+    }
+  };
+
+  /** The raw log for one incident, oldest first. The fold is the answer to "is
+   *  it acked"; this is the answer to "what happened", and a timeline needs
+   *  both. */
+  const actionsFor = (incidentId: string): ActionRow[] =>
+    stmt.actionsFor.all(incidentId).map(toActionRow);
 
   return {
     db,
@@ -275,6 +381,96 @@ export function openStore(path = 'ops-dash.sqlite') {
      *  1/0 conversion happens here rather than at each call site. */
     setRuleState(key: string, enabled: boolean): void {
       stmt.putRuleState.run(key, enabled ? 1 : 0);
+    },
+
+    recordAction,
+    actionsFor,
+
+    /** Acknowledged HERE. Nothing upstream is told, and nothing upstream could
+     *  be: everything this process reads is read-only, and an "acknowledge"
+     *  that reached into Microsoft's service health would be a mutating
+     *  third-party call this repo does not make. */
+    acknowledge(incidentId: string, actor: string, at: string): void {
+      recordAction({ incidentId, action: 'ack', actor, at });
+    },
+
+    /** `until === null` is an indefinite mute — until somebody unmutes it. */
+    mute(incidentId: string, actor: string, until: string | null, at: string): void {
+      recordAction({ incidentId, action: 'mute', actor, at, until });
+    },
+
+    unmute(incidentId: string, actor: string, at: string): void {
+      recordAction({ incidentId, action: 'unmute', actor, at });
+    },
+
+    /**
+     * Resolve by hand: log who did it, and set `resolved_at`.
+     *
+     * One transaction, because an action row saying "resolved" beside an
+     * incident that is still open is a worse state than either alone.
+     *
+     * **A manual resolve does not make a live condition false.** If the rule is
+     * still firing, the next correlation tick reopens this incident — same id,
+     * because `correlate`'s `carryForward` strips `resolvedAt` and keeps the
+     * identity. That is the honest outcome rather than a bug to suppress: the
+     * operator sees it come back, which is true, instead of a screen that
+     * agrees with them while the service is still down. The ack and the mute
+     * survive it, because actions live in their own table keyed on the incident
+     * id and never on the incident row's lifecycle.
+     *
+     * Resolving an already-resolved incident logs the action and leaves the
+     * original `resolved_at` where it was. The first resolution is when it
+     * stopped; a second press must not make the outage look shorter.
+     */
+    resolveIncident(incidentId: string, actor: string, at: string): void {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        // Action first: its foreign key is what proves the incident exists, so
+        // an unknown id fails before anything has been written.
+        recordAction({ incidentId, action: 'resolve', actor, at });
+        stmt.markResolved.run(at, incidentId);
+        db.exec('COMMIT');
+      } catch (cause) {
+        db.exec('ROLLBACK');
+        throw cause;
+      }
+    },
+
+    /**
+     * The contract's `ack` / `muted` for one incident, as of `now`.
+     *
+     * `now` is a parameter because a mute EXPIRES, and whether it has is a
+     * question about a clock. Defaulted for the convenience of a route that has
+     * no opinion; injected by every test.
+     */
+    incidentFlags(incidentId: string, now: Date | number | string = new Date()): IncidentFlags {
+      return foldActions(actionsFor(incidentId), now);
+    },
+
+    /**
+     * Flags for every incident that has any, in one query.
+     *
+     * For hydrating a list: the alternative is one query per row, and the list
+     * route already reads every open incident. An incident with no live flags
+     * is ABSENT from this record rather than present with an empty object — an
+     * empty object would read as "this one has flags" to anyone checking for
+     * the key, and a caller spreading `flags[id] ?? {}` gets the right answer
+     * either way.
+     */
+    allIncidentFlags(now: Date | number | string = new Date()): Record<string, IncidentFlags> {
+      const byIncident = new Map<string, ActionRow[]>();
+      for (const raw of stmt.allActions.all()) {
+        const id = String((raw as Record<string, unknown>)['incident_id']);
+        const list = byIncident.get(id);
+        if (list) list.push(toActionRow(raw));
+        else byIncident.set(id, [toActionRow(raw)]);
+      }
+      const out: Record<string, IncidentFlags> = {};
+      for (const [id, rows] of byIncident) {
+        const flags = foldActions(rows, now);
+        if (flags.ack || flags.muted) out[id] = flags;
+      }
+      return out;
     },
 
     /**
