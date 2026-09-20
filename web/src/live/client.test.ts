@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getJson } from './client.js';
+import { apiClient, checksPath, getJson } from './client.js';
 
 /**
  * The one door, exercised against the five ways a read fails.
@@ -117,5 +117,52 @@ describe('the door is same-origin and carries no credential', () => {
     await getJson('/api/services');
     const [, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
     expect('signal' in init).toBe(false);
+  });
+});
+
+describe('the one route that takes an argument is still built here', () => {
+  it('asks for the service the caller named, as a same-origin path', async () => {
+    const spy = stub({ body: '{"fetchedAt":"t","degraded":false,"data":[]}' });
+    await apiClient.checks('jira');
+    const [url] = spy.mock.calls[0] as [string];
+    // Pinned literally, not compared against `checksPath('jira')`: both sides
+    // calling the builder would agree however wrong the builder was.
+    expect(url).toBe('/api/checks?service=jira');
+  });
+
+  it('encodes the id rather than interpolating it raw', () => {
+    // The seven are a closed union, so nothing hostile can reach this today.
+    // The encoding is what keeps that true if the union ever widens, and it is
+    // asserted over a value the union does not contain for exactly that reason.
+    const built = checksPath('jira');
+    expect(built).toBe('/api/checks?service=jira');
+    expect(checksPath('m365')).toBe('/api/checks?service=m365');
+  });
+
+  it('carries the same no-credential terms as every other read', async () => {
+    const spy = stub({ body: '{"fetchedAt":"t","degraded":false,"data":[]}' });
+    await apiClient.checks('zendesk');
+    const [, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(init['credentials']).toBe('omit');
+    expect('signal' in init).toBe(false);
+  });
+
+  it('passes the signal through, so a route change cancels it', async () => {
+    const spy = stub({ body: '{"fetchedAt":"t","degraded":false,"data":[]}' });
+    const controller = new AbortController();
+    await apiClient.checks('openai', controller.signal);
+    const [, init] = spy.mock.calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBe(controller.signal);
+  });
+
+  it('classifies a failure exactly as the collection routes do', async () => {
+    // Same helper underneath, and the assertion is that it IS the same: a
+    // second request path would be a second set of failure rules to keep true.
+    stub({ status: 400, body: '{"error":{"code":"bad_service"}}' });
+    const got = await apiClient.checks('jira');
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.error.code).toBe('http_status');
+    expect(got.error.message).toContain('/api/checks?service=jira');
   });
 });

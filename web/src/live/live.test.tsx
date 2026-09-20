@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '../theme/ThemeProvider.js';
 import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import { App } from '../app/App.js';
-import { LiveDataProvider } from './DataSource.js';
+import { LiveDataProvider, useChecks } from './DataSource.js';
+import type { CheckRun, ServiceId } from '@ops-dash/shared';
 import type { ApiClient, ApiPath, Fetched } from './client.js';
 
 /**
@@ -113,6 +114,22 @@ const incidentsBody = (data: unknown[], error?: { code: string; message: string 
   result: { data, fetchedAt: '2026-09-19T12:00:00.000Z', degraded: error !== undefined, ...(error ? { error } : {}) },
 });
 
+/** The runs `/api/checks?service=jira` serves: one probe that answered and one
+ *  that did not. Redacted like everything else here — a vendor endpoint name
+ *  and a region, no host of ours. */
+const JIRA_RUNS: CheckRun[] = [
+  { serviceId: 'jira', at: '2026-09-19T11:59:30.000Z', check: 'Jira /status', region: 'us-east', result: 'pass', latencyMs: 220 },
+  { serviceId: 'jira', at: '2026-09-19T11:59:00.000Z', check: 'Jira /status', region: 'eu-west', result: 'timeout', latencyMs: null },
+];
+
+const checksBody = (data: unknown[], over: Record<string, unknown> = {}) => ({
+  fetchedAt: '2026-09-19T12:00:00.000Z',
+  degraded: false,
+  data,
+  ...(data.length === 0 ? { empty: true } : {}),
+  ...over,
+});
+
 /* --------------------------------------------------------------- the client */
 
 const ok = (json: unknown): Fetched => ({ ok: true, json });
@@ -123,7 +140,9 @@ const pending = (): Promise<Fetched> => new Promise<Fetched>(() => {});
 
 function clientOf(
   answers: Partial<Record<ApiPath, () => Promise<Fetched> | Fetched>>,
-  checks?: () => Promise<Fetched> | Fetched,
+  /** Takes the id it was asked for, so a test can prove the page asked about
+   *  the service it is showing rather than about whichever one came first. */
+  checks?: (serviceId: ServiceId) => Promise<Fetched> | Fetched,
 ): ApiClient {
   return {
     get: async (path) => {
@@ -134,7 +153,7 @@ function clientOf(
     // Unstubbed by default and deliberately an ERROR rather than an empty
     // success: a test that forgets to stub this should see a panel saying the
     // runs could not be read, not one saying there are none.
-    checks: async (serviceId) => (checks ? checks() : fail(`no checks stub for ${serviceId}`)),
+    checks: async (serviceId) => (checks ? checks(serviceId) : fail(`no checks stub for ${serviceId}`)),
   };
 }
 
@@ -390,12 +409,14 @@ describe('absent measurements render as absent', () => {
     expect(screen.getByText(/database is locked/)).toBeInTheDocument();
   });
 
-  it('a service with counts but no runs does not claim no probe has run', async () => {
+  it('a service with counts whose runs we could not read does not claim no probe has run', async () => {
     app(upClient(), '/services/jira');
     expect(await screen.findByText(/1 of 1 checks reported/)).toBeInTheDocument();
     expect(screen.queryByText('No probe has run yet.')).not.toBeInTheDocument();
-    // And the table below says what it is missing rather than showing nothing.
-    expect(screen.getByText(/Individual check runs are not served by the API yet/)).toBeInTheDocument();
+    // `upClient` stubs no check runs, so the runs endpoint fails: the line says
+    // which of the three no-runs cases this is, rather than implying the probes
+    // never ran.
+    expect(screen.getByText(/The individual runs could not be read/)).toBeInTheDocument();
   });
 
   it('a service with no checks at all says exactly that', async () => {
@@ -546,5 +567,265 @@ describe('the fixture path is not reached in live mode, and vice versa', () => {
     );
     expect(await screen.findAllByTestId('service-tile')).toHaveLength(7);
     expect(screen.getAllByTestId('alert-row').length).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------ the individual check runs */
+
+describe('the check-runs table reads the API', () => {
+  const withChecks = (checks: (id: ServiceId) => Promise<Fetched> | Fetched) =>
+    clientOf(
+      { '/api/services': () => ok(SERVICES), '/api/incidents': () => ok(incidentsBody([])) },
+      checks,
+    );
+
+  /** The table is the only one on the page; its body rows are the runs. */
+  const runRows = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
+
+  it('renders one row per run, with the check, the region and the result', async () => {
+    app(withChecks(() => ok(checksBody(JIRA_RUNS))), '/services/jira');
+    expect(await screen.findByText('Check history')).toBeInTheDocument();
+    const rows = runRows();
+    expect(rows).toHaveLength(2);
+    // Read off the payload by hand, not mapped from JIRA_RUNS: a loop over the
+    // same array the stub served would pass for a table rendering nothing.
+    expect(rows[0]).toHaveTextContent('Jira /status');
+    expect(rows[0]).toHaveTextContent('us-east');
+    expect(rows[0]).toHaveTextContent('Pass');
+    expect(rows[0]).toHaveTextContent('220');
+    expect(rows[1]).toHaveTextContent('eu-west');
+    expect(rows[1]).toHaveTextContent('Timeout');
+  });
+
+  it('a probe that did not answer shows no latency, never a zero', async () => {
+    app(withChecks(() => ok(checksBody(JIRA_RUNS))), '/services/jira');
+    await screen.findByText('Check history');
+    const timeout = runRows()[1]!;
+    expect(timeout).toHaveTextContent('—');
+    // A zero here renders as the fastest probe ever recorded, beside a row that
+    // says Timeout.
+    expect(timeout.textContent).not.toContain('0 ms');
+    expect(within(timeout).queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('asks about the service whose page this is', async () => {
+    const asked: ServiceId[] = [];
+    app(
+      withChecks((id) => {
+        asked.push(id);
+        return ok(checksBody([]));
+      }),
+      '/services/claude',
+    );
+    await screen.findByText('Check history');
+    expect(asked).toEqual(['claude']);
+  });
+
+  it('serves the runs it was given rather than a shorter table', async () => {
+    // The 5-vs-25 decision, pinned. The API caps the page at 25; the view shows
+    // what it was served, because a table that silently drops rows is one an
+    // operator cannot use to count how often a probe is flapping.
+    const many: CheckRun[] = Array.from({ length: 25 }, (_, i) => ({
+      serviceId: 'jira',
+      at: new Date(Date.parse('2026-09-19T12:00:00.000Z') - i * 30_000).toISOString(),
+      check: 'Jira /status',
+      region: i % 2 === 0 ? 'us-east' : 'eu-west',
+      result: 'pass',
+      latencyMs: 100 + i,
+    }));
+    app(withChecks(() => ok(checksBody(many))), '/services/jira');
+    await screen.findByText('Check history');
+    expect(runRows()).toHaveLength(25);
+  });
+
+  it('a service with no runs says there are none, and does not read as a failure', async () => {
+    // Five of the seven have no probe today, so this is the COMMON state. If it
+    // renders red the operator learns that red means nothing.
+    app(withChecks(() => ok(checksBody([]))), '/services/claude');
+    expect(await screen.findByText('No check runs have been recorded for this service.')).toBeInTheDocument();
+    expect(screen.queryByText(/Check history is unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('a store we could not read says so, and never says there are none', async () => {
+    app(
+      withChecks(() => ok({ fetchedAt: '2026-09-19T12:00:00.000Z', degraded: true, error: { code: 'store_unavailable', message: 'database is locked' } })),
+      '/services/jira',
+    );
+    expect(await screen.findByText(/Check history is unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/database is locked/)).toBeInTheDocument();
+    // The distinction the route was added for: "we could not look" is not
+    // "there are none".
+    expect(screen.queryByText('No check runs have been recorded for this service.')).not.toBeInTheDocument();
+  });
+
+  it('a failure to reach the API at all is also not an empty table', async () => {
+    app(withChecks(() => fail('Failed to fetch')), '/services/jira');
+    expect(await screen.findByText(/Check history is unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Failed to fetch/)).toBeInTheDocument();
+    expect(screen.queryByText('No check runs have been recorded for this service.')).not.toBeInTheDocument();
+  });
+
+  it('keeps the last runs, marked stale, with the reason', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Served at 12:00, read at 12:14: the age is arithmetic, not whatever the
+    // suite took.
+    vi.setSystemTime(new Date('2026-09-19T12:14:00.000Z'));
+    app(
+      withChecks(() => ok(checksBody(JIRA_RUNS, { degraded: true, error: { code: 'store_unavailable', message: 'database is locked' } }))),
+      '/services/jira',
+    );
+    expect(await screen.findByText(/Check history data is 14 minutes old/)).toBeInTheDocument();
+    // The rows are STILL THERE — the last runs anyone has beat a blank panel.
+    expect(runRows()).toHaveLength(2);
+    expect(screen.getByTestId('checks-stale-reason')).toHaveTextContent('database is locked');
+  });
+
+  it('does not show one service\'s runs on another service\'s page', async () => {
+    // The row is refused by the parser rather than rendered under the wrong
+    // name: a probe attributed to the wrong service is worse than no table.
+    app(withChecks(() => ok(checksBody(JIRA_RUNS))), '/services/claude');
+    expect(await screen.findByText(/Check history is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText('Jira /status')).not.toBeInTheDocument();
+  });
+
+  it('a route param that is not one of the seven asks the API nothing', async () => {
+    // `/api/checks` answers an unknown id with HTTP 400, and a red panel on a
+    // page that already says "not a monitored service" is the navigation-as-
+    // outage false alarm this layer refuses everywhere else.
+    let asked = 0;
+    app(
+      withChecks(() => {
+        asked += 1;
+        return ok(checksBody([]));
+      }),
+      '/services/nope',
+    );
+    expect(await screen.findByText(/nope is not a monitored service/)).toBeInTheDocument();
+    expect(asked).toBe(0);
+  });
+
+  it('a new service\'s page never shows the previous one\'s runs', async () => {
+    // The poll is keyed on the service, and a keyed poll starts with no data.
+    // Without that, walking from Jira's page to Claude's leaves Jira's probes
+    // on screen until the first answer arrives — attributed to Claude.
+    const answers: Record<string, unknown[]> = { jira: JIRA_RUNS, claude: [] };
+    const click = (href: string) => {
+      const link = screen.getAllByRole('link').find((a) => a.getAttribute('href') === href);
+      expect(link, `no link to ${href}`).toBeDefined();
+      fireEvent.click(link!, { button: 0 });
+    };
+    app(
+      withChecks((id) => new Promise<Fetched>((resolve) => {
+        // Claude answers late, so the window in which the previous service's
+        // rows could still be on screen is wide open rather than closed by a
+        // synchronous reply.
+        if (id === 'claude') setTimeout(() => resolve(ok(checksBody(answers[id] ?? []))), 50);
+        else resolve(ok(checksBody(answers[id] ?? [])));
+      })),
+      '/',
+    );
+    await screen.findAllByTestId('service-pill');
+    await act(async () => { click('/services/jira'); });
+    expect(await screen.findAllByText('Jira /status')).toHaveLength(2);
+
+    await act(async () => { click('/'); });
+    await screen.findAllByTestId('service-pill');
+    await act(async () => { click('/services/claude'); });
+    expect(screen.queryAllByText('Jira /status')).toHaveLength(0);
+    expect(await screen.findByText('No check runs have been recorded for this service.')).toBeInTheDocument();
+  });
+
+  it('distinguishes "still loading" from "could not be read" beside the counts', async () => {
+    // Jira reports 1 of 1 passing, so the counts are real and the runs are not
+    // here yet. Saying they could not be read would be a failure we have not
+    // had; saying none came back would be a claim we cannot make yet.
+    app(withChecks(() => pending()), '/services/jira');
+    expect(await screen.findByText(/The individual runs are still loading/)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument();
+  });
+
+  it('says none came back when the read succeeded and held nothing', async () => {
+    // The third case, and the world where the three candidates differ: counts
+    // above zero, a successful read, an empty page.
+    app(withChecks(() => ok(checksBody([]))), '/services/jira');
+    expect(await screen.findByText(/No individual runs came back/)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/still loading/)).not.toBeInTheDocument();
+  });
+
+  it('says which no-runs case it is beside the counts', async () => {
+    // Claude has no probe at all: the half-card says so, and the table's empty
+    // state agrees with it rather than contradicting it.
+    app(withChecks(() => ok(checksBody([]))), '/services/claude');
+    expect(await screen.findByText('No probe has run yet.')).toBeInTheDocument();
+    expect(screen.getByText('No check runs have been recorded for this service.')).toBeInTheDocument();
+  });
+});
+
+describe('the fixture path still owns the demo pages', () => {
+  it('renders the fixture runs with no provider, and asks no API', async () => {
+    // The branch all 152 baselines render through. Five fixture rows, from
+    // Milestone 1's code path, with nothing live above them.
+    render(
+      <MemoryRouter initialEntries={['/services/jira?demo=sev1']}>
+        <ThemeProvider>
+          <DemoModeProvider>
+            <App />
+          </DemoModeProvider>
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('Check history')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getAllByRole('row').slice(1)).toHaveLength(5);
+    // And none of the live copy: the fixtures cannot fail, so the page must not
+    // offer a reason they might have.
+    expect(screen.queryByText('No check runs have been recorded for this service.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Check history is unavailable/)).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------- the hook, where the view cannot */
+
+describe('useChecks is keyed on the service it was asked about', () => {
+  /** The claim is about a component that STAYS MOUNTED while the id under it
+   *  changes — which routing does not reproduce, because every path between two
+   *  service pages unmounts the page in between. So the hook is rendered
+   *  directly, with the id as a prop. */
+  function Runs({ id }: { id: string }) {
+    const load = useChecks(id);
+    return (
+      <div data-testid="runs">
+        {load === null ? 'no provider' : (load.data ?? []).map((r) => r.region).join(',')}
+      </div>
+    );
+  }
+
+  it('drops the previous service\'s runs the moment the id changes', async () => {
+    let releaseClaude: (v: Fetched) => void = () => {};
+    const client = clientOf({}, (id) =>
+      id === 'jira'
+        ? ok(checksBody(JIRA_RUNS))
+        : new Promise<Fetched>((resolve) => { releaseClaude = resolve; }));
+    const tree = (id: string) => (
+      <LiveDataProvider client={client} intervalMs={1_000_000}>
+        <Runs id={id} />
+      </LiveDataProvider>
+    );
+    const { rerender } = render(tree('jira'));
+    expect(await screen.findByTestId('runs')).toHaveTextContent('us-east,eu-west');
+
+    await act(async () => { rerender(tree('claude')); });
+    // Claude has not answered yet. Jira's regions on Claude's data would be
+    // another service's probes under this service's name.
+    expect(screen.getByTestId('runs').textContent).toBe('');
+    await act(async () => { releaseClaude(ok(checksBody([]))); });
+    expect(screen.getByTestId('runs').textContent).toBe('');
+  });
+
+  it('answers null with no provider above it, which is the fixture path', () => {
+    render(<Runs id="jira" />);
+    expect(screen.getByTestId('runs')).toHaveTextContent('no provider');
   });
 });

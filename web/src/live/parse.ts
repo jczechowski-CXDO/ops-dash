@@ -1,4 +1,4 @@
-import type { BlastMetric, Severity, StatusLevel } from '@ops-dash/shared';
+import type { BlastMetric, CheckRun, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
 import { SERVICE_NAMES, serviceLabel } from '../lib/serviceNames.js';
 import { firstSentence, type IncidentView, type Load, type ServiceView } from './model.js';
 
@@ -275,4 +275,92 @@ export function parseIncidents(
     incidents.push(view);
   }
   return { ok: true, value: { servedAt, incidents, ...(resultError === null ? {} : { error: resultError }) } };
+}
+
+/* --------------------------------------------------------------- /api/checks */
+
+/**
+ * The individual runs behind a service's counts.
+ *
+ * `/api/checks?service=<id>` is the one route that answers with a bare
+ * `SourceResult` — no `{ servedAt, … }` wrapper — so `fetchedAt` is the age a
+ * stale badge reports and it is required: a table of numbers with no idea how
+ * old they are is the panel this milestone exists to remove.
+ *
+ * The three answers the route can give stay three answers here:
+ *
+ *   `data` (possibly `[]`, with `empty: true`)  we looked; here is what there is
+ *   `error` with no `data`                      we could NOT look
+ *   both                                        the last good rows, stale
+ *
+ * The second and third are the reason this is not `runs ?? []`. Five of the
+ * seven services genuinely have no probe today, so an empty table is the COMMON
+ * reading and must not be painted as a failure — and a store that could not be
+ * read must not be painted as "there are none".
+ */
+
+/** A `Record` over the union rather than an array of three strings, for the
+ *  reason `SERVICE_NAMES` is one: a fourth result in the frozen contract stops
+ *  this compiling, where an array would go on quietly refusing the new member
+ *  as unreadable. */
+const RESULTS: Record<CheckRun['result'], true> = { pass: true, fail: true, timeout: true };
+
+function isRunResult(v: unknown): v is CheckRun['result'] {
+  return typeof v === 'string' && Object.hasOwn(RESULTS, v);
+}
+
+/**
+ * One row, validated field by field.
+ *
+ * `result` is the field that decides a colour, so an unrecognised value is
+ * refused rather than defaulted: `pass` would paint a run we cannot read green,
+ * and `fail` would invent a failure the store never recorded. Refusing the read
+ * is the only answer that is not a claim about the probe.
+ *
+ * `latencyMs` is `null` for anything non-numeric, which is what a timeout
+ * serves. Never 0 — a zero renders as the fastest probe ever recorded.
+ */
+export function checkRunView(raw: unknown, serviceId: ServiceId): CheckRun | null {
+  if (!isRecord(raw)) return null;
+  const rowService = str(raw['serviceId']);
+  // A row belonging to another service would be another service's probe on this
+  // page, attributed to this one. The query is bound to one id; a response
+  // carrying a different one is a defect somewhere and not a table to render.
+  if (rowService === null || rowService !== serviceId) return null;
+  const at = str(raw['at']);
+  const check = str(raw['check']);
+  const region = str(raw['region']);
+  const result = raw['result'];
+  if (at === null || check === null || region === null || !isRunResult(result)) return null;
+  // `serviceId` is the id we ASKED for — already a member of the frozen union
+  // — carried across having checked that the row agrees with it. The
+  // alternative is a cast on a string that arrived over the wire.
+  return { serviceId, at, check, region, result, latencyMs: num(raw['latencyMs']) };
+}
+
+export function parseChecks(
+  json: unknown,
+  serviceId: ServiceId,
+): Parsed<{ servedAt: string; value: CheckRun[]; error?: { code: string; message: string } }> {
+  if (!isRecord(json)) return bad('the response was not an object');
+  const servedAt = str(json['fetchedAt']);
+  if (servedAt === null) return bad('the response carried no fetchedAt');
+  const resultError = errorOf(json['error']);
+  const list = json['data'];
+  if (!Array.isArray(list)) {
+    // Amendment 9 again, and the distinction the whole route was added for: no
+    // rows WITH a reason is the store failing, in its own words; no rows and no
+    // reason is a malformed response. Neither is "there are none".
+    return resultError === null ? bad('the result carried no data array') : { ok: false, error: resultError };
+  }
+  const runs: CheckRun[] = [];
+  for (const entry of list) {
+    const view = checkRunView(entry, serviceId);
+    // Louder than dropping the row: a table quietly one row short looks exactly
+    // like a probe that did not run, which is a fact about the estate rather
+    // than about our parsing.
+    if (view === null) return bad('a check run could not be read');
+    runs.push(view);
+  }
+  return { ok: true, value: { servedAt, value: runs, ...(resultError === null ? {} : { error: resultError }) } };
 }

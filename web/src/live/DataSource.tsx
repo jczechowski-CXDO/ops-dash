@@ -1,8 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import type { FixtureBundle, HistoryRow } from '../fixtures/index.js';
-import { apiClient, type ApiClient, type ApiPath } from './client.js';
-import { parseIncidents, parseServices, type Parsed } from './parse.js';
+import type { CheckRun } from '@ops-dash/shared';
+import { isServiceId } from '../lib/serviceNames.js';
+import { apiClient, type ApiClient, type ApiPath, type Fetched } from './client.js';
+import { parseChecks, parseIncidents, parseServices, type Parsed } from './parse.js';
 import { ready, serviceViewOf, type IncidentView, type Load, type ServiceView } from './model.js';
 
 /**
@@ -91,8 +93,22 @@ export function useDashboard(): Dashboard {
  * never be reported as something it is not" rule, pointed the other way.
  */
 function useEndpoint<T>(
-  client: ApiClient,
-  path: ApiPath,
+  /** `null` means "there is nothing to poll" — no provider above us, or a route
+   *  param that is not one of the seven services. The effect does not run and
+   *  the load stays `{}`; it is not a failure and must not render as one. */
+  client: ApiClient | null,
+  /** What identifies this poll, for the effect's dependencies. A path for the
+   *  two collection routes, and `checks:<id>` for the one that takes an
+   *  argument — so navigating between two service pages restarts the poll
+   *  rather than showing the previous service's runs. */
+  key: string,
+  /**
+   * How to ask. The client is a parameter rather than a closed-over value so
+   * that the request is not itself a dependency: it is held in a ref like
+   * `parse` below, while `key` and `client` are what decide that this is a
+   * DIFFERENT poll.
+   */
+  request: (client: ApiClient, signal: AbortSignal) => Promise<Fetched>,
   parse: (json: unknown) => Parsed<{ servedAt: string; value: T; error?: { code: string; message: string } }>,
   intervalMs: number,
 ): Load<T> {
@@ -102,13 +118,21 @@ function useEndpoint<T>(
   // every render and hammering the API.
   const parseRef = useRef(parse);
   parseRef.current = parse;
+  const requestRef = useRef(request);
+  requestRef.current = request;
 
   useEffect(() => {
+    if (client === null) return;
     let cancelled = false;
     const controller = new AbortController();
+    // A NEW poll starts with no data, and that matters for the one route that
+    // takes an argument: navigating from /services/jira to /services/claude
+    // would otherwise leave Jira's check runs on Claude's page until the first
+    // answer arrived — the previous service's probes, attributed to this one.
+    setLoad({});
 
     const tick = async () => {
-      const got = await client.get(path, controller.signal);
+      const got = await requestRef.current(client, controller.signal);
       if (cancelled) return;
       if (!got.ok) {
         if (got.error.code === 'aborted') return;
@@ -135,7 +159,7 @@ function useEndpoint<T>(
       controller.abort();
       clearInterval(id);
     };
-  }, [client, path, intervalMs]);
+  }, [client, key, intervalMs]);
 
   return load;
 }
@@ -161,6 +185,73 @@ const parseIncidentsFor = (
     : parsed;
 };
 
+/** The two collection routes ask the same way; only the literal differs. The
+ *  path is still a member of `ApiPath`, so nothing here widens the union the
+ *  one door is built on. */
+const get = (path: ApiPath) => (client: ApiClient, signal: AbortSignal): Promise<Fetched> =>
+  client.get(path, signal);
+
+/* ----------------------------------------------------- the per-service route */
+
+/**
+ * The client, published separately from the data.
+ *
+ * `Dashboard` is the three screens' payload and is the same shape in both
+ * worlds. Check runs are not part of it: they belong to ONE service, the page
+ * that wants them knows which, and putting a seven-entry map of runs into a
+ * context every view reads would poll six services nobody is looking at.
+ *
+ * So the provider publishes how to ask, and `useChecks` below is the only
+ * consumer. Its absence is the fixture path, exactly as `Ctx`'s absence is.
+ */
+type Source = { client: ApiClient; intervalMs: number };
+
+const SourceCtx = createContext<Source | null>(null);
+
+/**
+ * The check runs for one service, or `null` for "this page owns its own data".
+ *
+ * `null` is not an empty load and not a failure: it means no live provider is
+ * mounted, so `ServiceDetail` reads the fixtures exactly as it did in
+ * Milestone 1. Every one of the 152 baselines renders through that branch.
+ *
+ * It is also `null` for a route param that is not one of the seven. `/api/checks`
+ * answers an unknown id with HTTP 400 — correctly — and asking it anyway would
+ * paint a red panel on a page that already says "that is not a monitored
+ * service", which is the navigation-as-outage false alarm this layer refuses
+ * everywhere else.
+ */
+export function useChecks(serviceId: string | undefined): Load<CheckRun[]> | null {
+  const source = useContext(SourceCtx);
+  const id = serviceId !== undefined && isServiceId(serviceId) ? serviceId : null;
+  // Both nulls collapse into one: nothing to poll.
+  const client = source === null || id === null ? null : source.client;
+  const load = useEndpoint<CheckRun[]>(
+    client,
+    `checks:${id ?? ''}`,
+    // `id` is captured from the render that built this closure, and the closure
+    // is only ever called with a non-null client — which this file only
+    // produces when `id` is non-null. The guard is here so the narrowing is the
+    // typechecker's rather than a comment's, and there is no cast.
+    (c, signal) => (id === null ? NEVER : c.checks(id, signal)),
+    (json) => (id === null ? NOT_ASKED : parseChecks(json, id)),
+    source?.intervalMs ?? REFRESH_MS,
+  );
+  return client === null ? null : load;
+}
+
+/** Unreachable by construction — see `useChecks`. Values rather than throws:
+ *  a hook that throws on a branch nobody can take is a crash waiting for the
+ *  day somebody can. */
+const NEVER: Promise<Fetched> = Promise.resolve({
+  ok: false,
+  error: { code: 'aborted', message: 'no service to ask about' },
+});
+const NOT_ASKED: Parsed<never> = {
+  ok: false,
+  error: { code: 'bad_payload', message: 'no service to ask about' },
+};
+
 export function LiveDataProvider({
   children,
   client = apiClient,
@@ -170,8 +261,9 @@ export function LiveDataProvider({
   client?: ApiClient;
   intervalMs?: number;
 }) {
-  const services = useEndpoint(client, '/api/services', parseServicesFor, intervalMs);
-  const incidents = useEndpoint(client, '/api/incidents', parseIncidentsFor, intervalMs);
+  const services = useEndpoint(client, '/api/services', get('/api/services'), parseServicesFor, intervalMs);
+  const incidents = useEndpoint(client, '/api/incidents', get('/api/incidents'), parseIncidentsFor, intervalMs);
+  const source = useMemo<Source>(() => ({ client, intervalMs }), [client, intervalMs]);
 
   const value = useMemo<Dashboard>(
     () => ({
@@ -186,5 +278,9 @@ export function LiveDataProvider({
     [services, incidents],
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      <SourceCtx.Provider value={source}>{children}</SourceCtx.Provider>
+    </Ctx.Provider>
+  );
 }

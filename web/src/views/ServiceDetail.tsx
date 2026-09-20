@@ -8,16 +8,19 @@ import { Sparkline } from '../components/Sparkline.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
-import { useDashboard } from '../live/DataSource.js';
+import { useChecks, useDashboard } from '../live/DataSource.js';
+import { StaleReason } from '../live/StaleReason.js';
 import {
   countText,
   lastSeenLine,
+  loadKind,
   panelStateFor,
   percentileText,
   sparkSamples,
   NO_VALUE,
   staleReason,
   uptimeText,
+  type Load,
   type ServiceView,
 } from '../live/model.js';
 import { checkRunsFor } from '../fixtures/index.js';
@@ -125,19 +128,33 @@ function vendorProvenance(vendor: ServiceView['vendor']): string {
 /**
  * Ours: the newest probe on the page, tying the half-card to the table below.
  *
- * The no-runs case is now two cases and they are different facts. With no runs
+ * The no-runs case is several cases and they are different facts. With no runs
  * AND no counts, no probe has ever run — five of the seven services today. With
- * counts but no runs, the probes ran and the API does not serve the individual
- * rows: `/api/services` carries `ours.passing` and `ours.total` and there is no
- * check-runs route yet. Saying "no probe has run yet" over two passing probes
- * would be this dashboard lying in the one direction it is built not to.
+ * counts but no runs, the probes ran and something stopped us listing them, and
+ * WHICH something is the sentence: still reading, could not read, or read and
+ * there were none. Saying "no probe has run yet" over two passing probes would
+ * be this dashboard lying in the one direction it is built not to.
+ *
+ * `checks` is `null` on the fixture path, where the runs are in hand and cannot
+ * fail to be — so that branch says the one thing that is true of a complete
+ * record with nothing in it.
  */
-function oursProvenance(runs: CheckRun[], ours: ServiceView['ours']): string {
+function oursProvenance(
+  runs: CheckRun[],
+  ours: ServiceView['ours'],
+  checks: Load<CheckRun[]> | null,
+): string {
   const newest = runs[0];
   if (newest !== undefined) return `Last check run ${ago(newest.at)}.`;
-  return ours.total === 0
-    ? 'No probe has run yet.'
-    : `${ours.passing} of ${ours.total} checks reported. Individual runs are not served by the API yet.`;
+  if (ours.total === 0) return 'No probe has run yet.';
+  const kind = checks === null ? 'ready' : loadKind(checks);
+  const why =
+    kind === 'loading'
+      ? 'The individual runs are still loading.'
+      : kind === 'ready'
+        ? 'No individual runs came back.'
+        : 'The individual runs could not be read.';
+  return `${ours.passing} of ${ours.total} checks reported. ${why}`;
 }
 
 const RESULT_WORD: Record<CheckRun['result'], string> = {
@@ -242,6 +259,10 @@ export default function ServiceDetail({
   const { id } = useParams();
   const { mode } = useDemoMode();
   const dashboard = useDashboard();
+  // Before the early return below, because it is a hook: a service id that is
+  // not one of the seven, or a page with no live provider above it, is handled
+  // inside `useChecks` by not polling at all rather than by not calling it.
+  const checks = useChecks(id);
   const service = injectedService ?? dashboard.services.data?.find((s) => s.id === id);
 
   if (!service) {
@@ -274,19 +295,31 @@ export default function ServiceDetail({
     );
   }
 
-  // The fixtures hold per-service check runs; the API serves none, and an empty
-  // array there is "not served", not "nothing ran". The two get different
-  // sentences below.
-  const runs = injectedRuns ?? (dashboard.live ? [] : checkRunsFor(mode, service.id));
+  /**
+   * The runs, from whichever source owns this page.
+   *
+   * `checks === null` is the fixture path — Milestone 1's code path, which the
+   * 152 baselines are pinned to — and `injectedRuns` is the test seam. Neither
+   * can fail, so both keep the state they have always had.
+   *
+   * The live path is the one that needs four states, and the distinction the
+   * whole route was added for is between two of them: `/api/checks` answers
+   * `empty: true` when a service has no runs, and `error` with no data when the
+   * store could not be read. Five of the seven services have no probe today, so
+   * the empty panel is the COMMON one and must not read as a failure — and a
+   * store we could not read must not read as "there are none".
+   */
+  const runs = injectedRuns ?? checks?.data ?? (dashboard.live ? [] : checkRunsFor(mode, service.id));
   const checkState: PanelState =
-    runs.length === 0
-      ? {
-          kind: 'empty',
-          message: dashboard.live
-            ? 'Individual check runs are not served by the API yet; the counts above come from /api/services.'
-            : 'No check runs recorded in this window.',
-        }
-      : { kind: 'ready' };
+    injectedRuns === undefined && checks !== null
+      ? panelStateFor(checks, 'Check history', {
+          when: (rows) => rows.length === 0,
+          message: 'No check runs have been recorded for this service.',
+        })
+      : runs.length === 0
+        ? { kind: 'empty', message: 'No check runs recorded in this window.' }
+        : { kind: 'ready' };
+  const checksStale = checks === null ? null : staleReason(checks);
   const { values: sparkValues, missing: sparkMissing } = sparkSamples(service.spark);
   const feedStale = staleReason(service.feed);
   const lastSeen = lastSeenLine(service.feed);
@@ -338,7 +371,7 @@ export default function ServiceDetail({
           level={service.ours.level}
           label={service.ours.label}
           note={service.ours.note}
-          provenance={oursProvenance(runs, service.ours)}
+          provenance={oursProvenance(runs, service.ours, injectedRuns === undefined ? checks : null)}
           dotTestId="ours-dot"
         />
       </div>
@@ -436,6 +469,10 @@ export default function ServiceDetail({
           <SectionHeading meta={`${service.short} · newest first`}>Check history</SectionHeading>
         </div>
         <Panel state={checkState}>
+          {/* Inside the panel, so it renders in the one state that has both
+              data and a failure. The stale alert above it carries the age; this
+              carries the reason, which the age alone does not give. */}
+          <StaleReason reason={checksStale} testId="checks-stale-reason" />
           <Table columns={CHECK_COLUMNS} rows={runs} dense />
         </Panel>
       </Card>

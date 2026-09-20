@@ -30,6 +30,22 @@ export const SERVICE_NAMES: Record<ServiceId, { short: string; name: string }> =
 };
 
 /**
+ * Is this string one of the seven?
+ *
+ * Derived from `SERVICE_NAMES`' own keys rather than from a second list, for
+ * the reason the record above is a `Record<ServiceId, …>`: a hand-written
+ * array of seven ids is a copy that can lose one, and the one it loses is a
+ * service whose page silently stops asking the API for its check runs.
+ *
+ * It exists because a route param is a `string` and `client.checks` takes a
+ * `ServiceId`. The narrowing is done here, once, so no caller reaches for a
+ * cast to make an unvalidated URL parameter satisfy the frozen union.
+ */
+export function isServiceId(v: string): v is ServiceId {
+  return Object.hasOwn(SERVICE_NAMES, v);
+}
+
+/**
  * The display name for an arbitrary string, which is what an incident's
  * `serviceId` is: the contract widens it deliberately, because an incident can
  * belong to `platform:statuspage` or to a product source that is not one of the
@@ -37,7 +53,5 @@ export const SERVICE_NAMES: Record<ServiceId, { short: string; name: string }> =
  * at — showing the raw key is honest, and inventing a title for it is not.
  */
 export function serviceLabel(serviceId: string): string {
-  return Object.hasOwn(SERVICE_NAMES, serviceId)
-    ? SERVICE_NAMES[serviceId as ServiceId].short
-    : serviceId;
+  return isServiceId(serviceId) ? SERVICE_NAMES[serviceId].short : serviceId;
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import type { ServiceId } from '@ops-dash/shared';
 import { loadKind } from './model.js';
-import { decodeSeverity, incidentView, isStatusLevel, levelLabel, parseIncidents, parseServices, serviceEntryView } from './parse.js';
+import { decodeSeverity, incidentView, isStatusLevel, levelLabel, parseChecks, parseIncidents, parseServices, serviceEntryView } from './parse.js';
 
 /**
  * A `/api/services` entry, shaped exactly as `server/src/api/routes.ts`
@@ -383,8 +384,23 @@ describe('an OMITTED key is handled, not merely an explicit null — G5 MEDIUM 6
       lastStateChange: null,
     });
 
+  /**
+   * The same narrowing `view()` does at the top of this file, for payloads
+   * built by hand here rather than from `entry()`'s defaults.
+   *
+   * It throws rather than asserting non-null with `!`: `serviceEntryView`
+   * returns `ServiceView | null` and every test below assumes the payload was
+   * accepted. If one day it is not, the failure should name that fact instead
+   * of reading as an assertion about a level.
+   */
+  const parsedView = (raw: unknown) => {
+    const got = serviceEntryView(raw);
+    if (got === null) throw new Error('the payload under test did not parse');
+    return got;
+  };
+
   it('a source that has never succeeded does not inherit a level from anywhere', () => {
-    const view = serviceEntryView(neverPolled());
+    const view = parsedView(neverPolled());
     expect(view.vendor.level).toBe('unknown');
     // And the past-tense reading is absent rather than defaulted: there is no
     // "what we last saw", because we never saw anything.
@@ -396,7 +412,7 @@ describe('an OMITTED key is handled, not merely an explicit null — G5 MEDIUM 6
     // The specific failure: `data` arriving as `{}` and `level(undefined)`
     // resolving to a default. Asserted on the level rather than on the key, so
     // it holds however the parser is reorganised.
-    const view = serviceEntryView(neverPolled());
+    const view = parsedView(neverPolled());
     expect(view.vendor.level).not.toBe('operational');
     expect(view.vendor.level).toBe('unknown');
   });
@@ -409,7 +425,7 @@ describe('an OMITTED key is handled, not merely an explicit null — G5 MEDIUM 6
       result: { data: null, fetchedAt: '2026-09-20T04:00:00.000Z', degraded: true, error: { code: 'http_503', message: 'x' } },
       currentLevel: 'unknown',
     });
-    const view = serviceEntryView(withNull);
+    const view = parsedView(withNull);
     expect(view.vendor.level).toBe('unknown');
     expect(view.feed.data).toBeUndefined();
   });
@@ -417,8 +433,125 @@ describe('an OMITTED key is handled, not merely an explicit null — G5 MEDIUM 6
   it('a present payload still reads through, so the tests above are not passing vacuously', () => {
     // The control. Without it, a parser that dropped `data` unconditionally
     // would satisfy every assertion above.
-    const view = serviceEntryView(entry());
+    const view = parsedView(entry());
     expect(view.feed.data?.level).toBe('operational');
     expect(view.vendor.level).toBe('operational');
+  });
+});
+
+/* --------------------------------------------------------------- /api/checks */
+
+describe('the individual check runs', () => {
+  const RUN = {
+    serviceId: 'jira',
+    at: '2026-09-20T04:00:00.000Z',
+    check: 'Jira /status',
+    region: 'us-east',
+    result: 'pass',
+    latencyMs: 110,
+  };
+  const page = (over: Record<string, unknown> = {}) => ({
+    fetchedAt: '2026-09-20T04:00:05.000Z',
+    degraded: false,
+    data: [RUN],
+    ...over,
+  });
+
+  const runsOf = (json: unknown, id: ServiceId = 'jira') => {
+    const parsed = parseChecks(json, id);
+    if (!parsed.ok) throw new Error(`refused: ${parsed.error.message}`);
+    return parsed.value;
+  };
+
+  it('reads a run field by field', () => {
+    // Pinned literals rather than a comparison against RUN: an echo of the
+    // input would pass for a parser that spread the payload through unread.
+    const [run] = runsOf(page()).value;
+    expect(run).toEqual({
+      serviceId: 'jira',
+      at: '2026-09-20T04:00:00.000Z',
+      check: 'Jira /status',
+      region: 'us-east',
+      result: 'pass',
+      latencyMs: 110,
+    });
+    expect(runsOf(page()).servedAt).toBe('2026-09-20T04:00:05.000Z');
+  });
+
+  it('a timeout keeps its null latency rather than becoming a fast probe', () => {
+    const [run] = runsOf(page({ data: [{ ...RUN, result: 'timeout', latencyMs: null }] })).value;
+    expect(run?.result).toBe('timeout');
+    expect(run?.latencyMs).toBeNull();
+  });
+
+  it('a missing latency is null, and a zero is kept as a measurement', () => {
+    const [absent] = runsOf(page({ data: [{ ...RUN, latencyMs: undefined }] })).value;
+    expect(absent?.latencyMs).toBeNull();
+    const [zero] = runsOf(page({ data: [{ ...RUN, latencyMs: 0 }] })).value;
+    expect(zero?.latencyMs).toBe(0);
+  });
+
+  it('an empty page is a successful read of nothing, not a failure', () => {
+    const parsed = parseChecks(page({ data: [], empty: true }), 'jira');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.value).toEqual([]);
+    // No error alongside it: "we looked and there are none" carries no reason,
+    // because nothing went wrong.
+    expect(parsed.value.error).toBeUndefined();
+  });
+
+  it('a store that could not be read is a failure in its own words, never an empty list', () => {
+    const parsed = parseChecks(
+      { fetchedAt: 't', degraded: true, error: { code: 'store_unavailable', message: 'database is locked' } },
+      'jira',
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toEqual({ code: 'store_unavailable', message: 'database is locked' });
+  });
+
+  it('rows AND an error is stale-with-last-good, and keeps both', () => {
+    const parsed = parseChecks(page({ degraded: true, error: { code: 'store_unavailable', message: 'locked' } }), 'jira');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.value).toHaveLength(1);
+    expect(parsed.value.error).toEqual({ code: 'store_unavailable', message: 'locked' });
+  });
+
+  it('refuses a page with no age on it', () => {
+    // A table of numbers with no idea how old they are is the panel this
+    // milestone exists to remove.
+    expect(parseChecks({ degraded: false, data: [RUN] }, 'jira').ok).toBe(false);
+  });
+
+  it('refuses a run whose result is not one we can colour', () => {
+    for (const result of ['ok', 'PASS', '', null, undefined, 1]) {
+      expect(parseChecks(page({ data: [{ ...RUN, result }] }), 'jira').ok).toBe(false);
+    }
+    // The control: the three real ones are all accepted, so the assertion above
+    // is not passing over a parser that refuses everything.
+    for (const result of ['pass', 'fail', 'timeout']) {
+      expect(parseChecks(page({ data: [{ ...RUN, result }] }), 'jira').ok).toBe(true);
+    }
+  });
+
+  it('refuses a run belonging to another service', () => {
+    // Another service's probe on this page, attributed to this one. The query
+    // is bound to one id; a row carrying a different one is a defect upstream.
+    expect(parseChecks(page({ data: [{ ...RUN, serviceId: 'openai' }] }), 'jira').ok).toBe(false);
+    expect(parseChecks(page(), 'openai').ok).toBe(false);
+  });
+
+  it('refuses a row missing any of the fields the table renders', () => {
+    for (const key of ['serviceId', 'at', 'check', 'region']) {
+      expect(parseChecks(page({ data: [{ ...RUN, [key]: undefined }] }), 'jira').ok).toBe(false);
+    }
+  });
+
+  it('refuses a malformed page rather than reporting no runs', () => {
+    for (const junk of [null, 'runs', {}, { fetchedAt: 't', degraded: false }, { fetchedAt: 't', data: {} }]) {
+      expect(parseChecks(junk, 'jira').ok).toBe(false);
+    }
   });
 });
