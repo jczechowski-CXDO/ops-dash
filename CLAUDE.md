@@ -149,12 +149,33 @@ interaction, `ops-reviewer` for the diff — **and starts the next slice immedia
 rather than waiting for the result. Two types working on two stages of the same work
 cannot invent two versions of anything, because only one of them is inventing.
 
-This only became possible when the agents got `SendMessage`. Before that every handoff
-routed through the lead, so the pipeline serialised on the lead's attention — which is
-what actually made this project feel sequential, not the agents.
-
 The rule for the handoff: the author keeps ownership and fixes what comes back. A
 verification agent reports; it does not edit the author's files.
+
+### How peer messages actually arrive, measured
+
+**Inbound messages are delivered at a turn boundary, never mid-turn.** Established by an
+agent that sent three messages, deliberately slept 90 seconds and then 120 seconds waiting
+for an answer, received nothing, committed, reported — and then had all four of the other
+agent's replies delivered in a single batch at its next turn. Both directions worked the
+whole time. Only the timing was wrong.
+
+Three consequences, all of which cost real time before they were understood:
+
+- **An agent cannot wait for a peer inside its own turn.** Sleeping and polling is the
+  obvious thing to reach for and it is structurally incapable of working — the message
+  cannot be delivered while the agent is sitting in a tool call waiting for it. Do not
+  instruct an agent to wait for a reply.
+- **A working exchange looks like a monologue from both ends.** Neither party should read
+  silence as refusal or disengagement. One agent reported to the lead that the other "never
+  replied"; the other had replied twice over before that report was written. Silence means
+  *I have not heard yet*, never *they are not answering*.
+- **So "ask first" is the wrong instruction.** The right one is **make the first version
+  impossible to be wrong about**: strictly additive, existing callers compile untouched, and
+  say plainly in the commit that the open questions remain open and the file is yours to
+  change on their word. That is what made a late reply cost nothing. Had the first version
+  renamed a prop or changed a render path, answers arriving afterwards would have meant
+  rework in files the author does not own.
 
 A good check before dispatching: *if I spawn this, will there be two live agents of
 this type, and is the second one doing something the first genuinely cannot?* If the
