@@ -120,6 +120,151 @@ describe('signing in', () => {
   });
 });
 
+describe('the login route is rate limited, because the LAN can reach it', () => {
+  /** A fresh app per test: the throttle is per instance, so these cannot
+   *  interfere with each other or with the tests above. */
+  const app = () => buildApi({ store: quietStore(), now: () => NOW, auth: createSessionAuth() });
+
+  /** One attempt as the real username. The clock is fixed at build, so a test
+   *  that needs time to pass builds its own app with a movable one. */
+  const attempt = (a: ReturnType<typeof buildApi>, password: string) =>
+    a.inject({ method: 'POST', url: '/api/session', payload: { username: USERNAME, password } });
+
+  it('refuses a fourth attempt after three failures — even with the RIGHT password', async () => {
+    // The assertion that matters. A throttle that lets the correct password
+    // through while it is counting is not a throttle, it is a log.
+    const a = app();
+    try {
+      for (const _ of [1, 2, 3]) expect((await attempt(a, 'wrong')).statusCode).toBe(401);
+      const res = await attempt(a, PASSWORD);
+      expect(res.statusCode).toBe(429);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('too_many_attempts');
+      expect(res.headers['set-cookie']).toBeUndefined();
+    } finally {
+      await a.close();
+    }
+  });
+
+  it('allows two mistakes before it starts waiting — fat fingers are not an attack', async () => {
+    const a = app();
+    try {
+      expect((await attempt(a, 'wrong')).statusCode).toBe(401);
+      expect((await attempt(a, 'wrong')).statusCode).toBe(401);
+      // Still 200, not 429: the third attempt is the first one that could be
+      // refused, and it is the right password.
+      expect((await attempt(a, PASSWORD)).statusCode).toBe(200);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it('lets the operator in once the wait has passed, on the server’s clock', async () => {
+    // One auth instance, two clocks: the throttle must expire by time and not
+    // by a counter somebody reset.
+    const auth = createSessionAuth();
+    let clock = NOW;
+    const a = buildApi({ store: quietStore(), now: () => clock, auth });
+    try {
+      for (const _ of [1, 2, 3]) await a.inject({ method: 'POST', url: '/api/session', payload: { username: USERNAME, password: 'wrong' } });
+      expect((await a.inject({ method: 'POST', url: '/api/session', payload: { username: USERNAME, password: PASSWORD } })).statusCode).toBe(429);
+      clock = new Date(NOW.getTime() + 31_000);
+      expect((await a.inject({ method: 'POST', url: '/api/session', payload: { username: USERNAME, password: PASSWORD } })).statusCode).toBe(200);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it('a success clears the count, so yesterday’s typos do not lock out today', async () => {
+    const auth = createSessionAuth();
+    let clock = NOW;
+    const a = buildApi({ store: quietStore(), now: () => clock, auth });
+    const post = (password: string) => a.inject({ method: 'POST', url: '/api/session', payload: { username: USERNAME, password } });
+    try {
+      await post('wrong');
+      await post('wrong');
+      expect((await post(PASSWORD)).statusCode).toBe(200);
+      clock = new Date(NOW.getTime() + 1000);
+      // Two more failures would be the fourth and fifth overall. If the success
+      // had not cleared the count they would be refused rather than rejected.
+      expect((await post('wrong')).statusCode).toBe(401);
+      expect((await post('wrong')).statusCode).toBe(401);
+      expect((await post(PASSWORD)).statusCode).toBe(200);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it('guessing wrong USERNAMES cannot lock the operator out of their own dashboard', async () => {
+    // The reason the throttle has two buckets rather than one. Anyone on the
+    // LAN can send any username; if that spent the operator's budget, the
+    // control would be a denial of service against its own user.
+    const a = app();
+    try {
+      for (const name of ['admin', 'root', 'john', 'administrator', 'guest']) {
+        const res = await a.inject({ method: 'POST', url: '/api/session', payload: { username: name, password: 'wrong' } });
+        expect([401, 429]).toContain(res.statusCode);
+      }
+      expect((await attempt(a, PASSWORD)).statusCode).toBe(200);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it('and those guesses are themselves throttled — the bucket is not a bypass', async () => {
+    const a = app();
+    try {
+      for (const _ of [1, 2, 3]) await a.inject({ method: 'POST', url: '/api/session', payload: { username: 'admin', password: 'wrong' } });
+      const res = await a.inject({ method: 'POST', url: '/api/session', payload: { username: 'admin', password: 'wrong' } });
+      expect(res.statusCode).toBe(429);
+    } finally {
+      await a.close();
+    }
+  });
+});
+
+describe('a request from another origin is refused, whatever cookie it carries', () => {
+  const inject = async (url: string, method: 'POST' | 'DELETE' | 'GET', origin?: string) => {
+    const app = buildApi({ store: quietStore(), now: () => NOW, auth: createSessionAuth() });
+    try {
+      const cookie = method === 'DELETE' ? (await signIn(app)).setCookie.split(';')[0] ?? '' : '';
+      const res = await app.inject({
+        method,
+        url,
+        headers: { host: 'ops-dash.local:4000', ...(origin ? { origin } : {}), ...(cookie ? { cookie } : {}) },
+        ...(method === 'POST' ? { payload: { username: USERNAME, password: PASSWORD } } : {}),
+      });
+      return { statusCode: res.statusCode, body: res.body };
+    } finally {
+      await app.close();
+    }
+  };
+
+  it('refuses a cross-origin login and a cross-origin write', async () => {
+    expect((await inject('/api/session', 'POST', 'http://evil.example')).statusCode).toBe(403);
+    expect((await inject('/api/session', 'DELETE', 'http://evil.example')).statusCode).toBe(403);
+  });
+
+  it('is not fooled by an origin that merely contains our host — parsed, not matched', async () => {
+    // `startsWith`/`endsWith`/`includes` all accept at least one of these. The
+    // same trap `http/safeTarget.ts` exists for, pointed inward.
+    for (const origin of ['http://ops-dash.local:4000.evil.example', 'http://evil.example/?x=ops-dash.local:4000', 'http://ops-dash.local:4000@evil.example']) {
+      expect((await inject('/api/session', 'POST', origin)).statusCode, origin).toBe(403);
+    }
+  });
+
+  it('allows our own origin, and allows a client that sends none — the controls', async () => {
+    // Without these the rule above would be satisfied by refusing everything,
+    // which is a control that cannot distinguish a working seam from a broken
+    // one.
+    expect((await inject('/api/session', 'POST', 'http://ops-dash.local:4000')).statusCode).toBe(200);
+    expect((await inject('/api/session', 'POST')).statusCode).toBe(200);
+  });
+
+  it('does not refuse a cross-origin READ — those are public by decision and the browser may ask', async () => {
+    expect((await inject('/api/health', 'GET', 'http://evil.example')).statusCode).toBe(200);
+  });
+});
+
 describe('a mutating route needs a session', () => {
   it('refuses the logout route with no cookie, and serves it with one', async () => {
     // The end-to-end shape of the seam: same route, same server, one cookie

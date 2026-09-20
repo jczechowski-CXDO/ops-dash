@@ -81,7 +81,7 @@ export type AuthDecision =
 
 export type LoginOutcome =
   | { ok: true; principal: Principal; setCookie: string }
-  | { ok: false; status: 400 | 401 | 503; error: { code: string; message: string } };
+  | { ok: false; status: 400 | 401 | 429 | 503; error: { code: string; message: string } };
 
 export type SessionAuth = {
   /** The decision, for one request. The hook calls this; so may a test. */
@@ -104,8 +104,65 @@ export type SessionAuthOptions = {
   loadConfig?: () => AuthConfig;
 };
 
+/**
+ * The login throttle.
+ *
+ * **Not deferred to the release list, because the premise that would justify
+ * deferring it is already false.** John binds this to `0.0.0.0`, so the login
+ * route is reachable by anything on the LAN, and scrypt's ~50ms is a throttle
+ * measured in attempts per second — thousands an hour against a password a
+ * human chose. A cost function is not a rate limit.
+ *
+ * In memory, no store, no table, no dependency. It dies with the process, which
+ * is a real limitation and is on the release list rather than hidden here.
+ *
+ * **Two buckets, never one per name.** Keying by the submitted username would
+ * let anyone on the LAN mint unbounded map entries by guessing names — a memory
+ * leak reachable by an unauthenticated caller, which is a worse bug than the one
+ * being fixed. There is exactly one account, so there are exactly two
+ * populations: attempts against the real username, and everything else. The
+ * separation matters in the other direction too: guessing wrong *usernames*
+ * must not lock the operator out of their own dashboard.
+ */
+const OTHER = '\u0000other';
+
+/** Two free attempts — fat fingers — then a doubling wait, capped at 30s. A cap
+ *  rather than unbounded growth: a lockout an operator cannot wait out is a
+ *  denial of service anybody on the LAN can perform on them. */
+function delayAfter(failures: number): number {
+  if (failures <= 2) return 0;
+  return Math.min(30_000, 1000 * 2 ** (failures - 3));
+}
+
+type Bucket = { failures: number; nextAllowedAt: number };
+
+function createThrottle() {
+  const buckets = new Map<string, Bucket>();
+  const keyFor = (submitted: string, configured: string) => (submitted === configured ? configured : OTHER);
+  return {
+    /** Milliseconds still to wait, or 0. */
+    waitFor(submitted: string, configured: string, now: number): number {
+      const bucket = buckets.get(keyFor(submitted, configured));
+      return bucket ? Math.max(0, bucket.nextAllowedAt - now) : 0;
+    },
+    failed(submitted: string, configured: string, now: number): void {
+      const key = keyFor(submitted, configured);
+      const failures = (buckets.get(key)?.failures ?? 0) + 1;
+      buckets.set(key, { failures, nextAllowedAt: now + delayAfter(failures) });
+    },
+    /** A success clears the bucket it succeeded in. Only the real username can
+     *  ever succeed, so this cannot clear the other one. */
+    succeeded(submitted: string, configured: string): void {
+      buckets.delete(keyFor(submitted, configured));
+    },
+  };
+}
+
 export function createSessionAuth(opts: SessionAuthOptions = {}): SessionAuth {
   const load = opts.loadConfig ?? (() => loadAuthConfig());
+  // Per instance. `buildApi` makes one instance per process, and a test makes
+  // one per app — so a test cannot be slowed down by another test's failures.
+  const throttle = createThrottle();
 
   /** `undefined` rather than a throw: unconfigured is a state this process
    *  reports, not an exception a handler has to decide what to do with. */
@@ -179,10 +236,28 @@ export function createSessionAuth(opts: SessionAuthOptions = {}): SessionAuth {
       // The password is verified even when the username is wrong, so the reply
       // takes the same time either way — scrypt is the expensive half, and
       // skipping it on a bad username is a free username oracle.
+      // The wait is checked BEFORE the hash is computed. Checking it after
+      // would still refuse the attempt and would still burn 50ms of CPU per
+      // request — a rate limit that costs the defender more than the attacker
+      // is a denial-of-service amplifier wearing a control's clothes.
+      const wait = throttle.waitFor(username, cfg.username, now.getTime());
+      if (wait > 0) {
+        return {
+          ok: false,
+          status: 429,
+          error: {
+            code: 'too_many_attempts',
+            message: `too many failed sign-in attempts; try again in ${Math.ceil(wait / 1000)} seconds`,
+          },
+        };
+      }
+
       const right = verifyPassword(cfg.password_hash, password);
       if (!right || username !== cfg.username) {
+        throttle.failed(username, cfg.username, now.getTime());
         return { ok: false, status: 401, error: { code: 'bad_credentials', message: 'that username and password do not match' } };
       }
+      throttle.succeeded(username, cfg.username);
       const issuedAt = now.getTime();
       const token = signSession(
         { username: cfg.username, issuedAt, expiresAt: issuedAt + SESSION_TTL_MS },
@@ -235,6 +310,30 @@ export function actorOf(request: FastifyRequest): string {
 }
 
 /**
+ * Does this request's `Origin` name the host it was sent to?
+ *
+ * **Parsed, never pattern-matched** — `server/src/http/safeTarget.ts` makes the
+ * same argument for outbound URLs and it is the same trap in the other
+ * direction: `origin.startsWith('http://ops-dash')` is satisfied by
+ * `http://ops-dash.attacker.example`, and `.endsWith(host)` by
+ * `http://evilops-dash:4000`.
+ *
+ * An absent `Origin` passes. Browsers omit it on same-origin GETs and send it
+ * on every cross-origin write, and a non-browser client never sends one at all
+ * — refusing those would break `curl` and every future script while stopping
+ * nobody, since the attacker this guards against IS a browser.
+ */
+function sameOrigin(origin: unknown, host: unknown): boolean {
+  if (origin === undefined) return true;
+  if (typeof origin !== 'string' || typeof host !== 'string') return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;   // an unparseable Origin is not our own
+  }
+}
+
+/**
  * Install the check. Call it inside the plugin that registers the routes, so
  * Fastify's encapsulation confines it to them — the SPA's static routes are
  * registered on the root instance and are none of this module's business.
@@ -254,6 +353,21 @@ export function registerAuth(app: FastifyInstance, auth: SessionAuth, now?: () =
           code: 'auth_policy_missing',
           message: 'this route does not declare an auth policy, so the server refused to serve it',
         },
+      });
+      return reply;
+    }
+
+    // Cross-origin refusal, on the two policies that can change something: the
+    // write routes and the one that hands out a session.
+    //
+    // `SameSite=Strict` is the control and this is the belt beside it. It is
+    // cheap, it is parsed rather than pattern-matched, and it costs nothing for
+    // a non-browser client (curl sends no `Origin`) — which is deliberate: this
+    // defends against a browser being made to act for its user, which is the
+    // only attacker who has the cookie in the first place.
+    if (policy !== 'public-read' && !sameOrigin(request.headers.origin, request.headers.host)) {
+      void reply.code(403).send({
+        error: { code: 'cross_origin', message: 'this request came from another origin and was refused' },
       });
       return reply;
     }

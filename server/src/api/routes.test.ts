@@ -20,6 +20,7 @@ import {
   type IncidentsResponse,
   type HealthResponse,
   CHECKS_PAGE,
+  toWire,
 } from './routes.js';
 import type { SessionAuth } from '../auth/session.js';
 
@@ -179,6 +180,44 @@ describe('GET /api/services mirrors SourceResult outward unchanged', () => {
 
     expect(zendesk.result.empty).toBe(true);
     expect((zendesk.result.data as { level: string }).level).toBe('unknown');
+  });
+
+  it('serves an error with exactly the two keys the contract documents', async () => {
+    // `fetchJson` reports a parsed `Retry-After` as `error.retryAfterMs` and the
+    // store persists it, because the POLLER uses it. It is not in
+    // `DATA_CONTRACTS.md`, nothing renders it, and a field that reaches a client
+    // without being in the contract is contract surface acquired by accident —
+    // months later, the first time a vendor happens to send the header.
+    //
+    // Positive: the exact key set, not `not.toHaveProperty('retryAfterMs')`.
+    // The negative form passes over the next field somebody adds, which is the
+    // same weakness as every absence-claim guard this repo has had to rewrite.
+    const store = memStore();
+    store.putSnapshot(vendorSource('openai'), {
+      fetchedAt: '2026-09-19T10:05:00.000Z',
+      degraded: true,
+      error: { code: 'http_429', message: '429 Too Many Requests', retryAfterMs: 30_000 } as { code: string; message: string },
+    });
+
+    const { body } = await get({ store }, '/api/services');
+    const openai = (body as ServicesResponse).services.find((s) => s.id === 'openai')!;
+    expect(Object.keys(openai.result.error ?? {}).sort()).toEqual(['code', 'message']);
+    expect(openai.result.error).toEqual({ code: 'http_429', message: '429 Too Many Requests' });
+  });
+
+  it('strips at the wire without touching what the store holds', () => {
+    // The other half, and the reason this is a copy rather than a deletion: the
+    // poller reads `retryAfterMs` to decide when to try again. `toWire` is
+    // called on a value the store owns, so if it mutated its argument the
+    // backoff would silently stop obeying vendors — a defect with no symptom
+    // anywhere near this file.
+    const stored = {
+      fetchedAt: '2026-09-19T10:05:00.000Z',
+      degraded: true,
+      error: { code: 'http_429', message: '429 Too Many Requests', retryAfterMs: 30_000 } as { code: string; message: string },
+    };
+    expect(Object.keys(toWire(stored).error ?? {}).sort()).toEqual(['code', 'message']);
+    expect(stored.error).toHaveProperty('retryAfterMs', 30_000);
   });
 
   it('carries data AND error together for a stale source (amendment 9)', async () => {

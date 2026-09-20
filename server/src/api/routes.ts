@@ -559,6 +559,39 @@ export function graphHealth(supplier: ApiDeps['graphCert'], now: Date): CertHeal
   return { configured: true, needsAttention: certNeedsAttention(expiry), ...expiry };
 }
 
+/**
+ * The wire form of a stored error.
+ *
+ * **The one exception to "mirrored outward unchanged", and it is narrow on
+ * purpose.** `fetchJson` gained `error.retryAfterMs` so the Entra adapter could
+ * obey a `Retry-After`, and `store/db.ts` persists it — both correct, and both
+ * about how WE poll. It is not part of the payload
+ * `DATA_CONTRACTS.md` describes, nothing renders it, and a field that reaches a
+ * client without being in the contract is contract surface acquired by
+ * accident. The first vendor that sends `Retry-After` would have put it there,
+ * silently, months after anyone remembered why.
+ *
+ * So the store keeps it and the wire does not. If a screen ever wants
+ * "retrying in 60s", that is an amendment made deliberately, in the order the
+ * frozen-contract rule specifies.
+ *
+ * `code` and `message` are copied by name rather than deleted by name: a
+ * rest-spread exclusion would pass through the NEXT field somebody adds, which
+ * is the same absence-claim weakness every guard in this repo is written to
+ * avoid.
+ */
+export const wireError = (error: { code: string; message: string }): { code: string; message: string } => ({
+  code: error.code,
+  message: error.message,
+});
+
+/** A stored `SourceResult` as it goes out. Only the error is touched; `data`,
+ *  `fetchedAt`, `degraded` and `empty` are the mirror the whole route exists to
+ *  preserve. */
+export function toWire<T>(result: SourceResult<T>): SourceResult<T> {
+  return result.error === undefined ? result : { ...result, error: wireError(result.error) };
+}
+
 /* ----------------------------------------------------------------- routes */
 
 export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
@@ -591,7 +624,7 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
           // Mirrored, not rebuilt. getSnapshot already attaches the last
           // failure to the last good payload; re-deriving it here is how the
           // two would come to disagree.
-          result = store.getSnapshot(source) ?? neverPolled(servedAt);
+          result = toWire(store.getSnapshot(source) ?? neverPolled(servedAt));
         } catch (cause) {
           // One service's read failing must not blank the other six.
           result = storeUnavailable(servedAt, cause);
