@@ -4,7 +4,7 @@ import { useDemoMode } from '../app/DemoModeProvider.js';
 import { Card } from '../components/Card.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 import { useEntra } from '../live/DataSource.js';
-import { panelStateFor } from '../live/model.js';
+import { panelStateFor, type Load } from '../live/model.js';
 import { SectionHeading } from '../components/SectionHeading.js';
 import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
@@ -156,6 +156,50 @@ const auditColumns: Column<AuditEvent>[] = [
 export const MFA_BASIS =
   'MFA coverage counts member accounts only — B2B guests register their methods in their home tenant.';
 
+/**
+ * The code `/api/entra` serves when this host has no Graph credential at all.
+ *
+ * Chosen by the route and pinned here because this view **branches on it**, not
+ * merely displays it. `m4-auth` answers it from `graphHealth` — the same
+ * function `/api/health` uses — so the health page and this panel cannot
+ * disagree about whether a credential exists.
+ */
+export const GRAPH_UNCONFIGURED = 'graph_unconfigured';
+
+/**
+ * The panel state for a live Entra load, with ONE carve-out of `panelStateFor`.
+ *
+ * `panelStateFor` maps every error to `kind: 'error'`, which `Panel` paints as
+ * a red "Entra is unavailable" alert. That is right for a source that failed
+ * and wrong for a host that was deliberately never given a credential: nothing
+ * is unavailable, nothing broke, and somebody chose this. G3 HIGH-2 ruled on
+ * the same shape for an unknown service id, and CLAUDE.md says a permanently
+ * red tile for a deliberate absence is as bad as a permanently green one —
+ * red for an ordinary condition teaches an operator to distrust red.
+ *
+ * So `graph_unconfigured` renders as `empty`: the designed neutral state, in
+ * the server's own words. **Exactly one code**, because the carve is a claim
+ * about a specific deliberate absence and not a general softening:
+ *
+ *   - `never_polled` stays an error. `poller/schedule.ts` calls `guarded()`
+ *     immediately on start rather than waiting out the first interval, so the
+ *     window where a configured host has no row is the length of one poll and
+ *     not fifteen minutes. A `never_polled` that an operator actually sees has
+ *     outlived that window, and then it means the source never registered or
+ *     every attempt died before writing — which is a failure, and red.
+ *   - `store_unavailable`, `graph_read_failed` and everything else are
+ *     failures and stay red.
+ *
+ * And only when there is no data. An error arriving ALONGSIDE a payload is
+ * stale-with-last-good whatever its code, and swallowing that into a neutral
+ * empty would drop numbers we hold.
+ */
+export function entraPanelState(load: Load<EntraSnapshot>): PanelState {
+  return load.data === undefined && load.error?.code === GRAPH_UNCONFIGURED
+    ? { kind: 'empty', message: load.error.message }
+    : panelStateFor(load, 'Entra');
+}
+
 export default function Entra({ snapshot }: { snapshot?: EntraSnapshot } = {}) {
   const { bundle } = useDemoMode();
   /**
@@ -199,7 +243,7 @@ export default function Entra({ snapshot }: { snapshot?: EntraSnapshot } = {}) {
    * about each TABLE, and `TableSection` renders it there, twice, in the two
    * places it can actually be true.
    */
-  const state: PanelState = live === null ? { kind: 'ready' } : panelStateFor(live, 'Entra');
+  const state: PanelState = live === null ? { kind: 'ready' } : entraPanelState(live);
 
   return (
     <div data-testid="view-entra" style={VIEW_STACK}>

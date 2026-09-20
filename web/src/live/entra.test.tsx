@@ -7,7 +7,7 @@ import { DemoModeProvider } from '../app/DemoModeProvider.js';
 import { LiveDataProvider } from './DataSource.js';
 import { parseEntra } from './parse.js';
 import type { ApiClient, ApiPath, Fetched } from './client.js';
-import Entra, { MFA_BASIS } from '../views/Entra.js';
+import Entra, { GRAPH_UNCONFIGURED, MFA_BASIS } from '../views/Entra.js';
 import { fixtures } from '../fixtures/index.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 
@@ -425,6 +425,73 @@ describe('Entra · live · stale', () => {
     expect(within(alert).getByTestId('panel-stale-reason')).toHaveTextContent(REASON);
     // The numbers are still there: stale renders its children.
     expect(stats().getByText('4,503')).toBeInTheDocument();
+  });
+});
+
+describe('Entra · live · this host was never given a credential', () => {
+  /** What `/api/entra` serves when `graphHealth` reports no credential: an
+   *  error, no data, and a code that says which absence this is. Transcribed
+   *  from `api/routes.ts`'s `graphUnconfigured`. */
+  const UNCONFIGURED_MESSAGE =
+    'No Graph credential is configured on this host, so Entra has never been polled.';
+  const unconfigured = () => ({
+    servedAt: SERVED_AT,
+    result: {
+      fetchedAt: SERVED_AT,
+      degraded: true,
+      error: { code: GRAPH_UNCONFIGURED, message: UNCONFIGURED_MESSAGE },
+    },
+  });
+
+  it('says so neutrally, and does not paint a deliberate absence as an outage', async () => {
+    live(() => ok(unconfigured()));
+    expect(await screen.findByText(UNCONFIGURED_MESSAGE)).toBeInTheDocument();
+    // The assertions that matter are about what an operator does NOT see: this
+    // host is not broken, nothing is unavailable, and a red alert here would
+    // teach them to discount the red that means something.
+    expect(screen.queryByText(/Entra is unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // And no fabricated tenant behind it.
+    expect(screen.queryByTestId('entra-stats')).not.toBeInTheDocument();
+  });
+
+  it('a real failure is still a red failure — the carve is one code wide', async () => {
+    // The control. Without it the test above passes just as well over a view
+    // that stopped alerting on anything, which is the failure it would be
+    // introducing rather than preventing.
+    for (const code of ['graph_read_failed', 'never_polled', 'store_unavailable']) {
+      const view = live(() =>
+        ok({
+          servedAt: SERVED_AT,
+          result: { fetchedAt: SERVED_AT, degraded: true, error: { code, message: `it went wrong (${code})` } },
+        }),
+      );
+      expect(await screen.findByText(/Entra is unavailable/), code).toBeInTheDocument();
+      expect(screen.getByRole('alert'), code).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it('keeps the last good numbers even under that code, rather than blanking them', async () => {
+    // `graph_unconfigured` alongside a payload should not happen — the route
+    // only serves it when there is no row at all — but the carve is written to
+    // trigger only on an ABSENT payload, because swallowing a stale load into a
+    // neutral empty would throw away numbers we are holding. Asserted rather
+    // than left to the comment.
+    live(() =>
+      ok({
+        servedAt: SERVED_AT,
+        result: {
+          fetchedAt: SERVED_AT,
+          degraded: true,
+          data: { stats: LIVE_STATS, signals: SIGNALS, audit: AUDIT },
+          error: { code: GRAPH_UNCONFIGURED, message: UNCONFIGURED_MESSAGE },
+        },
+      }),
+    );
+    await screen.findByTestId('entra-stats');
+    expect(stats().getByText('4,503')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/Entra data is/);
   });
 });
 
