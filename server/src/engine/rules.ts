@@ -147,12 +147,36 @@ export function ourCheckFailing(ours: { passing: number; total: number }): boole
  * being emitted and these services join the population automatically, with no
  * change here.
  */
-const NOT_BLINDNESS_JUST_UNBUILT = 'platform_unsupported';
+/**
+ * The codes that mean "we have not read this yet", as opposed to "we read it
+ * and the read failed". Neither is a LOSS of sight, so neither counts.
+ *
+ * `never_polled` was found by running the thing. A cold start opened a real
+ * Sev2 — `INC-119d4dc7`, 2026-09-20T05:16:45Z — one second before the process
+ * finished booting, naming all four statuspage services and resolving itself
+ * sixty seconds later on the first successful poll. Its own summary read "we
+ * have LOST the ability to tell", which was false: nothing had been lost,
+ * nothing had yet been looked at. Every restart minted one, and each one counts
+ * against `incidents90d` for ninety days.
+ *
+ * It is the argument above, applied to the case the argument did not name. The
+ * caller in `index.ts` already says the two codes are one thing — "No adapter,
+ * or never polled. Both are 'we have not read this'" — and then hands the rule
+ * two codes where the rule excluded one. Two halves, each right on its own, and
+ * the defect lived in the join. Same shape as the three M3 found; no test could
+ * see it because every test constructs its signals already-polled.
+ *
+ * This is deliberately NOT a general "ignore unfamiliar codes" escape, which the
+ * argument above rejects for good reason. It is a closed set of two, and a feed
+ * that polled and then broke carries its transport's code, stays in the
+ * population, and still fires.
+ */
+const NOT_BLINDNESS_YET = new Set(['platform_unsupported', 'never_polled']);
 
 function blackoutPopulation(services: readonly ServiceSignal[]): Map<VendorPlatform, ServiceSignal[]> {
   const byPlatform = new Map<VendorPlatform, ServiceSignal[]>();
   for (const s of services) {
-    if (s.vendor.errorCode === NOT_BLINDNESS_JUST_UNBUILT) continue;
+    if (s.vendor.errorCode !== undefined && NOT_BLINDNESS_YET.has(s.vendor.errorCode)) continue;
     const list = byPlatform.get(s.vendor.platform);
     if (list) list.push(s);
     else byPlatform.set(s.vendor.platform, [s]);

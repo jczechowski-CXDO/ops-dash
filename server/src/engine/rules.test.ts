@@ -102,6 +102,35 @@ describe('blackout groups by vendor.platform (amendment 5)', () => {
     expect(evaluate([unsupported('proofpoint'), unsupported('m365')])).toEqual([]);
   });
 
+  it('does not fire at a cold start, when nothing has been polled even once', () => {
+    // REGRESSION, and it was real: INC-119d4dc7 opened 2026-09-20T05:16:45Z, one
+    // second before the process finished booting, and resolved sixty seconds
+    // later on the first poll. Every restart minted one, and each counted
+    // against incidents90d for ninety days.
+    //
+    // No unit test could have caught it, because every other test in this file
+    // constructs signals that have already been polled. The whole estate at t=0
+    // is a shape the suite had no way to express, which is why it took running
+    // the process to find — and is the argument for the soak, not against it.
+    const boot = (id: ServiceSignal['serviceId']): ServiceSignal =>
+      svc({ serviceId: id, vendor: { level: 'unknown', platform: 'statuspage', errorCode: 'never_polled' } });
+    expect(evaluate([boot('jira'), boot('helpjuice'), boot('claude'), boot('openai')])).toEqual([]);
+  });
+
+  it('fires the moment a polled feed goes dark, even alongside one never polled', () => {
+    // The SURVIVOR, and it carries as much of the meaning as the kill above: the
+    // fix must not buy its silence by making the rule harder to trigger. A feed
+    // that answered and then broke carries its transport's code, stays in the
+    // population, and still fires. A fix that silenced this too would have been
+    // firing for the wrong reason and nothing here could have told the difference.
+    const findings = evaluate([
+      svc({ serviceId: 'jira', vendor: { level: 'unknown', platform: 'statuspage', errorCode: 'http_503' } }),
+      svc({ serviceId: 'claude', vendor: { level: 'unknown', platform: 'statuspage', errorCode: 'http_503' } }),
+      svc({ serviceId: 'openai', vendor: { level: 'unknown', platform: 'statuspage', errorCode: 'never_polled' } }),
+    ]);
+    expect(findings.map((f) => f.serviceId)).toEqual(['platform:statuspage']);
+  });
+
   it('still fires when a real feed failure joins an unsupported one, counting only the real failures', () => {
     // Two statuspage vendors genuinely dark => blackout. The unsupported
     // statusio row alongside them changes nothing.
