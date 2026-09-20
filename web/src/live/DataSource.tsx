@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import type { FixtureBundle, HistoryRow } from '../fixtures/index.js';
-import type { CheckRun, EntraSnapshot } from '@ops-dash/shared';
+import type { CheckRun, EndpointSnapshot, EntraSnapshot } from '@ops-dash/shared';
 import { isServiceId } from '../lib/serviceNames.js';
 import { apiClient, type ApiClient, type ApiPath, type Fetched } from './client.js';
-import { parseChecks, parseEntra, parseIncidents, parseServices, type Parsed } from './parse.js';
+import { parseChecks, parseEndpoints, parseEntra, parseIncidents, parseServices, type Parsed } from './parse.js';
 import { ready, serviceViewOf, type IncidentView, type Load, type ServiceView } from './model.js';
 
 /**
@@ -278,6 +278,26 @@ export function useEntra(): Load<EntraSnapshot> | null {
     '/api/entra',
     get('/api/entra'),
     parseEntra,
+    source?.intervalMs ?? REFRESH_MS,
+  );
+  return client === null ? null : load;
+}
+
+/**
+ * The Endpoint Central snapshot, or `null` for the fixture path.
+ *
+ * Identical in shape to `useEntra` and for identical reasons — one page's
+ * snapshot has no business being polled behind the six screens that never show
+ * it, and `null` is how `?demo=` keeps rendering Milestone 1's code.
+ */
+export function useEndpoints(): Load<EndpointSnapshot> | null {
+  const source = useContext(SourceCtx);
+  const client = source === null ? null : source.client;
+  const load = useEndpoint<EndpointSnapshot>(
+    client,
+    '/api/endpoints',
+    get('/api/endpoints'),
+    parseEndpoints,
     source?.intervalMs ?? REFRESH_MS,
   );
   return client === null ? null : load;

@@ -52,7 +52,12 @@ import type { ServiceId } from '@ops-dash/shared';
 
 /** The routes that exist. A union, not a string: nothing outside this file can
  *  name a target. */
-export type ApiPath = '/api/services' | '/api/incidents' | '/api/entra' | '/api/health';
+export type ApiPath =
+  | '/api/services'
+  | '/api/incidents'
+  | '/api/entra'
+  | '/api/endpoints'
+  | '/api/health';
 
 /**
  * The one route that takes an argument, built here rather than by a caller.

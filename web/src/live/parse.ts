@@ -1,4 +1,4 @@
-import type { AuditEvent, BlastMetric, CheckRun, EntraSignal, EntraSnapshot, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
+import type { AuditEvent, BlastMetric, CheckRun, EndpointIssue, EndpointSnapshot, EntraSignal, EntraSnapshot, ServiceId, Severity, StatusLevel } from '@ops-dash/shared';
 import { SERVICE_NAMES, serviceLabel } from '../lib/serviceNames.js';
 import { firstSentence, type IncidentView, type Load, type ServiceView } from './model.js';
 
@@ -548,5 +548,100 @@ export function parseEntra(
       value: { stats, signals, audit },
       ...(resultError === null ? {} : { error: resultError }),
     },
+  };
+}
+
+
+/* ------------------------------------------------------------ /api/endpoints */
+
+/**
+ * The Endpoint Central snapshot. Same envelope and same rules as `/api/entra`.
+ *
+ * `stats` is five required numbers and is all-or-nothing for the reason the
+ * Entra stats are: the contract has nowhere to write "we could not look" into
+ * one of them, and a `0` under "Critical patches missing" reads as good news.
+ */
+const ISSUE_KINDS: Record<EndpointIssue['issueKind'], true> = {
+  stale_agent: true,
+  missing_patches: true,
+  no_bitlocker: true,
+  eol_build: true,
+};
+
+function isIssueKind(v: unknown): v is EndpointIssue['issueKind'] {
+  return typeof v === 'string' && Object.hasOwn(ISSUE_KINDS, v);
+}
+
+/**
+ * One attention row.
+ *
+ * `issueKind` is refused rather than defaulted even though **no column renders
+ * it**. There is no honest default: `stale_agent` would mislabel a BitLocker
+ * finding and `no_bitlocker` would invent an encryption problem, and an
+ * invisible wrong value is worse than a visible one because nothing on screen
+ * can contradict it. The contract is frozen, so a fifth kind arrives with an
+ * amendment that updates both sides at once — the same argument that makes
+ * `SIGNAL_KEYS` a Record over the union rather than a list of strings.
+ */
+export function endpointIssueView(raw: unknown): EndpointIssue | null {
+  if (!isRecord(raw)) return null;
+  const computer = str(raw['computer']);
+  const assignedTo = str(raw['assignedTo']);
+  const os = str(raw['os']);
+  const issue = str(raw['issue']);
+  const lastCheckIn = str(raw['lastCheckIn']);
+  const issueKind = raw['issueKind'];
+  if (
+    computer === null || assignedTo === null || os === null ||
+    issue === null || lastCheckIn === null || !isIssueKind(issueKind)
+  ) {
+    return null;
+  }
+  return { computer, assignedTo, os, issue, issueKind, lastCheckIn };
+}
+
+/** The five stats, whole or not at all. `0` is a real reading and is kept. */
+export function endpointStats(raw: unknown): EndpointSnapshot['stats'] | null {
+  if (!isRecord(raw)) return null;
+  const total = num(raw['total']);
+  const patchCompliance = num(raw['patchCompliance']);
+  const checkedIn7d = num(raw['checkedIn7d']);
+  const bitlockerEncrypted = num(raw['bitlockerEncrypted']);
+  const criticalPatchesMissing = num(raw['criticalPatchesMissing']);
+  if (
+    total === null || patchCompliance === null || checkedIn7d === null ||
+    bitlockerEncrypted === null || criticalPatchesMissing === null
+  ) {
+    return null;
+  }
+  return { total, patchCompliance, checkedIn7d, bitlockerEncrypted, criticalPatchesMissing };
+}
+
+export function parseEndpoints(
+  json: unknown,
+): Parsed<{ servedAt: string; value: EndpointSnapshot; error?: { code: string; message: string } }> {
+  if (!isRecord(json)) return bad('the response was not an object');
+  const servedAt = str(json['servedAt']);
+  if (servedAt === null) return bad('the response carried no servedAt');
+  const result = isRecord(json['result']) ? json['result'] : null;
+  if (result === null) return bad('the response carried no result envelope');
+  const resultError = errorOf(result['error']);
+  const data = isRecord(result['data']) ? result['data'] : null;
+  if (data === null) {
+    return resultError === null ? bad('the result carried no Endpoints snapshot') : { ok: false, error: resultError };
+  }
+  const stats = endpointStats(data['stats']);
+  if (stats === null) return bad('the Endpoints statistics could not be read');
+  const rawAttention = data['attention'];
+  if (!Array.isArray(rawAttention)) return bad('the snapshot carried no attention array');
+  const attention: EndpointIssue[] = [];
+  for (const entry of rawAttention) {
+    const view = endpointIssueView(entry);
+    if (view === null) return bad('an endpoint issue could not be read');
+    attention.push(view);
+  }
+  return {
+    ok: true,
+    value: { servedAt, value: { stats, attention }, ...(resultError === null ? {} : { error: resultError }) },
   };
 }
