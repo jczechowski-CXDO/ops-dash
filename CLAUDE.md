@@ -210,6 +210,43 @@ A good check before dispatching: *if I spawn this, will there be two live agents
 this type, and is the second one doing something the first genuinely cannot?* If the
 honest answer is "the first one is idle and knows these files", that is the agent.
 
+### What the official docs add, and where we already agreed
+
+`https://code.claude.com/docs/en/agent-teams`. Read once against the rules above; most
+of what this project learned by being burned is confirmed there, which is reassuring
+and also means the rest of this section is the part worth keeping.
+
+**Confirmed independently.** "Start with 3-5 teammates… **three focused teammates often
+outperform five scattered ones**", and explicitly: fifteen independent tasks is still a
+three-teammate job. That is the queueing rule above, arrived at from the other
+direction. Also confirmed: teammates load `CLAUDE.md`, MCP servers and skills but
+**never the lead's conversation history**, so the spawn prompt carries everything;
+messages are delivered automatically and the lead "doesn't need to poll" — consistent
+with the delay-not-delivery finding above, which remains the finer-grained statement.
+
+**New, and worth acting on:**
+
+- **Teammate prompt caches expire in five minutes, not an hour.** An in-process
+  teammate's requests fall outside the main conversation's cache TTL bucket.
+  `subagentPromptCacheTtl: "1h"` in `~/.claude/settings.json` fixes it, at a higher
+  billing rate for cache writes. This is the actual mechanism behind "a dormant agent
+  loses its cache" — it is not about dormancy at all, it is a five-minute TTL.
+- **Three hooks can make our test discipline mechanical instead of documentary**:
+  `TeammateIdle`, `TaskCreated` and `TaskCompleted`. **Exit code 2 sends feedback and
+  keeps the teammate working.** A `TeammateIdle` hook that refuses the idle unless
+  `npm test` from the root has passed is exactly the shape this file keeps arguing for,
+  and it would have caught the scoped-run false green directly.
+- **Teammates cannot spawn teammates**, and an in-process teammate cannot run a
+  background subagent. So every dispatch is the lead's, and fan-out is one level deep.
+- **Idle rows hide 30 seconds after the *whole panel* goes idle** (2.1.199+), and
+  surplus idle rows collapse into one `N idle agents` row past three. Part of the
+  "fifteen dormant windows" complaint is display, not state — but only part, and the
+  duplicate-specialist rule above is about the state.
+- **Shutdown is slow by design**: a teammate finishes its current tool call first. A
+  two-minute Playwright run means a two-minute shutdown.
+- `/model` and `/fast` always apply to the lead, never the viewed teammate; a
+  teammate's model is fixed at spawn. `/effort` does follow the teammate.
+
 **Keep an agent alive while it still owns something.** An idle agent costs nothing.
 What costs is closing the one that wrote `parse.ts` and spawning a fresh
 `ops-view` twenty minutes later to extend `parse.ts` — which happened, repeatedly,
@@ -230,6 +267,20 @@ keeps the agent and drops the history. So **stop-and-respawn IS the reset**, and
 is the right move when a task is done-done and the next one is unrelated — at that
 point the accumulated context is not an asset, it is stale assumptions and a spent
 window.
+
+**`TaskStop` is irreversible, and that is measured rather than assumed.** The official
+docs say that messaging an in-process teammate "that is no longer running" brings it
+back with its conversation restored. **That does not cover a teammate you stopped.**
+Tested on 2.1.278 ten minutes after stopping two agents: `SendMessage` answers
+`No agent named 'm3-runs' is reachable`, and the mechanism is visible on disk —
+`~/.claude/teams/{team}/config.json` keeps a `members` array, and `TaskStop` removes
+the entry. A name that is not in `members` cannot be addressed, so there is nothing
+to revive. Revival presumably applies to a teammate that simply ended its turn and is
+still a member.
+
+The practical consequence: **there is no soft close.** Letting an agent go idle costs
+nothing and keeps it addressable; stopping it is final within the session. Decide
+accordingly, and prefer idle over stopped whenever the files might come back.
 
 The two failure modes pull opposite ways and both are real:
 
