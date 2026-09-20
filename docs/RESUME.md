@@ -1902,7 +1902,15 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
 
 ## Still open at the close
 
-- **"Survives a night."** Not started in earnest.
+- **"Survives a night."** Running since 2026-09-20 05:17Z, PID 1797770 against
+  `/tmp/longrun.sqlite`, sampled every 120s to `/tmp/samples.log`. **Seven falsifiable
+  predictions are written down in `/tmp/overnight-predictions.txt` before the fact**, because
+  a soak test that is "passed" because nothing obviously broke has tested nothing. The one to
+  look at first: the main db file is still 4096 bytes and the WAL is growing ~123KB/2min, so
+  **nothing has ever checkpointed.** `wal_autocheckpoint` is 1000 pages, so it should plateau
+  near 4MB around 06:00Z; if the db file is still empty at dawn, a read connection is pinning
+  the WAL and the checkpoint can never complete. That is a bug a green test suite cannot have
+  and only elapsed time can show — which is the whole reason this clause exists.
 - **Three services have no probe of our own** — proofpoint, claude, openai — which is why
   the Overview reads 3 affirmed / 4 unknown rather than 6 / 1, and why five of seven have no
   `uptime30d`. Credential-free product endpoints exist for all three and are stable
