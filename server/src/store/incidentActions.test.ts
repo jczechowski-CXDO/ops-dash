@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openStore, type Store } from './db.js';
 import { foldActions, muteInForce, UnknownIncident, type ActionRow } from './incidentActions.js';
 import { correlate, toStoreRow, WINDOW_MS } from '../engine/correlate.js';
-import { evaluate, type ServiceSignal } from '../engine/rules.js';
+import { evaluate, RULES, type ServiceSignal } from '../engine/rules.js';
 import type { Incident } from '@ops-dash/shared';
 
 /* ------------------------------------------------------------------ setup */
@@ -370,6 +370,60 @@ describe('an action against an incident that does not exist', () => {
   });
 });
 
+describe('an action attributed to nobody', () => {
+  // The `actor` column's provenance changed at `284be80`: it used to be the
+  // constant `John H.` and it is now whatever the signed session says. That
+  // makes this row the durable answer to "who silenced this", and an empty
+  // string is not an answer. `auth/session.ts`'s `actorOf` already throws
+  // rather than defaulting, so reaching here empty is a wiring mistake
+  // upstream — which is precisely why the store refuses it too rather than
+  // trusting one layer to be the only check.
+
+  it('is refused for every verb, with nothing written', () => {
+    const s = open();
+    s.putIncident(incidentRow('INC-actor'));
+    expect(() => s.acknowledge('INC-actor', '', iso(NOW))).toThrow(/no actor/);
+    expect(() => s.mute('INC-actor', '', null, iso(NOW))).toThrow(/no actor/);
+    expect(() => s.unmute('INC-actor', '', iso(NOW))).toThrow(/no actor/);
+    expect(() => s.resolveIncident('INC-actor', '', iso(NOW))).toThrow(/no actor/);
+    expect(countActions(s)).toBe(0);
+    // The resolve must not have taken half: the throw happens inside the
+    // transaction, before `markResolved`, and the rollback has to undo it.
+    expect(resolvedAtOf(s, 'INC-actor')).toBeNull();
+  });
+
+  it('refuses whitespace that only looks like a name', () => {
+    const s = open();
+    s.putIncident(incidentRow('INC-ws'));
+    expect(() => s.acknowledge('INC-ws', '   ', iso(NOW))).toThrow(/no actor/);
+    expect(countActions(s)).toBe(0);
+  });
+
+  it('leaves the store usable afterwards', () => {
+    // A rolled-back transaction that was never rolled back leaves every later
+    // write failing with "cannot start a transaction within a transaction".
+    const s = open();
+    s.putIncident(incidentRow('INC-after'));
+    expect(() => s.resolveIncident('INC-after', '', iso(NOW))).toThrow();
+    s.acknowledge('INC-after', JOHN, iso(NOW));
+    expect(countActions(s)).toBe(1);
+  });
+
+  it('stores a real actor VERBATIM, and does not tidy it on the way in', () => {
+    // Trimmed for the emptiness test, never for the column. A name that comes
+    // back different from the name that was recorded defeats the one question
+    // this table exists to answer — and an identity is not ours to normalise.
+    // Read by raw SQL so the assertion does not reach the value the same way
+    // the writer did.
+    const s = open();
+    s.putIncident(incidentRow('INC-verbatim'));
+    s.acknowledge('INC-verbatim', '  Someone O’Brien  ', iso(NOW));
+    const stored = (s.db.prepare('SELECT actor FROM incident_actions').get() as { actor: string }).actor;
+    expect(stored).toBe('  Someone O’Brien  ');
+    expect(s.incidentFlags('INC-verbatim', NOW).ack?.by).toBe('  Someone O’Brien  ');
+  });
+});
+
 describe('resolving by hand', () => {
   it('sets resolved_at and logs who did it', () => {
     const s = open();
@@ -552,12 +606,36 @@ describe('a manual resolve does not make a live condition false', () => {
 
 /* ====================================================== rule_state, all three */
 
-describe('the rule toggle reaches all three rules, not the two that predate `ourside`', () => {
+describe('the rule toggle reaches every DECLARED rule, not the two it was written for', () => {
   const ourSideOnly: ServiceSignal = {
     serviceId: 'helpjuice',
     vendor: { level: 'operational', platform: 'statuspage' },
     ours: { passing: 0, total: 1 },
   };
+
+  it('every rule in RULES can be overridden, enumerated rather than named', () => {
+    // Enumerated from RULES rather than from a list of keys kept here. A second
+    // list in this file is a second definition, and this project's most
+    // expensive recurring defect is two definitions of one thing drifting — the
+    // describe name above said "all three rules" until `m4-entra` added four
+    // more RuleKeys, at which point the NAME made a claim the BODY no longer
+    // checked. Enumerating cannot go stale that way.
+    //
+    // The count is anchored positively: a RULES that shrank to empty would make
+    // every loop below vacuous, which is how an absence-claim passes by
+    // matching nothing.
+    expect(RULES.length).toBeGreaterThanOrEqual(3);
+
+    for (const rule of RULES) {
+      const s = open();
+      // Disabling one rule must not disturb the others. `firing` satisfies
+      // `vendor` and nothing else, so the expected result is a function of
+      // which rule was turned off — asserted by value, not by "did not throw".
+      s.setRuleState(rule.key, false);
+      expect(evaluate([firing], s.ruleState()).map((f) => f.ruleKey), rule.key)
+        .toEqual(rule.key === 'vendor' ? [] : ['vendor']);
+    }
+  });
 
   it('`ourside` runs by default and stops when it is turned off', () => {
     // `ruleState.test.ts` covers `vendor` and `blackout`; `ourside` arrived

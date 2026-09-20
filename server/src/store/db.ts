@@ -224,7 +224,21 @@ export function openStore(path = 'ops-dash.sqlite') {
     at: string;
     until?: string | null;
   }): void => {
+    // An action attributed to nobody is exactly as useless as one attributed to
+    // an incident that does not exist, and this row is the audit record — the
+    // only durable answer to "who silenced this". `auth/session.ts`'s `actorOf`
+    // already throws rather than defaulting, so an empty actor arriving here is
+    // a wiring mistake upstream, not user input; it gets a throw and no route
+    // should have a branch for it. Defence in depth, on the write path, where a
+    // value that is wrong gets persisted and outlives the bug that made it.
+    if (a.actor.trim() === '') {
+      throw new Error(`refusing to record a ${a.action} with no actor`);
+    }
     try {
+      // Stored VERBATIM — trimmed only for the emptiness test above, never for
+      // the column. Tidying an identity on its way into an audit trail means
+      // the name that comes back is not the name that was recorded, and the one
+      // question this table exists to answer is exactly that one.
       stmt.addAction.run(a.incidentId, a.action, a.actor, a.at, a.until ?? null);
     } catch (cause) {
       // Narrow: only the FK failure becomes UnknownIncident. A CHECK violation
