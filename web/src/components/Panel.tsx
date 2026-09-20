@@ -13,7 +13,14 @@ export type PanelState =
   | { kind: 'ready' }
   | { kind: 'loading'; rows?: number }
   | { kind: 'empty'; message: string }
-  | { kind: 'stale'; source: string; fetchedAt: string }
+  /**
+   * `reason` is WHY the data is stale, in the failure's own words — "the feed
+   * returned 503". An age with no cause is half the message: it tells an
+   * operator to refresh when what they need to do is look at Zendesk. Optional
+   * because plenty of stale states have no sentence to offer, and because the
+   * fixture path has none; absent, this renders exactly as it did before.
+   */
+  | { kind: 'stale'; source: string; fetchedAt: string; reason?: string }
   | { kind: 'error'; source: string; message: string; fetchedAt?: string };
 
 function unreachable(state: never): never {
@@ -60,13 +67,26 @@ export function Panel({ state, children }: { state: PanelState; children: ReactN
 
     // Stale DOES render its children — the last good data is still the best
     // answer available — but never without saying how old it is.
-    case 'stale':
+    case 'stale': {
+      const age = `${state.source} data is ${agePhrase(state.fetchedAt)}`;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <Alert severity="warning">{`${state.source} data is ${agePhrase(state.fetchedAt)}`}</Alert>
+          {/* The reason goes INSIDE the alert rather than beside it. Outside,
+              it sits outside `role="alert"`, so a screen reader hears the age
+              announced and never hears the cause — the same half-message, for a
+              different user. Alert's own title/body split carries both: the age
+              is the headline, the reason the detail, one announcement. */}
+          {state.reason === undefined ? (
+            <Alert severity="warning">{age}</Alert>
+          ) : (
+            <Alert severity="warning" title={age}>
+              <span data-testid="panel-stale-reason">{state.reason}</span>
+            </Alert>
+          )}
           {children}
         </div>
       );
+    }
 
     case 'ready':
       return <>{children}</>;

@@ -112,6 +112,77 @@ describe('Sparkline', () => {
     const { container } = render(<Sparkline values={[]} color="var(--success-main)" height={26} viewBoxHeight={26} />);
     expect(container.querySelector('polyline')).toBeNull();
   });
+
+  // A `null` is a probe that did not answer. `server/src/api/tile.ts` argues
+  // why both easy disposals draw an outage as good news: dropping the sample
+  // leaves a shorter, healthier line, zeroing it leaves one diving to
+  // instantaneous. These four assert it is drawn as neither.
+  describe('a sample that did not answer', () => {
+    const xs = (container: HTMLElement) =>
+      [...container.querySelectorAll('polyline')].flatMap((p) =>
+        (p.getAttribute('points') ?? '').split(' ').map((pt) => pt.split(',')[0]),
+      );
+
+    it('keeps its x position, so a gap cannot read as a shorter history', () => {
+      // Five slots, one hole. The answered samples sit at indices 0, 1, 3, 4
+      // of FIVE — x = 0, 25, 75, 100. Dropping the hole would give four samples
+      // of four: 0, 33.3, 66.7, 100. The literals are the whole point.
+      const { container } = render(
+        <Sparkline values={[100, 200, null, 300, 400]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      expect(xs(container)).toEqual(['0.0', '25.0', '75.0', '100.0']);
+    });
+
+    it('breaks the line rather than bridging the gap', () => {
+      const { container } = render(
+        <Sparkline values={[100, 200, null, 300, 400]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const runs = [...container.querySelectorAll('polyline')];
+      expect(runs).toHaveLength(2);
+      expect(runs[0]?.getAttribute('points')).toBe('0.0,24.0 25.0,16.7');
+      expect(runs[1]?.getAttribute('points')).toBe('75.0,9.3 100.0,2.0');
+    });
+
+    it('takes no part in the scale, so it cannot drag the floor to zero', () => {
+      // Four identical answered samples: the flat mid-line, y = 26 / 2 = 13.0,
+      // exactly as if the hole were not there. Treated as 0 the span becomes
+      // 0..200 and the answered samples climb to the top of the box (y = 2.0).
+      const { container } = render(
+        <Sparkline values={[200, 200, null, 200, 200]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const ys = [...container.querySelectorAll('polyline')].flatMap((p) =>
+        (p.getAttribute('points') ?? '').split(' ').map((pt) => pt.split(',')[1]),
+      );
+      expect(ys).toEqual(['13.0', '13.0', '13.0', '13.0']);
+    });
+
+    it('still draws the one probe that answered between two that did not', () => {
+      const { container } = render(
+        <Sparkline values={[null, 250, null]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const dot = container.querySelector('polyline');
+      // A one-point polyline paints nothing, so the point is repeated and the
+      // round cap makes it a dot. Centre slot of three: x = 50.
+      expect(dot?.getAttribute('points')).toBe('50.0,13.0 50.0,13.0');
+      expect(dot?.getAttribute('stroke-linecap')).toBe('round');
+    });
+
+    it('draws no line at all when nothing answered', () => {
+      const { container } = render(
+        <Sparkline values={[null, null, null]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      expect(container.querySelector('polyline')).toBeNull();
+    });
+
+    it('leaves a series with no holes byte-identical, so no baseline can move', () => {
+      const { container } = render(
+        <Sparkline values={[100, 300, 400]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const line = container.querySelector('polyline');
+      expect(line?.getAttribute('points')).toBe('0.0,24.0 50.0,9.3 100.0,2.0');
+      expect(line?.getAttribute('stroke-linecap')).toBeNull();
+    });
+  });
 });
 
 describe('Panel', () => {
@@ -155,6 +226,45 @@ describe('Panel', () => {
     render(<Panel state={{ kind: 'stale', source: 'Endpoint Central', fetchedAt: 'garbage' }}><p>x</p></Panel>);
     expect(screen.getByRole('alert')).toHaveTextContent('Endpoint Central data is of unknown age');
     expect(screen.getByRole('alert')).not.toHaveTextContent('an unknown age old');
+  });
+
+  // The product rule: a stale panel shows the last good data, visibly marked,
+  // WITH the reason. An age and no cause tells an operator to refresh when what
+  // they need to do is look at the vendor's status page.
+  it('says WHY the data is stale, not only how old it is', () => {
+    const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
+    render(
+      <Panel state={{ kind: 'stale', source: 'Zendesk', fetchedAt: fourteenMinutesAgo, reason: 'the feed returned 503' }}>
+        <p>last good</p>
+      </Panel>,
+    );
+    expect(screen.getByText('the feed returned 503')).toBeInTheDocument();
+    expect(screen.getByText('last good')).toBeInTheDocument();
+  });
+
+  it('announces the reason in the same live region as the age', () => {
+    // Beside the alert rather than inside it, the cause sits outside
+    // `role="alert"` and a screen reader hears the age and never hears why.
+    const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
+    render(
+      <Panel state={{ kind: 'stale', source: 'Zendesk', fetchedAt: fourteenMinutesAgo, reason: 'the feed returned 503' }}>
+        <p>last good</p>
+      </Panel>,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Zendesk data is 14 minutes');
+    expect(alert).toContainElement(screen.getByTestId('panel-stale-reason'));
+  });
+
+  it('is unchanged when there is no reason to give', () => {
+    const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
+    render(
+      <Panel state={{ kind: 'stale', source: 'Zendesk', fetchedAt: fourteenMinutesAgo }}><p>last good</p></Panel>,
+    );
+    // Pinned whole, including the severity word the alert prepends for screen
+    // readers: an empty reason element or a stray separator would show up here.
+    expect(screen.getByRole('alert').textContent).toBe('Warning:Zendesk data is 14 minutes old');
+    expect(screen.queryByTestId('panel-stale-reason')).toBeNull();
   });
 
   it('reports the age of the last good data on an error that has some', () => {
