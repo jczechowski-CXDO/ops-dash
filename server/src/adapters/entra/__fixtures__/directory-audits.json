@@ -1,0 +1,41 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits",
+  "value": [
+    {
+      "id": "DEMO-AUDIT-0001",
+      "category": "RoleManagement",
+      "activityDisplayName": "Add member to role",
+      "activityDateTime": "2026-09-20T12:04:00Z",
+      "result": "success",
+      "initiatedBy": { "user": { "userPrincipalName": "j.hart@example.com" } },
+      "targetResources": [{ "displayName": "Helpdesk Administrator" }]
+    },
+    {
+      "id": "DEMO-AUDIT-0002",
+      "category": "Policy",
+      "activityDisplayName": "Update conditional access policy",
+      "activityDateTime": "2026-09-20T10:00:00Z",
+      "result": "failure",
+      "initiatedBy": { "app": { "displayName": "Stellar-Connector" } },
+      "targetResources": [{ "displayName": "DEMO-CA-Baseline" }]
+    },
+    {
+      "id": "DEMO-AUDIT-0003",
+      "category": "UserManagement",
+      "activityDisplayName": "Disable user",
+      "activityDateTime": "2026-09-19T14:22:00Z",
+      "result": "timeout",
+      "initiatedBy": {},
+      "targetResources": [{ "userPrincipalName": "contractor-ac41@example.com" }]
+    },
+    {
+      "id": "DEMO-AUDIT-0004",
+      "category": "UserManagement",
+      "activityDisplayName": "Invite external user",
+      "activityDateTime": "2026-09-18T09:40:00Z",
+      "result": "success",
+      "initiatedBy": { "user": { "userPrincipalName": "j.hart@example.com" } },
+      "targetResources": []
+    }
+  ]
+}

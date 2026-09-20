@@ -1,0 +1,9 @@
+{
+  "@odata.context": "https://graph.microsoft.com/beta/$metadata#auditLogs/signIns",
+  "@odata.nextLink": "https://graph.microsoft.com/beta/auditLogs/signIns?$skiptoken=DEMO-SKIP-0001",
+  "value": [
+    { "id": "DEMO-SIGNIN-0001", "createdDateTime": "2026-09-20T14:05:00Z", "userId": "DEMO-USER-0001" },
+    { "id": "DEMO-SIGNIN-0002", "createdDateTime": "2026-09-20T13:55:12.4Z", "userId": "DEMO-USER-0002" },
+    { "id": "DEMO-SIGNIN-0003", "createdDateTime": "2026-09-19T22:10:00Z", "userId": "DEMO-USER-0001" }
+  ]
+}

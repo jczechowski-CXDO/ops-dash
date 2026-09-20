@@ -1,0 +1,8 @@
+{
+  "@odata.context": "https://graph.microsoft.com/beta/$metadata#auditLogs/signIns",
+  "value": [
+    { "id": "DEMO-SIGNIN-0004", "createdDateTime": "2026-09-20T09:00:00Z", "userId": "DEMO-USER-0003" },
+    { "id": "DEMO-SIGNIN-0005", "createdDateTime": "2026-09-18T23:00:00Z", "userId": "DEMO-USER-0009" },
+    { "id": "DEMO-SIGNIN-0006", "createdDateTime": "not a date", "userId": "DEMO-USER-0004" }
+  ]
+}

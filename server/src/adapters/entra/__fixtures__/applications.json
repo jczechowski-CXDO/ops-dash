@@ -1,0 +1,23 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#applications",
+  "value": [
+    {
+      "id": "DEMO-APP-0001",
+      "displayName": "Stellar-Connector",
+      "passwordCredentials": [{ "endDateTime": "2026-10-05T00:00:00Z" }],
+      "keyCredentials": []
+    },
+    {
+      "id": "DEMO-APP-0002",
+      "displayName": "DEMO-Reporting",
+      "passwordCredentials": [],
+      "keyCredentials": [{ "endDateTime": "2026-10-19T12:00:00Z" }]
+    },
+    {
+      "id": "DEMO-APP-0003",
+      "displayName": "DEMO-Archive",
+      "passwordCredentials": [{ "endDateTime": "2027-06-01T00:00:00Z" }],
+      "keyCredentials": []
+    }
+  ]
+}
