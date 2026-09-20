@@ -1833,3 +1833,85 @@ Wanting to watch a reported defect fail yourself rather than accept it on trust 
 this project runs on, and it is why the finding was confirmed rather than assumed. The
 correction is to the instrument, not the instinct. The owner would have run it inside a
 minute and the evidence would have been identical.
+
+
+---
+
+# Milestone 3 — live. Complete except one clause (2026-09-20)
+
+**1652 unit tests, 157 e2e, 152 visual baselines, typecheck and build clean.** One process
+serves the API and the dashboard from one URL; ten sources poll; three screens render real
+vendor data.
+
+```
+proofpoint  maintenance  ours=0/0  up=—     p95=—
+jira        operational  ours=1/1  up=1.00  p95=214
+helpjuice   operational  ours=1/1  up=1.00  p95=334
+claude      operational  ours=0/0  up=—     p95=—
+openai      operational  ours=0/0  up=—     p95=—
+zendesk     operational  ours=2/2  up=1.00  p95=208
+m365        degraded     ours=0/0  up=—     p95=—
+
+poller.ok=true  healthy=10  stale=none  cert=ok 689d
+```
+
+**Unmet: "survives a night."** Everything else in the definition of done is verified. The
+long run kept being reset by rebuilds, so the elapsed-time clause is genuinely short rather
+than nearly complete. It is the first thing to check tomorrow.
+
+## What M3 proved that M2 could not
+
+M2 ended with a chain that detected a real outage and nothing that could look at it. The
+three findings that only appeared once it ran as a process:
+
+- **It could not start, twice.** NodeNext `.js` specifiers cannot be run through Node's type
+  stripping, and `tsc` does not copy `schema.sql` or `vendors.json` — so the artefact
+  typechecked, compiled, and died on its first line. Neither is visible to a suite that
+  loads source directly.
+- **The store landed wherever the process was started from**, because the default was a bare
+  filename. A second empty database looks exactly like a first run.
+- **`GET /` was a 404.** "It is running" and "you can look at it" were two different states
+  for several hours, and nobody had noticed because every check was a curl against `/api`.
+
+## The seam that produced every serious defect, three more times
+
+G5's HIGH 1 was the third occurrence of one shape: **two components each correct, disagreeing
+about the join.** The engine folded a 50-row window and the API folded 500, so they reported
+different `ours` for any service with a probe that had not answered recently — and *both*
+tests named after that agreement passed, because both fixtures were under fifty rows.
+
+The other two this milestone: `/api/services` answering `unknown` where the engine said
+`operational` (the route called `publishedLevel` where amendment 10 needs `vendorLevel`), and
+`DataSourceSwitch` re-reading `?demo=` while `DemoModeProvider` held it in state, so one
+click on a tile silently left the fixtures.
+
+The countermeasures are now mechanical rather than documentary: one module owns the window,
+the fold and the count; a guard restricts who may import the narrow reading and pins the
+module's export surface as a set so it cannot be aliased around; and `isDemo` has one home.
+
+## What John decided, and why each was better than what I offered
+
+- **Uptime keeps the true number and loses the false caption.** I proposed nulling
+  `uptime30d` below a coverage floor. The number is true and the label lies, so it now
+  serves `uptimeFrom`/`uptimeSamples` and reads "only 47m observed, not 30 days".
+- **Bind to `0.0.0.0`.** Deliberate, recorded on the security release list as its own
+  highest-priority item, with a warning printed at every start — because the API has no auth
+  and `/api/health` discloses certificate metadata.
+- **Zendesk's two tenants, and Proofpoint is Hornetsecurity on status.io.** Both corrections
+  to guesses I had made from a pattern.
+
+## Still open at the close
+
+- **"Survives a night."** Not started in earnest.
+- **Three services have no probe of our own** — proofpoint, claude, openai — which is why
+  the Overview reads 3 affirmed / 4 unknown rather than 6 / 1, and why five of seven have no
+  `uptime30d`. Credential-free product endpoints exist for all three and are stable
+  (`api.anthropic.com/v1/messages` 405, `api.openai.com/v1/models` 401,
+  `cp.hornetsecurity.com` 200). **Needs John: yes/no, and at what interval**, because it
+  triples our unauthenticated outbound footprint on other people's APIs.
+- **Settings cannot toggle a rule.** The store and engine support it end to end; a toggle
+  needs a mutating route, which needs the auth seam. Deliberately M4.
+- **Entra, Endpoints and Email are fixture-backed.** Each needs its own adapter.
+- **`DATA_CONTRACTS.md` §7** promises a Sev2 no rule emits. Still John's call.
+- **One unexplained `nav item · dark` capture failure**, non-reproducing, whose pixel delta
+  was destroyed by re-running. Two clean full suites since.

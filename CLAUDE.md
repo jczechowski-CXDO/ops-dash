@@ -331,8 +331,16 @@ status feeds, runs four synthetic probes, correlates two rules, and serves the r
 read-only. It has been run against the live internet and detects a simulated outage end
 to end. Only `m365` has no adapter — its own is the first that needs a credential.
 
-Milestone 3 (live) is in progress: the server runs as a process, `/api/services` serves a
-whole tile, retention and staleness and certificate expiry are watched, and the operator's
-rule overrides are read every tick. The SPA wiring is the remaining piece. Plans live under
-`docs/superpowers/plans/`. **The server needs Node 24**:
+Milestone 3 (live) is complete: **1652 unit tests, 157 e2e, 152 visual baselines.** One
+process serves the API and the dashboard from a single URL, polls ten sources, correlates,
+prunes, and watches its own staleness and certificate expiry. Overview, ServiceDetail and
+IncidentDetail render real vendor data, with failure visible as failure — loading, stale
+with last-good, "we could not look", and "we looked and there is nothing" are four different
+panels.
+
+**The one clause of its definition of done that is unmet is "survives a night."** Everything
+else is verified; that needs elapsed time and has not had it.
+
+Milestone 4 — the Entra, Endpoints and Email adapters, the auth seam, and the mutating
+routes that need it — gets its own plan under `docs/superpowers/plans/`. **The server needs Node 24**:
 the store is `node:sqlite`, a built-in.
