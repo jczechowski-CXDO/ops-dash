@@ -14,7 +14,7 @@
     "adding them here before the adapter exists reads unknown rather than green.",
     "Zendesk: 'tenants' scopes the feed per account via ?subdomain=. We have two \u2014 crexendo and netsapiens \u2014 and BOTH are queried and merged, deduped by incident id. They share Pod 23 today, so one query would happen to cover both; that coincidence is exactly what not to build on.",
     "proofpoint is Hornetsecurity on status.io (live.hornet-status.com); the page id is in its HTML. 'locations' filters to OUR datacentres \u2014 the feed publishes ten and an unfiltered Frankfurt outage would land on our tile. Ours is named two mutually-exclusive ways: 'United States - Atlanta' carries the 13 core email services, 'United States - Georgia' the 3 newer 365 products. Both, or a third of the estate drops out.",
-    "m365 (msgraph) is still deliberately absent: its adapter needs a credential and is Milestone 3. index.ts answers for it with an explicit unsupported-platform error, so it reads unknown rather than green."
+    "m365 is Graph service health, app-only auth by certificate \u2014 the only feed needing a credential, which lives outside the repo (see http/graphToken.ts). 'components' names the 7 services we depend on out of the 32 Graph reports: Microsoft always has something degraded somewhere (9 of 32 on 2026-09-19, three of them Copilot), and rolling up all of them would leave the tile permanently amber."
   ],
   "feeds": [
     {
@@ -53,6 +53,20 @@
       "tenants": [
         "crexendo",
         "netsapiens"
+      ]
+    },
+    {
+      "id": "m365",
+      "platform": "msgraph",
+      "url": "https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/healthOverviews",
+      "components": [
+        "Exchange Online",
+        "Microsoft Entra",
+        "Microsoft Teams",
+        "SharePoint Online",
+        "Microsoft OneDrive",
+        "Microsoft Intune",
+        "Microsoft 365 apps"
       ]
     }
   ]

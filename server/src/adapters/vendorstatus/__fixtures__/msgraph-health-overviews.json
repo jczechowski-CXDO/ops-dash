@@ -1,0 +1,164 @@
+{
+  "value": [
+    {
+      "service": "Exchange Online",
+      "status": "serviceDegradation",
+      "id": "Exchange Online"
+    },
+    {
+      "service": "Microsoft Entra",
+      "status": "serviceDegradation",
+      "id": "Microsoft Entra"
+    },
+    {
+      "service": "Microsoft 365 suite",
+      "status": "serviceDegradation",
+      "id": "Microsoft 365 suite"
+    },
+    {
+      "service": "SharePoint Online",
+      "status": "serviceOperational",
+      "id": "SharePoint Online"
+    },
+    {
+      "service": "Dynamics 365 Apps",
+      "status": "serviceOperational",
+      "id": "Dynamics 365 Apps"
+    },
+    {
+      "service": "Basic Mobility and Security",
+      "status": "serviceOperational",
+      "id": "Basic Mobility and Security"
+    },
+    {
+      "service": "Planner",
+      "status": "serviceOperational",
+      "id": "Planner"
+    },
+    {
+      "service": "Sway",
+      "status": "serviceOperational",
+      "id": "Sway"
+    },
+    {
+      "service": "Power BI",
+      "status": "serviceOperational",
+      "id": "Power BI"
+    },
+    {
+      "service": "Microsoft Intune",
+      "status": "serviceOperational",
+      "id": "Microsoft Intune"
+    },
+    {
+      "service": "Microsoft OneDrive",
+      "status": "serviceOperational",
+      "id": "Microsoft OneDrive"
+    },
+    {
+      "service": "Microsoft Teams",
+      "status": "serviceDegradation",
+      "id": "Microsoft Teams"
+    },
+    {
+      "service": "Microsoft Bookings",
+      "status": "serviceOperational",
+      "id": "Microsoft Bookings"
+    },
+    {
+      "service": "Microsoft 365 for the web",
+      "status": "serviceOperational",
+      "id": "Microsoft 365 for the web"
+    },
+    {
+      "service": "Microsoft 365 apps",
+      "status": "serviceDegradation",
+      "id": "Microsoft 365 apps"
+    },
+    {
+      "service": "Power Apps in Microsoft 365",
+      "status": "serviceOperational",
+      "id": "Power Apps in Microsoft 365"
+    },
+    {
+      "service": "Microsoft Power Automate",
+      "status": "serviceOperational",
+      "id": "Microsoft Power Automate"
+    },
+    {
+      "service": "Microsoft Power Automate in Microsoft 365",
+      "status": "serviceOperational",
+      "id": "Microsoft Power Automate in Microsoft 365"
+    },
+    {
+      "service": "Microsoft Forms",
+      "status": "serviceOperational",
+      "id": "Microsoft Forms"
+    },
+    {
+      "service": "Microsoft Defender XDR",
+      "status": "serviceOperational",
+      "id": "Microsoft Defender XDR"
+    },
+    {
+      "service": "Project for the web",
+      "status": "serviceOperational",
+      "id": "Project for the web"
+    },
+    {
+      "service": "Microsoft Stream",
+      "status": "serviceOperational",
+      "id": "Microsoft Stream"
+    },
+    {
+      "service": "Universal Print",
+      "status": "serviceOperational",
+      "id": "Universal Print"
+    },
+    {
+      "service": "Microsoft Viva",
+      "status": "serviceDegradation",
+      "id": "Microsoft Viva"
+    },
+    {
+      "service": "Windows Autopatch",
+      "status": "serviceOperational",
+      "id": "Windows Autopatch"
+    },
+    {
+      "service": "Microsoft Dataverse",
+      "status": "serviceOperational",
+      "id": "Microsoft Dataverse"
+    },
+    {
+      "service": "Power Platform",
+      "status": "serviceOperational",
+      "id": "Power Platform"
+    },
+    {
+      "service": "Microsoft Copilot (Microsoft 365)",
+      "status": "serviceDegradation",
+      "id": "Microsoft Copilot (Microsoft 365)"
+    },
+    {
+      "service": "Microsoft Purview",
+      "status": "serviceDegradation",
+      "id": "Microsoft Purview"
+    },
+    {
+      "service": "Microsoft Clipchamp ",
+      "status": "serviceOperational",
+      "id": "Microsoft Clipchamp "
+    },
+    {
+      "service": "Microsoft 365 Copilot Chat",
+      "status": "serviceDegradation",
+      "id": "Microsoft 365 Copilot Chat"
+    },
+    {
+      "service": "Microsoft Copilot (Power Platform)",
+      "status": "serviceOperational",
+      "id": "Microsoft Copilot (Power Platform)"
+    }
+  ]
+}

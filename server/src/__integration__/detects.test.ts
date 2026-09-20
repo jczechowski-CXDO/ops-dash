@@ -26,6 +26,7 @@ const load = (name: string): Record<string, unknown> =>
 function realPayloads(): Map<string, unknown> {
   return new Map<string, unknown>([
     ['https://api.status.io/1.0/status/591aaa7fe69f388425000fda', load('statusio-hornet.json')],
+    ['https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/healthOverviews', load('msgraph-health-overviews.json')],
     ['https://jira-software.status.atlassian.com/api/v2/summary.json', load('statuspage-jira-summary.json')],
     ['https://status.helpjuice.com/api/v2/summary.json', load('statuspage-helpjuice-summary.json')],
     ['https://status.claude.com/api/v2/summary.json', load('statuspage-claude-summary.json')],
@@ -81,8 +82,14 @@ const PROBES: ProbeSpec[] = [
 /** Every probe answering the way it answers when it is well. */
 const allWell = (url: string) => (url.endsWith('zendesk-b') ? 401 : 200);
 
+/** A Graph token that is obviously fake. Every integration test passes one, so
+ *  the m365 adapter is exercised end to end — and no test in this repo can
+ *  reach the real credential by forgetting to stub something, because
+ *  `createApp` has no token source unless it is handed one. */
+const stubTokens = { get: async () => ({ token: 'integration-stub' }), reset: () => {} } as never;
+
 const app = (impl: FetchLike, now: () => Date) =>
-  createApp({ dbPath: ':memory:', fetchImpl: impl, now, probes: PROBES });
+  createApp({ dbPath: ':memory:', fetchImpl: impl, now, probes: PROBES, tokens: stubTokens });
 
 /**
  * One deterministic cycle of the READING sources — every vendor feed and the
@@ -155,14 +162,18 @@ describe('the chain, end to end, on the real captured payloads', () => {
 
     const byId = Object.fromEntries(a.signals().map((s) => [s.serviceId, s]));
     expect(Object.keys(byId)).toHaveLength(7);
-    // m365 is the last service with no adapter — its own needs a credential and
-    // is Milestone 3. proofpoint joined the polled set when Hornetsecurity's
-    // status.io feed landed, and reads `maintenance` off the captured payload
-    // because Hornet.email was in a planned window in our datacentre that day.
-    expect(byId['m365']!.vendor).toMatchObject({ level: 'unknown', platform: 'msgraph', errorCode: 'platform_unsupported' });
+    // All seven now carry live vendor data. The two levels below are read off
+    // the captured payloads and are real: Hornet.email was in a planned window
+    // in our datacentre, and four of the seven Microsoft services we depend on
+    // were in serviceDegradation, on 2026-09-19.
     expect(byId['proofpoint']!.vendor).toMatchObject({ level: 'maintenance', platform: 'statusio' });
+    expect(byId['m365']!.vendor).toMatchObject({ level: 'degraded', platform: 'msgraph' });
+    expect(byId['m365']!.vendor.errorCode).toBeUndefined();
     expect(byId['proofpoint']!.vendor.errorCode).toBeUndefined();
     expect(byId['jira']!.vendor.level).toBe('operational');
+    // Nothing is unknown any more, which is the milestone's headline — and the
+    // assertion that will fail the day a feed is dropped from the config.
+    expect(a.signals().filter((s) => s.vendor.level === 'unknown')).toEqual([]);
   });
 });
 

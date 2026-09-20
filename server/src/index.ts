@@ -26,6 +26,7 @@ import { openStore, type Store } from './store/db.js';
 import { vendorLevel } from './store/currentLevel.js';
 import { loadVendorFeeds } from './adapters/vendorstatus/common.js';
 import { pollVendor } from './adapters/vendorstatus/index.js';
+import type { TokenSource } from './http/graphToken.js';
 import { runAll, DEFAULT_PROBES } from './adapters/synthetic/runner.js';
 import { createSchedule, type Source } from './poller/schedule.js';
 import { correlate, toStoreRow, parseSeverity, WINDOW_MS } from './engine/correlate.js';
@@ -74,6 +75,15 @@ export type AppOptions = {
    *  the clock cannot be tested for what it does at a particular moment. */
   now?: () => Date;
   probes?: typeof DEFAULT_PROBES;
+  /**
+   * The Graph credential, for `m365` alone.
+   *
+   * Constructed HERE and nowhere else, and absent by default. A test that does
+   * not pass one gets an adapter reporting `graph_unconfigured`, which is both
+   * honest and impossible to confuse with a real credential — no test in this
+   * repo can reach the real one by forgetting to stub something.
+   */
+  tokens?: TokenSource;
 };
 
 export function createApp(opts: AppOptions = {}) {
@@ -88,7 +98,7 @@ export function createApp(opts: AppOptions = {}) {
     name: vendorSource(feed.id),
     intervalMs: VENDOR_INTERVAL_MS,
     run: async () => {
-      const result = await pollVendor(feed, opts.fetchImpl);
+      const result = await pollVendor(feed, opts.fetchImpl, opts.tokens);
       // Written whether it succeeded or not. `putSnapshot` branches on `error`
       // and keeps the last good payload alongside the new failure — that split
       // is the whole reason the table has four columns, and skipping the write

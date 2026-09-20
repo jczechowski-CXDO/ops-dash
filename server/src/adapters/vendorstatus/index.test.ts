@@ -45,9 +45,9 @@ const recording = (body: string) => {
 };
 
 describe('the shipped vendors.json', () => {
-  it('lists the six public feeds we poll, and only m365 is left without one', () => {
+  it('lists a feed for every one of the seven services', () => {
     const feeds = loadVendorFeeds();
-    expect(feeds.map((f) => f.id)).toEqual(['proofpoint', 'jira', 'helpjuice', 'claude', 'openai', 'zendesk']);
+    expect(feeds.map((f) => f.id)).toEqual(['proofpoint', 'jira', 'helpjuice', 'claude', 'openai', 'zendesk', 'm365']);
     expect(feeds.map((f) => f.platform)).toEqual([
       'statusio',
       'statuspage',
@@ -55,11 +55,11 @@ describe('the shipped vendors.json', () => {
       'statuspage',
       'statuspage',
       'zendesk-ssp',
+      'msgraph',
     ]);
-    // m365 is the only service with no feed: its adapter needs a credential and
-    // is Milestone 3. Asserted positively so that adding a feed for it without
-    // updating this test fails here rather than passing quietly.
-    expect(feeds.some((f) => f.id === 'm365')).toBe(false);
+    // Every ServiceId is covered. Pinned as a set comparison as well as an
+    // ordered list, so a future reorder does not quietly drop one.
+    expect(new Set(feeds.map((f) => f.id)).size).toBe(7);
   });
 
   it('points only at https URLs', () => {
@@ -128,41 +128,49 @@ describe('platform dispatch', () => {
     ]);
   });
 
-  it('answers for a platform with no adapter without making a request', async () => {
+  it('answers for msgraph with no credential without making a request', async () => {
+    // Every platform now has an adapter, so the remaining "cannot poll" case is
+    // a configuration one: msgraph needs a credential and this process was not
+    // given one. Distinct from a vendor failure on purpose — an operator who
+    // never set the credential up should see that, not a Microsoft-shaped
+    // problem — and it must not reach the network, because a request with no
+    // Authorization header comes back 401 and reads exactly like one.
     const { urls, respond } = recording('{}');
     const feed: VendorFeed = { id: 'm365', platform: 'msgraph', url: 'https://graph.microsoft.com/v1.0/x' };
     const result = await pollVendor(feed, respond);
-    expect(result.error?.code).toBe('platform_unsupported');
+    expect(result.error?.code).toBe('graph_unconfigured');
     expect(vendorOf(result).level).toBe('unknown');
     expect(vendorOf(result).platform).toBe('msgraph');
     expect(urls).toEqual([]);
   });
 });
 
-describe('the config claim: a fifth Statuspage vendor is a config line and no code', () => {
-  it('polls a vendor that exists only in a config file', async () => {
+describe('the config claim: the platform is a config line and no code', () => {
+  it('polls a vendor at whatever platform the config names', async () => {
     // The design's central claim about this adapter. If this test ever needs a
     // change to statuspage.ts to pass, the claim is false and the design owes
     // an answer. It did not, on 2026-09-19.
-    const shipped = loadVendorFeeds();
-    // `m365` is the only ServiceId with no shipped feed, so it is the only one
-    // this test can add without colliding. It was `proofpoint` until
-    // Hornetsecurity's status.io feed landed.
-    const fifth = {
-      id: 'm365',
+    // Every ServiceId now has a shipped feed, so there is no eighth vendor to
+    // add without amending the frozen contract. The claim is unchanged and the
+    // demonstration is stronger: MOVE a vendor to a different platform, in
+    // config alone, and watch dispatch follow it. If that ever needs a code
+    // change, the design owes an answer.
+    const moved = {
+      id: 'zendesk',
       platform: 'statuspage',
       url: 'https://status.example/api/v2/summary.json',
     };
-    const path = tempConfig({ feeds: [...shipped, fifth] });
+    const path = tempConfig({ feeds: [moved] });
 
     const feeds = loadVendorFeeds(path);
-    expect(feeds.length).toBe(7);
-    expect(feeds.filter((f) => f.platform === 'statuspage').length).toBe(5);
+    expect(feeds).toHaveLength(1);
+    expect(feeds[0]!.platform).toBe('statuspage');
 
-    const added = feeds.find((f) => f.id === 'm365')!;
     const { urls, respond } = recording(fixture('statuspage-helpjuice-summary.json'));
-    const result = await pollVendor(added, respond);
+    const result = await pollVendor(feeds[0]!, respond);
 
+    // Polled as Statuspage — the summary.json shape — despite being the service
+    // that ships as zendesk-ssp. Nothing about the id decided this.
     expect(vendorOf(result).level).toBe('operational');
     expect(vendorOf(result).platform).toBe('statuspage');
     expect(urls).toEqual(['https://status.example/api/v2/summary.json']);

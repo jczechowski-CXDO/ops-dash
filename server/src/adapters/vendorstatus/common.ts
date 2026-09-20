@@ -60,6 +60,20 @@ export type VendorFeed = {
    * silently drops a third of the estate from the rollup.
    */
   locations?: string[];
+  /**
+   * Several named services to roll up, where `component` names one.
+   *
+   * Microsoft Graph is the reason. It reports 32 services and Microsoft always
+   * has something degraded somewhere — nine of the thirty-two on the day this
+   * was written, three of them Copilot products nobody here has opened. Rolling
+   * up all of them leaves the tile permanently amber, which teaches the operator
+   * to ignore it. Naming what we depend on is the difference between a tile that
+   * means something and one that does not.
+   *
+   * Same contract as `component`: a named service the feed stops publishing is
+   * `unknown`, never a quietly shorter list that still reads healthy.
+   */
+  components?: string[];
 };
 
 /** The vendor half of a service tile, as the contract defines it. */
@@ -177,7 +191,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
   return feeds.map((entry, i) => {
     const where = `${path}: feeds[${i}]`;
     if (typeof entry !== 'object' || entry === null) throw new Error(`${where}: not an object`);
-    const { id, platform, url, component, tenants, locations } = entry as Record<string, unknown>;
+    const { id, platform, url, component, tenants, locations, components } = entry as Record<string, unknown>;
     if (typeof id !== 'string' || !(id in SERVICE_IDS)) {
       throw new Error(`${where}: id ${JSON.stringify(id)} is not a ServiceId`);
     }
@@ -189,6 +203,11 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
     }
     if (component !== undefined && typeof component !== 'string') {
       throw new Error(`${where}: component must be a string when present`);
+    }
+    if (components !== undefined) {
+      if (!Array.isArray(components) || components.length === 0 || !components.every((c) => typeof c === 'string' && c.length > 0)) {
+        throw new Error(`${where}: components must be a non-empty array of non-empty strings when present`);
+      }
     }
     if (locations !== undefined) {
       if (!Array.isArray(locations) || locations.length === 0 || !locations.every((l) => typeof l === 'string' && l.length > 0)) {
@@ -216,6 +235,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
       ...(component === undefined ? {} : { component }),
       ...(tenants === undefined ? {} : { tenants: tenants as string[] }),
       ...(locations === undefined ? {} : { locations: locations as string[] }),
+      ...(components === undefined ? {} : { components: components as string[] }),
     };
   });
 }

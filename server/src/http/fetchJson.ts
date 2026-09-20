@@ -52,9 +52,21 @@ const MAX_REDIRECTS = 3;
 
 export async function fetchJson<T>(
   url: string,
-  opts: { fetchImpl?: FetchLike; timeoutMs?: number; maxBytes?: number } = {},
+  opts: {
+    fetchImpl?: FetchLike;
+    timeoutMs?: number;
+    maxBytes?: number;
+    /** POST exists for exactly one caller: the OAuth token endpoint, which is a
+     *  form POST. It is here rather than in a second helper so that the four
+     *  failure rules, the body cap and the SSRF floor apply to the most
+     *  security-sensitive request this process makes. A second way out to the
+     *  network, however small, is a second place for them not to apply. */
+    method?: 'GET' | 'POST';
+    body?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<SourceResult<T>> {
-  const { fetchImpl = fetch, timeoutMs = 10_000, maxBytes = MAX_BODY_BYTES } = opts;
+  const { fetchImpl = fetch, timeoutMs = 10_000, maxBytes = MAX_BODY_BYTES, method = 'GET', body: reqBody, headers: extraHeaders } = opts;
   const fetchedAt = new Date().toISOString();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -77,13 +89,24 @@ export async function fetchJson<T>(
       }
 
       response = await fetchImpl(target, {
+        method,
         signal: controller.signal,
-        headers: { accept: 'application/json' },
+        headers: { accept: 'application/json', ...extraHeaders },
         redirect: 'manual',
+        // A redirect on a POST is not followed with the body re-sent — the loop
+        // below only re-dials, and re-sending a signed assertion to a location
+        // a server chose is how a credential ends up somewhere it should not be.
+        ...(reqBody === undefined ? {} : { body: reqBody }),
       });
 
       if (!isRedirect(response.status)) break;
 
+      if (method !== 'GET') {
+        // Never replay a non-GET to a redirect target. For the token endpoint
+        // that body is a signed client assertion, and a vendor-chosen
+        // `Location` must not receive it.
+        return err(fetchedAt, 'redirect_on_write', `${response.status} redirect on a ${method}; not followed`);
+      }
       if (hop >= MAX_REDIRECTS) {
         return err(fetchedAt, 'too_many_redirects', `more than ${MAX_REDIRECTS} redirects`);
       }

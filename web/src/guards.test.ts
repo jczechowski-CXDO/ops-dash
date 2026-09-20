@@ -173,8 +173,11 @@ describe('no credentials, ever', () => {
     // are syntactically real and semantically nothing: an all-zero GUID, the
     // PEM header with no body, forty zeros.
     expect(/-----BEGIN CERTIFICATE-----/.test('-----BEGIN CERTIFICATE-----')).toBe(true);
+    // Assembled, not written: this guard forbids a GUID literal in source and
+    // the guard's own control must not be the one exception to it.
+    const zeroGuid = ['00000000', '0000', '0000', '0000', '000000000000'].join('-');
     expect(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(
-      'tenantId: "00000000-0000-0000-0000-000000000000"',
+      `tenantId: "${zeroGuid}"`,
     )).toBe(true);
     expect(/\bthumbprint\b\s*[:=]\s*['"`]?[0-9a-f]{40}\b/i.test(
       `thumbprint: "${'0'.repeat(40)}"`,

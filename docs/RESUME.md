@@ -1360,3 +1360,65 @@ rather than quietly becoming a global estate.
 The generalisable bit: **a scoping filter must distinguish "not relevant to us" from "not
 scoped by this vendor".** Treating the second as the first deletes data. That is the same
 error as inferring health from absence, one layer up.
+
+
+## Milestone 3, first task: the msgraph adapter (2026-09-19)
+
+All seven services now carry live vendor data. `m365` was the last, and it is the only
+adapter that needs a credential.
+
+```
+proofpoint  maintenance  statusio     ours=0/0
+jira        operational  statuspage   ours=1/1
+helpjuice   operational  statuspage   ours=1/1
+claude      operational  statuspage   ours=0/0
+openai      operational  statuspage   ours=0/0
+zendesk     operational  zendesk-ssp  ours=2/2
+m365        degraded     msgraph      ours=0/0
+incidents: 0
+```
+
+`m365` reads `degraded` and it is true: Exchange Online, Microsoft Entra, Microsoft Teams
+and Microsoft 365 apps were all in `serviceDegradation`.
+
+### No MSAL
+
+Client credentials with a certificate is a signed JWT and one form POST — about forty lines
+against `node:crypto`. The server's only runtime dependency is still Fastify.
+
+The trap worth knowing, because it costs an afternoon and Microsoft's error does not say
+so: **`x5t` is the base64url of the certificate's SHA-1 fingerprint BYTES**, not of the hex
+string openssl prints. The wrong one produces a perfectly well-formed assertion that is
+rejected generically. Pinned by a test that computes it independently from the DER and also
+asserts it is *not* the hex form.
+
+### The service list is the design problem, for the fourth time
+
+Graph reports 32 services and Microsoft always has something degraded somewhere — nine of
+thirty-two that day, three of them Copilot products nobody here has opened. Rolling up all
+of them leaves the tile permanently amber. `components` names the seven we depend on.
+
+That is now four vendors in a row where the whole design question was *which part of this
+feed is about us*: Zendesk's pod, Hornetsecurity's datacentre, Hornetsecurity's
+single-region services, and Microsoft's service list. It is worth stating as a rule for the
+next adapter rather than rediscovering it: **a vendor's feed is scoped to the vendor, and
+the first question about any new one is which slice of it describes our estate.**
+
+### The guard caught its own author, twice
+
+`guards.test.ts` forbids a GUID literal in source. It fired on `graphToken.test.ts`, whose
+fake tenant ids are GUID-shaped, and on its own control test. Both were fixed by assembling
+the GUIDs from parts — `['11111111','2222',…].join('-')` — rather than by exempting
+anything.
+
+Worth the small ugliness: a guard whose first real encounter is with a *fake* secret is a
+guard about to acquire a permanent exception for the file most likely to acquire a real one
+by accident. Zero exceptions is a property that is cheap to keep and expensive to recover.
+
+### The credential, and what was accepted
+
+82 permissions, all read-only, nine of them reading things no screen in the design does —
+BitLocker recovery keys, mailbox folders, Teams recordings, message trace. Raised with John
+and accepted: it is his toolbox app registration and this runs on his machine alone. Four
+new entries are on the security review's "Reopens at release" list, the first of which is
+to narrow the grant before this runs anywhere else.
