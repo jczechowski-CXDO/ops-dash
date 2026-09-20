@@ -108,6 +108,45 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   call and is the trigger for everything on the "Reopens at release" list in
   `docs/superpowers/security/2026-09-18-m1-review.md`.
 
+## Working with the agent team
+
+The specialists live in `.claude/agents/`. They are long-lived collaborators, not
+one-shot functions, and the difference matters more than it sounds.
+
+**Keep an agent alive while it still owns something.** An idle agent costs nothing.
+What costs is closing the one that wrote `parse.ts` and spawning a fresh
+`ops-view` twenty minutes later to extend `parse.ts` — which happened, repeatedly,
+in one session. Three things are lost, in increasing order of importance: the prompt
+cache, the re-reading, and **the reasoning that never made it into a comment**. The
+agent that wrote a file knows why it chose what it chose; its replacement sees only
+the result.
+
+**Before dispatching, check `ListAgents`.** If an idle agent owns the files the task
+touches, send it the task by name. Spawn a new one when the work is a genuinely
+different domain, when the previous context is exhausted or polluted, or when you
+want a deliberately fresh reading — a reviewer re-reviewing its own work is worth
+nothing.
+
+**Close an agent when its context has no further use — not to tidy a list.** Idle
+agents that will be reused are fine; spawning the whole team at the start of a
+session and using the ones you need is fine. The waste is an agent that will never
+be touched again left open, not the count. Closing is throwing away context, so it
+is a decision about the context.
+
+**Force-stop them; do not rely on the protocol.** `shutdown_request` needs the agent
+to reply with a `shutdown_response`, which it cannot do if `SendMessage` is missing
+from its allowlist — ten agents once approved shutdown in prose and none were ever
+deregistered. `TaskStop` with the agent's name works regardless.
+
+**They can and should talk to each other.** Every definition carries `SendMessage`
+and `ListAgents`. When two agents own opposite sides of a seam, they settle it
+directly and tell the lead what they agreed — the lead is not a router. Every serious
+defect in Milestone 3 was two agents each doing their half correctly and disagreeing
+about the join. Ownership disputes are the exception: those are the lead's call.
+
+Note `to: "main"` is rejected — an agent spawned this way is a main conversation
+itself, so `"main"` addresses the sender. Agents address the lead as `team-lead`.
+
 ## Testing, and the one habit this repo runs on
 
 **A passing test is not evidence until someone has watched it fail.** This milestone
