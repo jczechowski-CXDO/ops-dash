@@ -1,12 +1,13 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
-import type { ServiceId, Severity, SourceResult, StatusLevel } from '@ops-dash/shared';
+import type { ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
 import type { SourceStatus } from '../poller/schedule.js';
 // The ONE definition of "what is this service now", shared with `index.ts` and
 // the engine. Imported rather than reimplemented: a second copy of this rule
 // would be a second place for a stale `operational` to leak out, and the two
 // would agree right up until the day they did not.
-import { currentLevel } from '../store/currentLevel.js';
+import { vendorLevel } from '../store/currentLevel.js';
 import { buildTile, type ServiceTile, type TileStore } from './tile.js';
+import { SERVICE_PLATFORM } from './platforms.js';
 
 /**
  * The read-only API.
@@ -132,13 +133,43 @@ export type ServiceEntry = {
   /** The stored envelope, byte for byte. See `store/currentLevel.ts` for why
    *  `result.data.level` is NOT the field to colour a tile with. */
   result: SourceResult<unknown>;
-  /** What this service is **now**, as opposed to what the payload says it was
-   *  when we could last read it. Derived — the one derived field on this
-   *  route — and sitting BESIDE the mirror rather than inside it, by
-   *  `store/currentLevel.ts`, which is also what the engine reads. One rule,
-   *  one definition: the API and the correlator cannot disagree about whether
-   *  a vendor is green. */
+  /**
+   * What this service is **now**, as opposed to what the payload says it was
+   * when we could last read it. Derived, and sitting BESIDE the mirror rather
+   * than inside it, by `vendorLevel` in `store/currentLevel.ts` — which is the
+   * same call, with the same three arguments, that `index.ts` hands the
+   * correlation engine. One rule, one definition: the API and the correlator
+   * cannot disagree about whether a vendor is green.
+   *
+   * It was `currentLevel(result)` until 2026-09-19, and they DID disagree —
+   * the route served Zendesk `unknown` while the engine, in the same process
+   * and against the same store, had it `operational` with 2/2 of our probes
+   * passing. `currentLevel` answers the narrower question "what did the vendor
+   * publish", and Zendesk publishes no health at all, so it can only ever
+   * answer `unknown` there. Amendment 10's inference lives in `vendorLevel`
+   * and needs the `ours` half, which this route did not compute until it
+   * served a whole tile. Second time this seam has produced the same class of
+   * bug: G2 HIGH 4 was the API and the engine disagreeing about a stale
+   * payload.
+   */
   currentLevel: StatusLevel;
+  /**
+   * Present when `currentLevel` was DERIVED from our own evidence rather than
+   * published by the vendor (amendment 10). It belongs to `currentLevel` and
+   * NOT to `result.data`, which is still the vendor's untouched word.
+   *
+   * The tile must show whose reading this is. A green the operator believes
+   * Zendesk affirmed, when it was really our two probes, is a worse lie than
+   * the grey it replaced — so this is carried outward rather than dropped, and
+   * a client that renders the level without it is rendering a claim we did not
+   * make.
+   */
+  inferred?: { basis: string };
+  /** Which upstream the vendor half comes from (amendment 5). Served because
+   *  the client cannot otherwise tell that four `unknown` tiles are one
+   *  Statuspage outage rather than four independent ones — and because it is
+   *  the input that decides whether `inferred` is even possible. */
+  platform: VendorPlatform;
 } & Omit<ServiceTile, 'error'> & {
   /**
    * `ServiceTile.error`, renamed at this boundary.
@@ -371,13 +402,24 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
         // every absent measurement comes back as `null` rather than as a zero
         // that would render as a reading. See `tile.ts` for each decision.
         const { error: metricsError, ...tile } = buildTile(store, id, at);
+        const platform = SERVICE_PLATFORM[id];
         // Derived BESIDE the mirror, never instead of it: `result` is
-        // untouched and `currentLevel` is the safe reading of it.
+        // untouched and this is the safe reading of it.
+        //
+        // `vendorLevel` and not `currentLevel`, with BOTH halves handed to it,
+        // exactly as `index.ts` hands them to the engine. Our half is
+        // `tile.ours`, which is why this line sits below the tile rather than
+        // above it: the inference cannot be made without it, and making it
+        // with a hardcoded `{ passing: 0, total: 0 }` would silently answer
+        // `unknown` forever.
+        const { level, inferred } = vendorLevel(result, platform, tile.ours);
         return {
           id,
           source,
           result,
-          currentLevel: currentLevel(result),
+          platform,
+          currentLevel: level,
+          ...(inferred ? { inferred } : {}),
           ...tile,
           ...(metricsError ? { metricsError } : {}),
         };

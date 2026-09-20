@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { CheckRun, SourceResult } from '@ops-dash/shared';
 import { openStore, type Store } from '../store/db.js';
+import { createApp } from '../index.js';
 import { createSchedule, type Source, type SourceStatus } from '../poller/schedule.js';
 import {
   buildApi,
@@ -395,6 +396,164 @@ describe('GET /api/services serves our half as measurements or as nulls', () => 
     const zendesk = entries.find((s) => s.id === 'zendesk')!;
     expect(zendesk.metricsError).toBeUndefined();
     expect(zendesk.latencyMs).toBe(90);
+  });
+});
+
+/* --------------------------------- /api/services: the level, with our half */
+
+describe('GET /api/services answers the level the ENGINE answers, not a narrower one', () => {
+  /** A zendesk-ssp payload as its adapter stores it: no health field of its
+   *  own, because the platform publishes none — only incidents. */
+  const zendeskFeed = (fetchedAt: string): SourceResult<unknown> => ({
+    data: { level: 'unknown', label: 'Unknown', note: 'the SSP feed publishes no health', incidentsSince: [] },
+    fetchedAt,
+    degraded: false,
+  });
+
+  const probes = (store: Store, results: Array<CheckRun['result']>) =>
+    results.forEach((result, i) =>
+      store.addRun({
+        serviceId: 'zendesk',
+        at: `2026-09-19T11:5${i}:00.000Z`,
+        check: `pod ${i}`,
+        region: 'us-east',
+        result,
+        latencyMs: result === 'pass' ? 120 : null,
+      }),
+    );
+
+  it('infers operational for zendesk when our own checks all pass, and says whose evidence it is', async () => {
+    // The live defect, 2026-09-19: this served `unknown` while the engine in
+    // the same process said `operational`. `currentLevel` cannot answer
+    // anything else for a platform that publishes no health.
+    const store = memStore();
+    store.putSnapshot(vendorSource('zendesk'), zendeskFeed('2026-09-19T11:59:00.000Z'));
+    probes(store, ['pass', 'pass']);
+
+    const { body } = await get({ store }, '/api/services');
+    const zendesk = (body as ServicesResponse).services.find((s) => s.id === 'zendesk')!;
+
+    expect(zendesk.currentLevel).toBe('operational');
+    expect(zendesk.inferred).toEqual({
+      basis: '2 of 2 of our own checks passing, and no open incident published for our pod',
+    });
+    // The vendor's own word is untouched underneath. The inference is OUR
+    // reading served beside it, never an edit to what they published.
+    expect((zendesk.result.data as { level: string }).level).toBe('unknown');
+  });
+
+  it('does not infer when one of our checks is failing, and does not claim an outage either', async () => {
+    // Condition 4. Both directions matter: no green, and no red — inferring an
+    // outage from our own half would fold the two halves of the Sev1 rule into
+    // one and let it confirm itself.
+    const store = memStore();
+    store.putSnapshot(vendorSource('zendesk'), zendeskFeed('2026-09-19T11:59:00.000Z'));
+    probes(store, ['pass', 'fail']);
+
+    const { body } = await get({ store }, '/api/services');
+    const zendesk = (body as ServicesResponse).services.find((s) => s.id === 'zendesk')!;
+
+    expect(zendesk.currentLevel).toBe('unknown');
+    expect(zendesk.inferred).toBeUndefined();
+  });
+
+  it('does not infer for a platform that DOES publish health, however well our probes are doing', async () => {
+    // Jira is statuspage. An `unknown` there means the feed genuinely failed
+    // to tell us something, and our probes do not get to answer for it.
+    const store = memStore();
+    store.putSnapshot(vendorSource('jira'), {
+      data: { level: 'unknown', label: 'Unknown', note: 'no component matched', incidentsSince: [] },
+      fetchedAt: '2026-09-19T11:59:00.000Z',
+      degraded: false,
+    });
+    store.addRun({
+      serviceId: 'jira',
+      at: '2026-09-19T11:59:00.000Z',
+      check: 'Jira reachable',
+      region: 'us-east',
+      result: 'pass',
+      latencyMs: 90,
+    });
+
+    const { body } = await get({ store }, '/api/services');
+    const jira = (body as ServicesResponse).services.find((s) => s.id === 'jira')!;
+
+    expect(jira.currentLevel).toBe('unknown');
+    expect(jira.inferred).toBeUndefined();
+  });
+
+  it('does not infer over a failed read, even with every probe of ours passing', async () => {
+    // Condition 2. A feed we could not read is not a feed that said nothing.
+    const store = memStore();
+    store.putSnapshot(vendorSource('zendesk'), zendeskFeed('2026-09-19T11:00:00.000Z'));
+    store.putSnapshot(vendorSource('zendesk'), {
+      fetchedAt: '2026-09-19T11:59:00.000Z',
+      degraded: true,
+      error: { code: 'http_503', message: '503 Service Unavailable' },
+    });
+    probes(store, ['pass', 'pass']);
+
+    const { body } = await get({ store }, '/api/services');
+    const zendesk = (body as ServicesResponse).services.find((s) => s.id === 'zendesk')!;
+
+    expect(zendesk.currentLevel).toBe('unknown');
+    expect(zendesk.inferred).toBeUndefined();
+  });
+
+  it('serves each service’s platform, so four unknowns can be read as one outage', async () => {
+    const { body } = await get({ store: memStore() }, '/api/services');
+    const entries = (body as ServicesResponse).services;
+    expect(Object.fromEntries(entries.map((s) => [s.id, s.platform]))).toEqual({
+      proofpoint: 'statusio',
+      jira: 'statuspage',
+      helpjuice: 'statuspage',
+      claude: 'statuspage',
+      openai: 'statuspage',
+      zendesk: 'zendesk-ssp',
+      m365: 'msgraph',
+    });
+  });
+
+  it('agrees with the engine’s own signals(), service by service, over one store', async () => {
+    // The defect reproduced end to end: ONE process, ONE store, the route's
+    // answer and `index.ts`'s `signals()` compared directly. Neither side is
+    // recomputed here by this test — each is asked the way its real caller
+    // asks it, which is the only arrangement in which they could have been
+    // caught disagreeing.
+    const app = createApp({ dbPath: ':memory:' });
+    try {
+      // A shape in which the two ANSWERS DIFFER unless both apply amendment
+      // 10: zendesk inferable, jira plainly degraded, openai never polled.
+      app.store.putSnapshot(vendorSource('zendesk'), zendeskFeed('2026-09-19T11:59:00.000Z'));
+      app.store.putSnapshot(vendorSource('jira'), {
+        data: { level: 'degraded', label: 'Degraded', note: 'elevated errors', incidentsSince: [] },
+        fetchedAt: '2026-09-19T11:59:00.000Z',
+        degraded: false,
+      });
+      probes(app.store, ['pass', 'pass']);
+
+      const res = await app.api.inject({ method: 'GET', url: '/api/services' });
+      const fromApi = Object.fromEntries(
+        (res.json() as ServicesResponse).services.map((s) => [s.id, s.currentLevel]),
+      );
+      const fromEngine = Object.fromEntries(app.signals().map((s) => [s.serviceId, s.vendor.level]));
+
+      expect(fromApi).toEqual(fromEngine);
+      // …and pinned as literals too, so a future where BOTH are wrong in the
+      // same way is still a red test. Equality alone would call that agreement.
+      expect(fromApi).toEqual({
+        zendesk: 'operational',
+        jira: 'degraded',
+        proofpoint: 'unknown',
+        helpjuice: 'unknown',
+        claude: 'unknown',
+        openai: 'unknown',
+        m365: 'unknown',
+      });
+    } finally {
+      await app.api.close();
+      app.store.close();
+    }
   });
 });
 
