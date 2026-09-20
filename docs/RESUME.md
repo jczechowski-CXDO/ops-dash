@@ -1985,6 +1985,19 @@ it. Both files were right. The seam was wrong. Fixed at `600fdea` by making the 
 closed set of two — deliberately not a general "ignore unfamiliar codes", which that same
 rationale rejects for good reason.
 
+**And a second failure, mine, in the same fifteen minutes.** The note I first wrote about that
+row said "an OPEN correlated incident, from proofpoint reading `maintenance`". Both clauses
+were false: it had resolved after sixty seconds, and it was the `blackout` rule on
+`platform:statuspage`, not `vendor` on proofpoint. `maintenance` *cannot* open an incident —
+`rules.ts:92` is an exhaustive switch returning `false` for it, with a comment saying so. I had
+`SELECT count(*)` — one row — and a half-memory of a tile, and I wrote a cause.
+
+The sequence is the instructive part, not the guess. **I selected the actual row two minutes
+later, found the cold-start defect in it, and left the false attribution standing in the file
+the morning reader would open.** Disproving your own claim does not retract it; going back
+does. This was the same hour the "say what you know, not what you concluded" rule was written
+down here about somebody else, which is roughly how long that rule survived contact.
+
 **Why no test caught it, which is the part worth keeping.** Every test in `rules.test.ts`
 constructs signals that have already been polled. *The estate at t=0 was a shape the suite had
 no way to express.* That is not a gap in the tests' rigour; it is a gap in their vocabulary,
