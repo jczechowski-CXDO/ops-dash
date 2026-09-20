@@ -36,6 +36,22 @@ const SERVER = join(REPO, 'server');
  *  to make network calls, so the guards below split: the web must make none,
  *  the server must make them ONLY through its one helper. */
 const serverSrc = () => walk(join(SERVER, 'src'), ['.ts']);
+
+/** Committed NON-code under `server/src` — the adapter fixtures and their notes.
+ *
+ *  This exists because both guards below walked `.ts` only, and Milestone 4 put
+ *  hand-redacted Graph payloads in `__fixtures__/*.json`. Those files were read
+ *  by NOTHING: not the redaction guard, not the credential guard. A real UPN, a
+ *  tenant GUID or a pasted PEM in a fixture would have been committed and pushed
+ *  with every check green.
+ *
+ *  It was reported by the agent that wrote those fixtures, having redacted them
+ *  by hand and then noticed nothing would have caught it if they had not. The
+ *  redaction guard's own comment already said "redaction binds everywhere, tests
+ *  included, so the guard should look everywhere" — and then looked at one
+ *  workspace. That is the fourth accurate comment on this project to fail to
+ *  prevent the thing it described, which is the argument for guards over prose. */
+const serverData = () => walk(join(SERVER, 'src'), ['.json', '.md']);
 const src = () =>
   // Anchored to this exact path, not endsWith: the old form exempted ANY
   // web/src/**/guards.test.ts from every guard, so a new file with that name
@@ -239,7 +255,7 @@ describe('nothing reaches off-box', () => {
 
 describe('no credentials, ever', () => {
   /** Everything a human might paste while wiring an adapter up. */
-  const sources = () => [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc()];
+  const sources = () => [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc(), ...serverData()];
 
   it('no credential path or secret-shaped key in the repo source', () => {
     // server/src included from Milestone 2. It holds no credential today and
@@ -311,17 +327,97 @@ describe('fixtures stay redacted', () => {
   // than web/src/fixtures/*.ts — passed every guard, and made "directory absent"
   // indistinguishable from "nothing found". Redaction binds everywhere, tests
   // included, so the guard should look everywhere.
-  const fixtures = () => src().map(read).join('\n');
+  //
+  //  WIDENED 2026-09-20 to every workspace AND to committed non-code. `src()` is
+  //  web/src; the Graph fixtures are `server/src/adapters/*/__fixtures__/*.json`,
+  //  which nothing read. See `serverData` above for how that was found.
+  const redactable = () => [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc(), ...serverData()];
+  const fixtures = () => redactable().map(read).join('\n');
+
+  it('actually reads the fixture files it claims to guard', () => {
+    // NON-VACUITY, and it is the positive set rather than an absence claim —
+    // the distinction this project keeps relearning. Every assertion below is
+    // "no match found", which a walk over an empty list satisfies perfectly.
+    // Rename a directory, change an extension, break `walk`, and the guard goes
+    // green while reading nothing at all.
+    //
+    // So: name the files that must be in scope. A fixture directory that is
+    // renamed fails HERE, loudly, instead of silently leaving its contents
+    // unguarded.
+    const scanned = redactable().map(rel);
+    for (const required of [
+      'server/src/adapters/entra/__fixtures__/applications.json',
+      'server/src/adapters/entra/__fixtures__/directory-audits.json',
+      'server/src/adapters/vendorstatus/__fixtures__/msgraph-health-overviews.json',
+    ]) {
+      expect(scanned).toContain(required);
+    }
+    // And the JSON really is being read, not merely listed.
+    expect(fixtures()).toContain('@example.com');
+  });
 
   it('carries no real corporate identifier', () => {
     // CXDO-GraphExport and Stellar-Connector are app-registration names, not
     // user or host identifiers, and are deliberately real. Hosts and UPNs are not.
     expect(fixtures()).not.toMatch(/@crexendo\.com/i);
     expect(fixtures()).not.toMatch(/CXDO-(LT|DT)-/);
+    // Added with the Graph fixtures: a tenant's own domain is as identifying as
+    // a UPN, and `onmicrosoft.com` is the one nobody thinks to redact because it
+    // does not look like a company name.
+    expect(fixtures()).not.toMatch(/\bonmicrosoft\.com\b/i);
+    expect(fixtures()).not.toMatch(/@netsapiens\.com/i);
   });
 
+  /** Domains an address in this repo may legitimately carry. Each one is here
+   *  because somebody decided it, which is the property that matters: a domain
+   *  nobody listed fails, including the one nobody thought to forbid.
+   *
+   *  The second group is the Email page's reason for existing. Its job is to
+   *  display attacker-authored content, so its fixtures carry sender addresses
+   *  that are *supposed* to look hostile — including `exarnple.com`, which is a
+   *  homoglyph of `example.com` and is the fixture doing its job. They are
+   *  fabricated and must stay fabricated; a real phishing sender captured from a
+   *  live mailbox is somebody's actual address and does not belong in a repo
+   *  that is pushed. */
+  const ALLOWED_DOMAINS = [
+    // documentation ranges, RFC 2606
+    'example.com', 'example.net', 'example.org', 'status.example.com',
+    // fabricated phishing senders — web/src/fixtures/email.ts
+    'invoice-secure.net', 'sharefile-cloud.ru', 'ms-verify.co', 'example-hr.com', 'exarnple.com',
+    // commit trailer
+    'noreply.anthropic.com',
+  ];
+
+  it('every address in the repo is a documentation or fabricated address', () => {
+    // The POSITIVE form, and it is the half that catches what nobody listed. The
+    // not.toMatch assertions above can only refuse domains somebody thought of;
+    // this requires every address to be one we allow. Assert what a value must
+    // be, never what it must not be.
+    for (const addr of fixtures().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []) {
+      const domain = addr.slice(addr.indexOf('@') + 1).toLowerCase();
+      expect(ALLOWED_DOMAINS).toContain(domain);
+    }
+  });
+
+  /** Dotted quads that are not our estate leaking. Each is named because the
+   *  alternative — a pattern loose enough to admit them — admits a real address
+   *  too. Widening the walk to `server/src` is what surfaced all of these; they
+   *  are all legitimate and none was visible while the guard read one workspace. */
+  const ALLOWED_QUADS: [string, string][] = [
+    ['0.0.0.0', 'the documented bind address; John ruled it, and it is on the release list'],
+    ['127.0.0.1', 'loopback — safeTarget proves it is REFUSED, so it must appear'],
+    ['169.254.169.254', 'cloud metadata — the classic SSRF target, same reason'],
+    ['10.0.0.5', 'RFC 1918 — an SSRF refusal case'],
+    ['192.168.1.1', 'RFC 1918 — an SSRF refusal case'],
+    // Not an address at all. Kept explicit rather than loosening the pattern,
+    // because a regex that stops matching this stops matching real quads too.
+    ['6.63.0.0', 'NOT an IP: a Hornetsecurity Control Panel version, verbatim in a vendor payload'],
+  ];
+
   it('uses only the RFC 5737 documentation range for IP addresses', () => {
+    const allowed = new Set(ALLOWED_QUADS.map(([q]) => q));
     for (const ip of fixtures().match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.[\dx]{1,3}\b/g) ?? []) {
+      if (allowed.has(ip)) continue;
       expect(ip).toMatch(/^203\.0\.113\./);
     }
   });
