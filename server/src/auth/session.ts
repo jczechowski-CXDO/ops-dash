@@ -79,9 +79,32 @@ export type AuthDecision =
       error: { code: 'unauthenticated' | 'session_invalid' | 'session_expired' | 'auth_unconfigured'; message: string };
     };
 
+/**
+ * The codes a caller can act on.
+ *
+ * **Pinned as a union rather than left as `string`, because the browser renders
+ * a different panel per code.** `m4-views` branches on these: `unauthenticated`
+ * is a sign-in prompt, `auth_unconfigured` is "this host has no credential",
+ * `too_many_attempts` is a wait — and `session_expired` is none of the three.
+ * A generic `string` here would let a well-meaning edit collapse two of them
+ * into one code, and the symptom would be a screen that paints a deliberate
+ * absence as an outage: G3 HIGH-2, which this project has now hit three times
+ * in two days.
+ *
+ * The typechecker is the enforcement. `AuthDecision` below pins its four the
+ * same way, for the same reason.
+ *
+ * One constraint from the other side of the seam, recorded because nothing in
+ * this workspace can check it: `web/src/live/client.ts` owns the transport
+ * vocabulary `aborted`, `unreachable`, `http_status`, `empty_body` and
+ * `non_json_2xx`, and a served code colliding with `aborted` would make a real
+ * failure vanish into a blank panel. None of ours collide; a new one must not.
+ */
+export type LoginErrorCode = 'bad_request' | 'bad_credentials' | 'too_many_attempts' | 'auth_unconfigured';
+
 export type LoginOutcome =
   | { ok: true; principal: Principal; setCookie: string }
-  | { ok: false; status: 400 | 401 | 429 | 503; error: { code: string; message: string } };
+  | { ok: false; status: 400 | 401 | 429 | 503; error: { code: LoginErrorCode; message: string } };
 
 export type SessionAuth = {
   /** The decision, for one request. The hook calls this; so may a test. */

@@ -104,7 +104,10 @@ const authAs = (username: string | null): SessionAuth => ({
     username === null
       ? { authenticated: false, status: 401, error: { code: 'unauthenticated', message: 'this route needs a session; sign in first' } }
       : { authenticated: true, principal: { username } },
-  login: () => ({ ok: false, status: 503, error: { code: 'not_in_this_test', message: 'login is exercised in auth/session.test.ts' } }),
+  // `auth_unconfigured` and not an invented code: `LoginErrorCode` is a closed
+  // union precisely so nobody can mint a fifth, and a stub is a caller like any
+  // other. This line was `'not_in_this_test'` until the union caught it.
+  login: () => ({ ok: false, status: 503, error: { code: 'auth_unconfigured', message: 'login is exercised in auth/session.test.ts' } }),
   logoutCookie: () => 'ops_dash_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
   configured: () => username !== null,
 });

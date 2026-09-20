@@ -156,6 +156,7 @@ describe('each auth module exports exactly what it is meant to', () => {
       'AUTH_POLICIES',
       'AuthDecision',
       'AuthPolicy',
+      'LoginErrorCode',
       'LoginOutcome',
       'Principal',
       'SessionAuth',
