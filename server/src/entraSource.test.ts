@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApp, ENTRA_SOURCE, ENTRA_INTERVAL_MS, ENDPOINTS_INTERVAL_MS } from './index.js';
+import { createApp, ENTRA_SOURCE, ENTRA_IDENTITY_SOURCE, ENTRA_INTERVAL_MS, ENDPOINTS_INTERVAL_MS } from './index.js';
 import { ENDPOINTS_SOURCE } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
 import type { EntraSnapshot } from '@ops-dash/shared';
@@ -203,5 +203,64 @@ describe('the endpoints source is registered, and only when it can run', () => {
       expect(code === 'endpoints_unconfigured').toBe(!registered);
       await a.api.close();
     }
+  });
+});
+
+describe('the identity signal crosses the composition root', () => {
+  /**
+   * THE JOIN, and it exists because closing G6 HIGH-3 removed the only thing
+   * watching it.
+   *
+   * The guard that recorded the gap was an **absence claim** — *nothing outside
+   * the engine builds an `IdentitySignal`* — and deleting it on closure left no
+   * positive assertion behind. `m4-entra` noticed within minutes: the composed
+   * path `pollEntraWithIdentity → putSnapshot(ENTRA_IDENTITY_SOURCE) →
+   * correlateNow → correlate({ identity })` is three lines in `index.ts` and
+   * **no test mentioned the key at all.** Every piece was covered; the join was
+   * not, which is the shape of every expensive defect this project has had.
+   *
+   * All three of these passed the entire suite before this test existed:
+   *
+   *   - the `if (identity)` write silently never firing
+   *   - the read spelling the key differently from the write — precisely the
+   *     `vendorSource(id)` hazard this file's own docblock warns about, where a
+   *     key spelled two ways reads as `never_polled` forever
+   *   - a later refactor dropping `identity` from the `correlate` call
+   *
+   * and the visible symptom of every one is **four rules that never fire**,
+   * which is indistinguishable from a quiet estate. That is exactly the
+   * condition the deleted guard existed to make visible.
+   *
+   * So this asserts the positive: a Graph payload becomes an incident through
+   * the real composition root. The stub serves two confirmed-compromised
+   * accounts specifically so that assertion is available.
+   */
+  const fixtures = loadFixtures((name) =>
+    JSON.parse(readFileSync(join(FIXTURE_DIR, name), 'utf8')) as unknown,
+  );
+
+  it('a poll produces an identity signal that correlateNow turns into a risky incident', async () => {
+    const { impl, misses } = serve(routes(fixtures));
+    const a = createApp({ dbPath: ':memory:', fetchImpl: impl, now: () => NOW, probes: [], tokens: goodToken() });
+
+    // Before the poll there is no identity, and `correlate` must read that as
+    // NOT EVALUATED rather than as "nothing is wrong" — so no identity rule
+    // may fire, and none may resolve either.
+    expect(a.correlateNow().some((i) => i.ruleKey === 'risky')).toBe(false);
+
+    await a.sources.find((s) => s.name === ENTRA_SOURCE)!.run();
+
+    // The store holds it under the key the reader uses. Asserted directly,
+    // because a write and a read that disagree about the spelling is the one
+    // failure this join is most likely to have.
+    expect(a.store.getSnapshot(ENTRA_IDENTITY_SOURCE)?.data).toBeDefined();
+
+    const risky = a.correlateNow().filter((i) => i.ruleKey === 'risky');
+    expect(risky).toHaveLength(1);
+    expect(risky[0]!.severity).toBe(1);
+
+    // A miss would route a real assertion into an accidental test of the error
+    // path, so the world must have answered every call it was asked.
+    expect(misses).toEqual([]);
   });
 });
