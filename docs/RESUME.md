@@ -1670,3 +1670,47 @@ Had it been a warning rather than an error it would still be there. The generali
 one already at the top of `CLAUDE.md` and it keeps being true at larger scales: *a check that
 is not run is indistinguishable from a check that passes* — and this time the check was in
 the command, it just was not the command anyone ran.
+
+
+## A claim about a file you do not own needs MORE evidence, not less (2026-09-20)
+
+The view agent's own formulation, after briefing another agent that m365's sev1 `spark`
+carried holes and that a baseline would legitimately move. It does not, and no baseline
+should — every fixture spark comes from `spark()`, which returns `number[]`.
+
+**The root cause is the interesting part.** The only hole-bearing series in the repository is
+one the agent wrote itself that evening — `spark: [210, null, null, 260]` in a live test
+payload, there to exercise the hole-counting label. It had been looking at that array for
+hours and generalised from its own test data to the fixture bundle without opening the
+fixture file.
+
+Its generalisation, kept verbatim because it is sharper than the one I offered:
+
+> Not owning a file is exactly the condition that makes a claim about it unverified, while
+> making it *feel* like background knowledge rather than a claim.
+
+And the corollary, which is the reusable half:
+
+> A claim about a file I do not own needs the same evidence as one about a file I do — more,
+> because I cannot be corrected by a failing test I would have run anyway.
+
+Every other claim in that brief was checked, because every other claim was about code the
+agent had just written, where the verification habit is already engaged and the cost is a
+few seconds. The unchecked one wore the costume of something already known.
+
+**Two things make this worth more than an apology.**
+
+The tell was inside the message. It wrote *"no fixture feed has ever failed, so no stale
+panel is photographed"* and, four paragraphs later, asserted that a fixture carried holes.
+Two claims about the same property of the same files, pointing opposite ways, in one
+document — catchable without opening anything.
+
+And the failure is worse in a brief than in a report. **A report is reviewable; a brief is
+instructions.** A wrong claim to the lead gets challenged. The same wrong claim to a peer
+becomes their acceptance criterion — here, it would have licensed a moved baseline, turning
+a real regression into a shrug and regenerating away the signal.
+
+The fix was not "ignore that line" but *"if that baseline moves, it is a regression — stop
+and say so"*, which is a **stricter** criterion than the wrong one it replaced. Worth
+noticing: correcting a false permission usually makes the other agent's job easier, not
+harder, because a false permission is always a permission to skip something.
