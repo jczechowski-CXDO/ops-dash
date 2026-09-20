@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { MAX_FIELD_CHARS, escapeInvisible, isInvisible, safeText } from './vendorText.js';
 
@@ -135,5 +138,125 @@ describe('safeText — the type check is the load-bearing half', () => {
     ]) {
       expect(safeText(text, 'x')).toBe(text);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Who imports this module, pinned as a literal list.
+ *
+ * **Why a guard and not the sentence in the docblock.** That docblock says
+ * *"breaking this function must redden something in every suite that imports
+ * it"*, and until now nothing checked it. This repository has counted four
+ * accurate comments that failed to prevent the thing they described, and the
+ * ruling it drew is that prose is the third defence and it keeps losing. The
+ * reach claim is exactly the kind that rots: it was pinned as a number for one
+ * commit before an adopter in another directory made it wrong, without
+ * touching this file or its tests.
+ *
+ * **The case that justifies it is a consumer LEAVING, not arriving.** A new
+ * adopter failing this test is useful and somebody would probably notice
+ * anyway. A consumer quietly dropping its import is the one nobody catches:
+ * that suite silently stops being evidence of anything, while the docblock goes
+ * on naming it as proof of reach. Both directions are covered here; the second
+ * is the reason it exists.
+ *
+ * **What this does NOT buy, stated plainly so nobody reads it as the stronger
+ * guarantee:** it guards *who imports*, not *whether each importer's suite
+ * actually reddens*. A consumer that imports `safeText` and never calls it
+ * passes this test. The mutation battery recorded in `vendorText.ts` is still
+ * the thing that proves reach; this only stops that battery's conclusion from
+ * going stale in silence.
+ */
+const SRC = dirname(fileURLToPath(import.meta.url));
+const REPO = join(SRC, '..', '..');
+const relative = (p: string) => p.slice(REPO.length + 1).split(sep).join('/');
+
+const tsFiles = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? tsFiles(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [],
+  );
+
+/**
+ * Comments removed before matching, and that is load-bearing rather than
+ * tidy. A content grep catches prose: `m4-entra` inflated an import count
+ * twofold this afternoon by grepping without stripping, having quoted the
+ * ruling about it to somebody else an hour earlier. Measured here too — an
+ * unstripped scan reports `adapters/endpoints/queries.test.ts` as a consumer,
+ * and it only mentions the module. There is a self-reference in it as well:
+ * `vendorText.ts`'s own docblock names its consumers, so an unstripped walk
+ * can list this module as an importer of itself.
+ *
+ * Line comments are stripped only where `//` is not preceded by a colon, so a
+ * `'https://...'` in ordinary code survives intact. That is deliberately the
+ * conservative direction: the residual risk is a TRAILING comment producing a
+ * false positive, which fails loudly and gets investigated, rather than a
+ * false negative, which hides.
+ */
+const stripComments = (code: string) =>
+  code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+/** A real import specifier, not a mention of the name. */
+export const importsVendorText = (code: string) =>
+  /from\s+['"][^'"]*vendorText\.js['"]/.test(stripComments(code));
+
+/** Every consumer, measured 2026-09-20T17:28Z. Adding one is a line somebody
+ *  defends in review rather than a diff nobody reads — the same argument
+ *  `guards.test.ts` makes for its own allowlists. */
+const CONSUMERS = [
+  'server/src/adapters/email/parse.ts',
+  'server/src/adapters/endpoints/queries.ts',
+  'server/src/vendorText.test.ts',
+];
+
+describe('the consumer set is pinned, so a reach claim cannot rot unnoticed', () => {
+  it('is exactly these importers', () => {
+    const found = tsFiles(SRC)
+      .filter((f) => importsVendorText(readFileSync(f, 'utf8')))
+      .map(relative)
+      .sort();
+    expect(found).toEqual([...CONSUMERS].sort());
+  });
+
+  it('read a real tree and a non-empty list — the control for the assertion above', () => {
+    // POSITIVE on both sides. "The importers are exactly none" is what a broken
+    // walk reports, and an empty expectation would accept it. Anchored on the
+    // walk having found files AND on the pinned list having entries, because
+    // this suite has already shipped the absence-satisfied-vacuously hole twice
+    // today and caught it twice.
+    expect(tsFiles(SRC).length).toBeGreaterThan(20);
+    expect(CONSUMERS.length).toBeGreaterThan(0);
+    expect(tsFiles(SRC).map(relative)).toContain('server/src/vendorText.ts');
+  });
+
+  it('counts an import and refuses a mention — the controls, on text rather than on files', () => {
+    // Proven able to fail without anybody writing a broken consumer.
+    expect(importsVendorText("import { safeText } from '../../vendorText.js';")).toBe(true);
+    expect(importsVendorText('import { safeText } from "./vendorText.js";')).toBe(true);
+    // Must NOT count: the docblock sentence that names a consumer, the block
+    // comment that records the mutation battery, and a bare mention of the name.
+    expect(importsVendorText("// see server/src/vendorText.js for the escaping")).toBe(false);
+    expect(importsVendorText("/** reddens a test in vendorText.js too */")).toBe(false);
+    // A COMMENTED-OUT IMPORT, which is the only shape that actually exercises
+    // the comment stripping. Added after a mutation survived: deleting
+    // `stripComments` entirely reddened nothing, because no file in the tree
+    // today mentions this module in an import-shaped way inside a comment, and
+    // every other control here is a mention that would not match the specifier
+    // pattern regardless. The stripping was a defence that nothing defended —
+    // real protection against a state that is one careless edit away, and
+    // completely unproven until these two lines.
+    expect(importsVendorText("// import { safeText } from '../../vendorText.js';")).toBe(false);
+    expect(importsVendorText("/* import { safeText } from './vendorText.js'; */")).toBe(false);
+    expect(importsVendorText('const what = "vendorText.js";')).toBe(false);
+    // A URL ending in the module's name. Written as a bare string rather than
+    // as a call, because the first draft of this line spelled it as a network
+    // call and tripped the repo's no-bare-fetch guard — in `server/src`, which
+    // that guard watches hardest. The guard was right: the control is about a
+    // URL that is not an import, and nothing about it needed a call to make
+    // the point. Fifth instance of "a test cannot forbid a literal by
+    // containing it", this time against a different guard than the four in
+    // `docs/RESUME.md`.
+    expect(importsVendorText("const asset = 'https://example.com/vendorText.js';")).toBe(false);
   });
 });
