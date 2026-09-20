@@ -142,6 +142,20 @@ the parallel work ends: collapse back to one and give the follow-on task to the 
 that owns the files, rather than leaving the others dormant and spawning a fresh one
 later.
 
+**Pipeline across types instead of parallelising within one.** That is where the
+wall-clock actually is, and it costs no coherence. An agent that has finished a slice
+hands the verification to a different specialist — `ops-e2e` for the baselines and
+interaction, `ops-reviewer` for the diff — **and starts the next slice immediately**
+rather than waiting for the result. Two types working on two stages of the same work
+cannot invent two versions of anything, because only one of them is inventing.
+
+This only became possible when the agents got `SendMessage`. Before that every handoff
+routed through the lead, so the pipeline serialised on the lead's attention — which is
+what actually made this project feel sequential, not the agents.
+
+The rule for the handoff: the author keeps ownership and fixes what comes back. A
+verification agent reports; it does not edit the author's files.
+
 A good check before dispatching: *if I spawn this, will there be two live agents of
 this type, and is the second one doing something the first genuinely cannot?* If the
 honest answer is "the first one is idle and knows these files", that is the agent.
