@@ -1559,3 +1559,49 @@ fixed before commit.
 It also measured something useful: the noise floor of that improvised harness is non-zero,
 and HEAD-against-HEAD differs on one of the same captures — **precisely because
 `killTransitions` cannot run.** The broken thing was measurable through the hole it left.
+
+
+## When a number is honest and its label is not, fix the label (2026-09-20)
+
+John's ruling on G5 HIGH 2, and it generalises well enough to be its own rule.
+
+`uptime30d` read `1` after three minutes of probing. I offered two fixes: null it
+below a coverage floor, or serve the coverage alongside. Both treated the number as the
+problem. John's answer was that the number is **true** — everything we watched did pass —
+and the caption "rolling 30 days" is the lie.
+
+**Do not null an honest measurement to avoid a dishonest caption.** Nulling discards a real
+reading, and the floor is a threshold someone has to invent that then silently decides what
+an operator believes. Serve the figure with its basis and let the label say what was
+actually observed: `uptimeFrom`, `uptimeSamples`, and a caption reading "only 47m observed,
+not 30 days". A mature install still reads "rolling 30 days" word for word, so nothing that
+was already right had to change.
+
+The same question is now answerable for every derived number on a tile: p50, p95,
+`incidents90d`. Ask what the figure genuinely covers before deciding it is wrong.
+
+## A guard that names a forbidden string can be renamed around (2026-09-20)
+
+G5 MEDIUM 3, and the fourth distinct way a guard in this repo has turned out to be weaker
+than it read.
+
+The `publishedLevel` guard refused a surviving alias by searching for `currentLevel` — the
+one spelling nobody would choose twice. `export const reading = publishedLevel` satisfied
+every assertion in the file, and a caller importing `reading` never names the guarded symbol
+at all, so the import rule had nothing to object to. The narrow reading would have been
+loose under a new name and the mechanism would have been decoration.
+
+Fixed by pinning the module's **export surface as a set** rather than searching it for a
+forbidden string. A name that is not on the list fails whatever it is called, which is the
+only form that cannot be renamed around. Adding an export is then a deliberate act with a
+failing test attached.
+
+The collected shape of all four, which is worth stating once:
+
+- an absence-claim (`offenders === []`) passes when the rule can see nothing
+- a forbidden-string search passes when the thing is spelled differently
+- a file-scoped exemption licenses everything in the file, not the line that needed it
+- a rule whose fixture cannot produce the condition is measuring the fixture
+
+Every one of them reads as a working guard and reports success. **The only reliable form is
+to assert the positive set — what must be found, and exactly what may be there.**

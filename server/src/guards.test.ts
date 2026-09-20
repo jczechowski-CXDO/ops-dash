@@ -106,6 +106,25 @@ const homeExports = (code: string) => ({
   oldName: /\bcurrentLevel\b/.test(stripComments(code)),
 });
 
+/**
+ * Every name this module exports.
+ *
+ * G5 MEDIUM 3. The `oldName` rule above only refuses an alias spelled
+ * `currentLevel`, and that is the one spelling nobody would choose twice.
+ * `export const reading = publishedLevel` passes it — and then any file in the
+ * server can `import { reading }`, never naming `publishedLevel`, and the
+ * import rule below sees nothing to object to. The narrow reading escapes under
+ * a new name and the whole mechanism is decoration.
+ *
+ * So the export surface is pinned as a SET, not searched for a forbidden
+ * string. A name that is not on the list fails here whatever it is called,
+ * which is the only form that cannot be renamed around.
+ */
+const exportedNames = (code: string): string[] =>
+  [...stripComments(code).matchAll(/^export\s+(?:async\s+)?(?:function|const|class|type|interface)\s+([A-Za-z0-9_$]+)/gm)]
+    .map((m) => m[1]!)
+    .sort();
+
 const HOME = join(SRC, 'store', 'currentLevel.ts');
 
 describe('only its own module may read the vendor’s published level', () => {
@@ -119,6 +138,33 @@ describe('only its own module may read the vendor’s published level', () => {
     // every other assertion here and restores the trap in full — two names,
     // both sounding like the answer, one of them wrong.
     expect(homeExports(read(HOME))).toEqual({ narrow: true, public: true, oldName: false });
+  });
+
+  it('exports exactly these four names, so the narrow reading cannot escape under another', () => {
+    // G5 MEDIUM 3. The alias rule above catches `currentLevel` and only that.
+    // `export const reading = publishedLevel` would satisfy every other
+    // assertion in this file, and a caller importing `reading` never names the
+    // guarded symbol at all — so the import rule below would have nothing to
+    // object to, and the narrow reading would be loose under a new name.
+    //
+    // Pinned as a set. Adding an export here is then a deliberate act with a
+    // failing test attached, rather than something that happens quietly.
+    expect(exportedNames(read(HOME))).toEqual([
+      'PLATFORMS_WITHOUT_PUBLISHED_HEALTH',
+      'isStatusLevel',
+      'publishedLevel',
+      'vendorLevel',
+    ]);
+  });
+
+  it('would see an alias under ANY name — the control the old rule did not have', () => {
+    // The mutation that motivated this: a rename that the `currentLevel` string
+    // search cannot see.
+    const planted = `export function ${NARROW_READING}(s: unknown) { return s; }\n` +
+      `export function ${PUBLIC_READING}(s: unknown) { return s; }\n` +
+      `export const quietReading = ${NARROW_READING};\n`;
+    expect(homeExports(planted).oldName).toBe(false);          // the old rule is blind to it
+    expect(exportedNames(planted)).toContain('quietReading');  // this one is not
   });
 
   it('would see a deprecated alias if one were left behind — the control', () => {
