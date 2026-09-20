@@ -70,6 +70,22 @@ consolation for Task 5. A screen labelled "Endpoints" carrying a number no opera
 is the permanently-wrong-tile failure wearing a new hat, and both the lead and `m4-entra`
 reached that conclusion independently.
 
+### Task 6: the sentence that must not be lost
+
+**The Email adapter has never completed an end-to-end poll.** It reads four of six stats and the
+blocked list, and everything it knows about the vendor came from roughly ten minutes of live
+probing before the token was revoked. It is tested entirely against hand-built fixtures whose
+shapes were confirmed in that window.
+
+**Its tests being green says the parser is right about a payload shape somebody observed. It
+does not say the adapter works.** The agent who wrote it asked specifically that this survive
+into whatever restarts the task, and they are right to: 55 green tests is exactly the sort of
+number that reads as completion.
+
+Two things gate a restart: a re-minted credential scoped to `/emails/statistics/by_type/` and
+`/emails/_search/` under one `object_id`, and the `number | null` amendment for the two
+structurally-absent stats.
+
 ### Task 6 is halted, and the reason is a finding rather than a setback
 
 John placed a Proofpoint/Hornetsecurity Control Panel token, then revoked it about forty

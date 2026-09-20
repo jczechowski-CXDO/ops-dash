@@ -407,6 +407,38 @@ Three consequences, all of which cost real time before they were understood:
   rework in files the author does not own. Both agents arrived at this independently and it
   is the pattern that makes a laggy channel safe rather than reckless.
 
+### Standing rules versus rulings — where each is cheap
+
+An agent observed that a standing hold order *"made the boundary obvious rather than a judgement
+call I had to make five separate times"*, with five red files in front of them and obvious
+curiosity about all of them. The lead generalised that into a preference for standing
+instructions over case-by-case rulings. **The same agent then argued against their own
+evidence**, on the grounds that it was one observation from one agent on one afternoon and it
+was about to change how the team is run.
+
+Their narrower version is the one to use:
+
+> **A standing rule is cheapest where the boundary is factual and the temptation is
+> predictable** — whose file is this, may I commit, may I probe a vendor.
+> **A ruling is still needed where the judgement IS the work** — is this finding urgent, is it
+> worth interrupting somebody for, does this claim need checking before I pass it on.
+
+**The cost side, which their own afternoon demonstrated.** Three things they did were in scope
+only because they judged them so, and a blunt reading of "hold, pick up nothing" would have
+killed all three: escalating a credential-shaped literal as urgent rather than cosmetic,
+chasing an anomaly far enough to establish it was **not** a coupling, and verifying a peer's
+claim before relaying it. **Two of those, stopping earlier would have left something false on
+the record.**
+
+The asymmetry that survives, and the reason to write boundaries at all: **the agent under
+temptation is badly placed to derive a rule and usually well placed to apply one.** That argues
+for the lead writing the boundary and the agent applying it — not for the boundary being wide.
+
+And a correction worth keeping about why the order worked: it was not the instruction alone.
+Two peers had, that same afternoon, publicly demonstrated how expensive it is to investigate
+someone else's in-flight work. **The instruction made the boundary easy; the examples made it
+obvious.** Both were doing work.
+
 A good check before dispatching: *if I spawn this, will there be two live agents of
 this type, and is the second one doing something the first genuinely cannot?* If the
 honest answer is "the first one is idle and knows these files", that is the agent.
