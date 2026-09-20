@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { EntraSnapshot } from '@ops-dash/shared';
 import type { FetchLike } from '../../http/fetchJson.js';
 import type { TokenSource } from '../../http/graphToken.js';
+import { readAll } from './paged.js';
+import { FAILED_SIGNINS } from './queries.js';
 import { pollEntra } from './index.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -15,6 +18,18 @@ const APPS = fixture('applications.json');
 const AUDITS = fixture('directory-audits.json');
 
 const NOW = new Date('2026-09-20T12:00:00Z');
+
+/** A prior snapshot, as the composition root would hand one back. Only
+ *  `stats.mfaUnregistered` is read; the rest is filled so the value is a real
+ *  `EntraSnapshot` and not a shape that happens to typecheck. */
+const previousSnapshot = (mfaUnregistered: number): EntraSnapshot => ({
+  stats: {
+    riskySignIns24h: 0, riskyConfirmedCompromised: 0, failedSignIns24h: 0, failedSignInAccounts: 0,
+    mfaCoverage: 0.5, mfaUnregistered, privilegedAccounts: 0, globalAdmins: 0,
+  },
+  signals: [],
+  audit: [],
+});
 
 const goodToken = (): TokenSource =>
   ({ get: async () => ({ token: 'stub-token' }), reset: () => {} }) as unknown as TokenSource;
@@ -228,12 +243,58 @@ describe('the Entra snapshot, end to end over a stubbed Graph', () => {
     expect(r.error?.message ?? '').not.toContain('page budget');
   });
 
-  it('mfa_gap appears the moment somebody supplies yesterday’s number', async () => {
-    // The seam. When the store carries the previous snapshot this is one
-    // argument at one call site, and nothing in this directory changes.
-    const { r } = await poll(routes(), { previousMfaUnregistered: 4 });
+  it('omits mfa_gap on a COLD START, because there is no yesterday to subtract', async () => {
+    // The third time this shape has caught this repo in two days: a phantom Sev2
+    // at boot from `never_polled`, the `ourside` rule that would have opened one
+    // on every restart, and this. With no prior snapshot the delta is unknowable,
+    // and the two ways to produce a number anyway — a 0, or a guess — are a lie
+    // and a worse lie. There is no row.
+    const { r } = await poll(routes());              // no `previous` passed
+    expect(r.data?.signals.map((s) => s.key)).not.toContain('mfa_gap');
+    // And the count is NOT lost, which is what makes omission honest here
+    // rather than merely safe.
+    expect(r.data?.stats.mfaUnregistered).toBe(1);
+  });
+
+  it('emits mfa_gap the moment a prior snapshot exists — the other half', async () => {
+    // Without this, "omit mfa_gap" could be implemented as "never emit mfa_gap"
+    // and the cold-start test above would still pass.
+    const { r } = await poll(routes(), { previous: previousSnapshot(4) });
     const gap = r.data?.signals.find((s) => s.key === 'mfa_gap');
     expect(gap).toMatchObject({ count: 1, delta24h: -3, severity: 3, label: 'MFA registration gaps' });
+  });
+
+  it('every OTHER delta is cold-start safe, and that is asserted rather than assumed', async () => {
+    // "Assume every new component has a cold-start case until you have written
+    // the test that proves it does not." The other seven deltas come out of a
+    // single poll — five are event counts split from one 48-hour read, guests
+    // come off `createdDateTime`, credential expiry is arithmetic — so they are
+    // present and correct with no prior snapshot at all. These are the same
+    // figures the fully-warmed poll produces.
+    const cold = await poll(routes());
+    const warm = await poll(routes(), { previous: previousSnapshot(4) });
+    const deltas = (r: Awaited<ReturnType<typeof poll>>['r']) =>
+      Object.fromEntries((r.data?.signals ?? []).filter((s) => s.key !== 'mfa_gap').map((s) => [s.key, s.delta24h]));
+    expect(deltas(cold.r)).toEqual({
+      risky_signin: 0, failed_spike: 3, expiring_credentials: 0,
+      role_change: 0, guest_access: 1, ca_change: 1,
+    });
+    expect(deltas(cold.r)).toEqual(deltas(warm.r));
+  });
+
+  it('the failed-sign-in count is reachable WITHOUT the expensive reads', async () => {
+    // DATA_CONTRACTS §7's `spray` rule wants failed sign-ins over a 15-minute
+    // window; nothing will ever justify polling 1,473 app registrations that
+    // often. The split is not built, but the parts are not fused either — this
+    // answers the question with no part of `pollEntra` involved, and fails if a
+    // later refactor buries the query inside it.
+    const { impl } = serve(routes());
+    const [interactive, other] = FAILED_SIGNINS(NOW.getTime() - 15 * 60_000);
+    const a = await readAll(interactive, 'stub-token', impl);
+    const b = await readAll(other, 'stub-token', impl);
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.rows.length + b.rows.length).toBe(6);   // both pages of the fixture
   });
 });
 
@@ -279,7 +340,7 @@ describe('a failed read never renders as green', () => {
     expect(r.data?.stats.mfaUnregistered).toBe(1);   // NOT 5
     // And the signal's evidence comes from the member rows, not the guest rows
     // whose lastUpdatedDateTime is newer.
-    const { r: withPrev } = await poll(routes(), { previousMfaUnregistered: 4 });
+    const { r: withPrev } = await poll(routes(), { previous: previousSnapshot(4) });
     expect(withPrev.data?.signals.find((s) => s.key === 'mfa_gap')?.lastSeen).toBe('2026-09-20T06:00:00.000Z');
   });
 

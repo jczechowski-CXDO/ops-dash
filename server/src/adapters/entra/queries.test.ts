@@ -73,6 +73,28 @@ describe('the sign-in queries, and why they are shaped this way', () => {
     }
   });
 
+  it('pins the exact property v1.0 lacks, so the reason survives a tidy-up', () => {
+    // The lead's ruling on the beta endpoint rests on one measured sentence, and
+    // the property name belongs in an ASSERTION rather than only in a comment —
+    // a comment explaining why the URL says `beta` is the kind of accurate
+    // comment this project has now watched fail to prevent the thing it
+    // described, three times in one night.
+    //
+    // Measured against v1.0, same filter, same tenant:
+    //   400 BadRequest — Could not find a property named 'signInEventTypes'
+    //                    on type 'microsoft.graph.signIn'
+    //
+    // So the choice is a beta surface or a number that is wrong by 29x and reads
+    // as a calm day. A beta shape change fails LOUDLY — fetchJson errors, the
+    // panel says "we could not look". The v1.0 version fails silently and
+    // permanently, which is the direction this repo does not accept.
+    const [, nonInteractive] = FAILED_SIGNINS(0);
+    expect(nonInteractive).toContain('signInEventTypes');
+    for (const url of [...FAILED_SIGNINS(0), ...LEGACY_SIGNINS(0)]) {
+      expect(url).not.toContain(`${GRAPH_V1}/auditLogs/signIns`);
+    }
+  });
+
   it('honours the per-collection page-size caps that Graph actually enforces', () => {
     // Not stylistic. `identityProtection/riskDetections` answers
     // `400 BadRequest — Invalid page size specified: '999'. Must be between 1

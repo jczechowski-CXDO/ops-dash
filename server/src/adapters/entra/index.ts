@@ -51,6 +51,22 @@ import {
  * express absence: a signal with no evidence behind it is **omitted**, never
  * emitted at zero with the poll time as its `lastSeen`.
  *
+ * **The fork, recorded so the next person sees it rather than rediscovers it:**
+ * if one flaky read blanking the whole panel turns out to be too brittle in
+ * practice, the fix is a contract amendment making `stats`' members nullable —
+ * `number | null`, handled by the typechecker at every call site. It is NOT a
+ * zero. A nullable field says "we could not look"; a zero says "we looked and
+ * there is nothing", and on this screen those are opposite pieces of news.
+ *
+ * **Cheap reads are kept separable from expensive ones, deliberately.** The
+ * sign-in counts are the only figures here that anything will plausibly want at
+ * a tighter cadence — DATA_CONTRACTS §7's unimplemented `spray` rule wants
+ * failed sign-ins over a 15-minute window, which 1,473 app registrations will
+ * never justify polling for. So the split is not built, but it is not fused
+ * either: `FAILED_SIGNINS` and `readAll` are both exported and together answer
+ * that question with no part of this function involved. `index.test.ts` proves
+ * it, so the property survives a refactor that did not know about it.
+ *
  * **Sequentially, not in parallel.** Thirteen concurrent Graph requests is the
  * shape that earns a 429, and `fetchJson` has no backoff — a throttle would
  * surface as a failed read and, under the all-or-nothing rule above, cost the
@@ -67,30 +83,38 @@ export type EntraPollOptions = {
    *  proving that this adapter waits. */
   sleep?: (ms: number) => Promise<void>;
   /**
-   * Yesterday's `mfaUnregistered`, if anybody has it.
+   * The last snapshot this source produced, or `undefined` on a cold start.
    *
-   * **The one thing Graph cannot answer.** Seven of the eight contract signals
-   * have a derivable `delta24h`: five are event counts, so the previous window
-   * is a second half of the same read; guest arrivals come off `createdDateTime`;
-   * and credential expiry is arithmetic on the credentials themselves. MFA
-   * registration is none of those. `reports/authenticationMethods/
-   * userRegistrationDetails` is point-in-time only — Graph has no record of
-   * what that number was yesterday, and no query can conjure one.
+   * **A parameter, never a store import, and the width is the point.** This
+   * adapter must not develop a private opinion about what "previous" means or
+   * where it is kept: the composition root owns storage, this file owns
+   * arithmetic, and the seam between them is one argument wide so neither side
+   * can drift. Milestone 3's expensive defects were all two halves each
+   * individually correct and disagreeing about the join; a seam you can read in
+   * a single line is one that cannot be joined two ways.
    *
-   * `EntraSignal.delta24h` is a required `number`, so there are exactly three
-   * ways to go: keep the previous value in our own store and pass it in here;
-   * amend the frozen contract to allow `null`; or emit `0`, which is the
-   * "absent is not zero" lie this repo has paid for repeatedly. The third is
-   * not on the table.
+   * **What it is for.** Seven of the eight contract signals have a `delta24h`
+   * derivable from a single poll: five are event counts, so the previous window
+   * is just the second half of one 48-hour read; guest arrivals come off
+   * `createdDateTime`; and credential expiry is arithmetic on the credentials
+   * themselves. MFA registration is none of those. `reports/
+   * authenticationMethods/userRegistrationDetails` is point-in-time only —
+   * Graph has no record of what that number was yesterday and no query can
+   * conjure one. So `mfa_gap`'s delta is `stats.mfaUnregistered` now minus
+   * `stats.mfaUnregistered` then, and "then" has to be handed to us.
    *
-   * Until the lead rules, this is an optional input with no default. Absent, the
-   * `mfa_gap` SIGNAL is omitted — its delta is unknowable and a row is the one
-   * thing the contract lets us leave out. The COUNT is not lost: it is still
-   * `stats.mfaUnregistered`, which asks for no delta. When the store starts
-   * carrying the previous snapshot, wiring it is one argument at one call site
-   * in the composition root, and nothing in this directory changes.
+   * **And on a cold start there is no `then`.** That is the whole reason this is
+   * `EntraSnapshot | undefined` rather than a number with a default. `0` would
+   * be the "absent is not zero" lie, and a guessed delta is worse because it
+   * looks like a measurement. This repo has now been caught by the same shape
+   * three times in two days — a phantom Sev2 at boot from `never_polled`, the
+   * `ourside` rule that would have opened one on every restart, and this. So:
+   * **the `mfa_gap` signal is omitted entirely until a prior snapshot exists.**
+   * Omission is expressible in the frozen contract and a wrong number is not.
+   * The count is never lost — it is `stats.mfaUnregistered`, which asks for no
+   * delta and is present from the first poll.
    */
-  previousMfaUnregistered?: number;
+  previous?: EntraSnapshot;
 };
 
 type Failure = { code: string; message: string };
@@ -294,11 +318,12 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
       newestAt(failedSignIns, 'createdDateTime')),
     signal('legacy_auth', legacy.current.length, legacy.current.length - legacy.previous.length,
       newestAt(legacySignIns, 'createdDateTime')),
-    // Omitted entirely while `previousMfaUnregistered` is absent — see the
-    // option's comment. The count survives in `stats.mfaUnregistered`.
-    opts.previousMfaUnregistered === undefined
+    // The cold start, stated where it happens rather than only where it is
+    // configured: with no prior snapshot there is no yesterday to subtract, so
+    // there is no row. Not a zero, not a guess. See `previous` above.
+    opts.previous === undefined
       ? undefined
-      : signal('mfa_gap', mfaUnregistered, mfaUnregistered - opts.previousMfaUnregistered,
+      : signal('mfa_gap', mfaUnregistered, mfaUnregistered - opts.previous.stats.mfaUnregistered,
         newestAt(members, 'lastUpdatedDateTime')),
     signal('expiring_credentials', credentials.count, credentials.delta24h, credentials.lastEnteredAt),
     signal('role_change', roles.current.length, roles.current.length - roles.previous.length,
