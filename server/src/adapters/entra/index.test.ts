@@ -1,134 +1,48 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { EntraSnapshot } from '@ops-dash/shared';
-import type { FetchLike } from '../../http/fetchJson.js';
-import type { TokenSource } from '../../http/graphToken.js';
 import { readAll } from './paged.js';
 import { FAILED_SIGNINS } from './queries.js';
 import { pollEntra } from './index.js';
+// The stubbed Graph lives beside the fixtures it reads, and is shared with the
+// composition root's own test so the two sides of the seam cannot drift about
+// what Graph answers. See the module's own comment.
+import {
+  FIXTURE_FILES, NOW, type Route, failingToken, goodToken, loadFixtures, previousSnapshot,
+  routes as stubRoutes, serve,
+} from './__fixtures__/graphStub.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
-const fixture = (name: string): unknown => JSON.parse(readFileSync(join(HERE, '__fixtures__', name), 'utf8'));
-
-const PAGE1 = fixture('signins-failed-page1.json');
-const PAGE2 = fixture('signins-failed-page2.json');
-const APPS = fixture('applications.json');
-const AUDITS = fixture('directory-audits.json');
-
-const NOW = new Date('2026-09-20T12:00:00Z');
-
-/** A prior snapshot, as the composition root would hand one back. Only
- *  `stats.mfaUnregistered` is read; the rest is filled so the value is a real
- *  `EntraSnapshot` and not a shape that happens to typecheck. */
-const previousSnapshot = (mfaUnregistered: number): EntraSnapshot => ({
-  stats: {
-    riskySignIns24h: 0, riskyConfirmedCompromised: 0, failedSignIns24h: 0, failedSignInAccounts: 0,
-    mfaCoverage: 0.5, mfaUnregistered, privilegedAccounts: 0, globalAdmins: 0,
-  },
-  signals: [],
-  audit: [],
-});
-
-const goodToken = (): TokenSource =>
-  ({ get: async () => ({ token: 'stub-token' }), reset: () => {} }) as unknown as TokenSource;
-const failingToken = (): TokenSource =>
-  ({ get: async () => ({ error: { code: 'graph_config', message: 'no credential' } }), reset: () => {} }) as unknown as TokenSource;
-
-/** Collections other than the two-page sign-in fixture, written inline so the
- *  expected figures below can be checked by counting them by eye. */
-const RISK = { value: [
-  { id: 'DEMO-RISK-0001', detectedDateTime: '2026-09-20T11:00:00Z' },   // current
-  { id: 'DEMO-RISK-0002', detectedDateTime: '2026-09-19T01:00:00Z' },   // previous
-] };
-const COMPROMISED = { value: [{ id: 'DEMO-USER-0007' }, { id: 'DEMO-USER-0008' }] };
-const REGISTRATION = { value: [
-  { id: 'DEMO-USER-0001', userType: 'member', isMfaRegistered: true, lastUpdatedDateTime: '2026-09-20T06:00:00Z' },
-  { id: 'DEMO-USER-0002', userType: 'member', isMfaRegistered: true, lastUpdatedDateTime: '2026-09-19T06:00:00Z' },
-  { id: 'DEMO-USER-0003', userType: 'member', isMfaRegistered: true, lastUpdatedDateTime: '2026-09-18T06:00:00Z' },
-  { id: 'DEMO-USER-0004', userType: 'member', isMfaRegistered: true, lastUpdatedDateTime: '2026-09-17T06:00:00Z' },
-  { id: 'DEMO-USER-0005', userType: 'member', isMfaRegistered: false, lastUpdatedDateTime: '2026-09-16T06:00:00Z' },
-  // Guests register their methods in their own home tenant. Four of them here,
-  // none registered — enough to drag a naive coverage figure from 0.8 to 0.44.
-  { id: 'DEMO-GUEST-0001', userType: 'guest', isMfaRegistered: false, lastUpdatedDateTime: '2026-09-20T07:00:00Z' },
-  { id: 'DEMO-GUEST-0002', userType: 'guest', isMfaRegistered: false, lastUpdatedDateTime: '2026-09-20T07:00:00Z' },
-  { id: 'DEMO-GUEST-0003', userType: 'guest', isMfaRegistered: false, lastUpdatedDateTime: '2026-09-20T07:00:00Z' },
-  { id: 'DEMO-GUEST-0004', userType: 'guest', isMfaRegistered: false, lastUpdatedDateTime: '2026-09-20T07:00:00Z' },
-] };
-const ASSIGNMENTS = { value: [
-  { id: 'DEMO-ASSIGN-0001', principalId: 'DEMO-USER-0001', principal: { '@odata.type': '#microsoft.graph.user' } },
-  { id: 'DEMO-ASSIGN-0002', principalId: 'DEMO-USER-0001', principal: { '@odata.type': '#microsoft.graph.user' } },
-  { id: 'DEMO-ASSIGN-0003', principalId: 'DEMO-USER-0002', principal: { '@odata.type': '#microsoft.graph.user' } },
-  { id: 'DEMO-ASSIGN-0004', principalId: 'DEMO-SPN-0001', principal: { '@odata.type': '#microsoft.graph.servicePrincipal' } },
-] };
-const GA_ROLE = { value: [{ id: 'DEMO-ROLE-0001', displayName: 'Global Administrator' }] };
-const GA_MEMBERS = { value: [{ id: 'DEMO-USER-0001' }, { id: 'DEMO-USER-0002' }, { id: 'DEMO-USER-0003' }] };
-const GUESTS = { value: [
-  { id: 'DEMO-GUEST-0001', createdDateTime: '2026-09-20T08:00:00Z' },   // inside 24h
-  { id: 'DEMO-GUEST-0002', createdDateTime: '2026-06-01T08:00:00Z' },
-  { id: 'DEMO-GUEST-0003', createdDateTime: '2026-05-01T08:00:00Z' },
-  { id: 'DEMO-GUEST-0004', createdDateTime: '2026-04-01T08:00:00Z' },
-] };
-const ROLE_AUDITS = { value: [
-  { id: 'DEMO-AUDIT-0001', activityDateTime: '2026-09-20T12:04:00Z' },  // current
-  { id: 'DEMO-AUDIT-0009', activityDateTime: '2026-09-19T00:00:00Z' },  // previous
-] };
-const POLICY_AUDITS = { value: [
-  { id: 'DEMO-AUDIT-0002', activityDisplayName: 'Update conditional access policy', activityDateTime: '2026-09-20T10:00:00Z' },
-  { id: 'DEMO-AUDIT-0010', activityDisplayName: 'Update token lifetime policy', activityDateTime: '2026-09-20T09:00:00Z' },
-] };
-
-type Route = [match: (url: string) => boolean, body: unknown];
-
-/** Matched by the distinguishing part of each query rather than by the whole
- *  URL, so a change to `$select` does not silently route a request to 404 and
- *  turn a real assertion into a test of the error path. */
-function routes(over: Route[] = []): Route[] {
-  const has = (...parts: string[]) => (url: string) => parts.every((p) => url.includes(p));
-  const signIn = (what: string, kind: 'interactive' | 'other') => (url: string) =>
-    url.includes('/auditLogs/signIns') && url.includes(what) &&
-    url.includes('signInEventTypes') === (kind === 'other');
-  return [
-    ...over,
-    [signIn('status/errorCode', 'interactive'), PAGE1],
-    [(url) => url.includes('$skiptoken=DEMO-SKIP-0001'), PAGE2],
-    [signIn('status/errorCode', 'other'), { value: [] }],
-    [signIn('clientAppUsed', 'interactive'), { value: [] }],
-    [signIn('clientAppUsed', 'other'), { value: [] }],
-    [has('riskDetections'), RISK],
-    [has('riskyUsers'), COMPROMISED],
-    [has('userRegistrationDetails'), REGISTRATION],
-    [has('roleAssignments'), ASSIGNMENTS],
-    [has('/directoryRoles?'), GA_ROLE],
-    [has('/directoryRoles/DEMO-ROLE-0001/members'), GA_MEMBERS],
-    [has("userType eq 'Guest'"), GUESTS],
-    [has('/applications'), APPS],
-    [has('directoryAudits', "category eq 'RoleManagement'"), ROLE_AUDITS],
-    [has('directoryAudits', "category eq 'Policy'"), POLICY_AUDITS],
-    [has('directoryAudits', '$orderby'), AUDITS],
-  ];
-}
-
-function serve(table: Route[]): { impl: FetchLike; misses: string[] } {
-  const misses: string[] = [];
-  const impl: FetchLike = async (url) => {
-    for (const [match, body] of table) {
-      if (match(url)) {
-        if (body === null) return new Response('upstream said no', { status: 503 });
-        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
-      }
-    }
-    misses.push(url);
-    return new Response('{}', { status: 404 });
-  };
-  return { impl, misses };
-}
+const FIXTURES = loadFixtures((name) =>
+  JSON.parse(readFileSync(join(HERE, '__fixtures__', name), 'utf8')) as unknown);
+const AUDITS = FIXTURES.directoryAudits;
+/** The stub, bound to this file's fixtures, so every call site below reads as
+ *  it did before the stub was shared. */
+const routes = (over: Route[] = []): Route[] => stubRoutes(FIXTURES, over);
 
 const poll = (table: Route[], over: Partial<Parameters<typeof pollEntra>[0]> = {}) => {
   const { impl, misses } = serve(table);
   return pollEntra({ tokens: goodToken(), fetchImpl: impl, now: () => NOW, ...over }).then((r) => ({ r, misses }));
 };
+
+describe('the shared Graph stub', () => {
+  it('names four payloads that actually exist on disk — the non-vacuity control', () => {
+    // The stub is now imported by the composition root's test as well as this
+    // one, so a filename that stopped resolving would hand BOTH sides a world
+    // made of `undefined` and every count would quietly become zero. Four
+    // literals, checked against the directory.
+    expect(Object.keys(FIXTURE_FILES).sort()).toEqual([
+      'applications', 'directoryAudits', 'failedSignInsPage1', 'failedSignInsPage2',
+    ]);
+    for (const name of Object.values(FIXTURE_FILES)) {
+      expect(existsSync(join(HERE, '__fixtures__', name)), name).toBe(true);
+    }
+    for (const payload of Object.values(FIXTURES)) {
+      expect(Array.isArray((payload as { value?: unknown[] }).value)).toBe(true);
+    }
+  });
+});
 
 describe('the Entra snapshot, end to end over a stubbed Graph', () => {
   it('every stat is the hand-counted figure, and no request went unrouted', async () => {
