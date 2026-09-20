@@ -184,7 +184,17 @@ const tsFiles = (dir: string): string[] =>
  * twofold this afternoon by grepping without stripping, having quoted the
  * ruling about it to somebody else an hour earlier. Measured here too — an
  * unstripped scan reports `adapters/endpoints/queries.test.ts` as a consumer,
- * and it only mentions the module. There is a self-reference in it as well:
+ * and it only mentions the module.
+ *
+ * **That mention is correct and intended, and is not an inconsistency to
+ * tidy.** `m4-entra` confirmed the reason: their tests reach `safeText`
+ * through their own `computerName` / `assignedTo` / `osName` helpers rather
+ * than importing it, because what is worth asserting is that *their call
+ * sites* reach it — not that the helper works, which is this file's job.
+ * Importing it there would make their test weaker and would make this guard's
+ * list accidentally right. A correct, deliberate mention is the normal case in
+ * a consumer's test suite, so the absence of a specifier is the signal and the
+ * presence of the name is nothing at all. There is a self-reference in it as well:
  * `vendorText.ts`'s own docblock names its consumers, so an unstripped walk
  * can list this module as an importer of itself.
  *
