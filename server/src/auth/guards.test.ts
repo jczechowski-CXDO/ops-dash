@@ -192,15 +192,47 @@ describe('the API knows only the published surface', () => {
       .filter((n) => n.length > 0)
       .sort();
 
-  it('imports exactly these four names from the seam', () => {
+  it('imports exactly these five names from the seam', () => {
     // Four: build one, install it, read the result, and the type. Everything
     // else about identity is `session.ts`'s to know.
-    expect(imported(read(ROUTES))).toEqual(['SessionAuth', 'createSessionAuth', 'principalOf', 'registerAuth']);
+    // `actorOf` joined them with the mutating routes: it is how a handler
+    // learns who is writing, and it throws rather than returning a fallback.
+    expect(imported(read(ROUTES))).toEqual(['SessionAuth', 'actorOf', 'createSessionAuth', 'principalOf', 'registerAuth']);
   });
 
   it('would see a fifth import appear — the control', () => {
     const planted = `import { createSessionAuth, verifySession } from '../auth/session.js';\n`;
     expect(imported(planted)).toEqual(['createSessionAuth', 'verifySession']);
+  });
+
+  it('only buildApi registers the plugin, so nothing can compose it without the hook', () => {
+    // The hook sits on the ROOT instance now (M-2), added by `buildApi` before
+    // the plugin so the plugin's routes inherit it. That is strictly better —
+    // it covers `static.ts`'s wildcard too — and it costs one property:
+    // `apiRoutes` registered directly on somebody else's Fastify would have no
+    // enforcement at all.
+    //
+    // So the registration is confined the way `publishedLevel`'s importers are:
+    // a positive set. `routes.ts` registers it inside `buildApi`; the tests name
+    // it to assert it exists. A fourth file naming it is a decision somebody
+    // defends in review rather than a diff nobody reads.
+    const users = sources()
+      .filter((f) => /\bapiRoutes\b/.test(f.code))
+      .map((f) => rel(f.path))
+      .sort();
+    //
+    // **This file is not in the list, and the reason is a trap worth naming.**
+    // It contains the string twice — once in the comment above, which
+    // `stripComments` blanks, and once in the pattern on the line above, where
+    // the literal reads `\bapiRoutes\b` and the character before `apiRoutes`
+    // is therefore the letter `b`. `\b` asserts a word boundary, and there is
+    // none between `b` and `a`, so **the guard cannot see its own spelling of
+    // itself**. That exclusion is incidental rather than designed, which is the
+    // kind of accident this repo distrusts: write `apiRoutes` in code here
+    // without a backslash in front of it and this test starts failing on
+    // itself. Measured with a standalone probe rather than reasoned, after the
+    // expected list disagreed with the tree.
+    expect(users).toEqual(['server/src/api/routes.test.ts', 'server/src/api/routes.ts']);
   });
 
   it('declares a policy at every route it registers', () => {
@@ -211,7 +243,7 @@ describe('the API knows only the published surface', () => {
     // registered here without a policy breaks the first.
     const code = stripComments(read(ROUTES));
     const registrations = [...code.matchAll(/app\.(get|post|put|patch|delete)\(\s*'([^']+)'\s*,\s*(\{[^}]*\}[^,]*)?/g)];
-    expect(registrations.length).toBe(7);
+    expect(registrations.length).toBe(7);   // the routes registered by a literal `app.<method>(` call
     for (const [, method, url, options] of registrations) {
       expect(options ?? '', `${method} ${url}`).toMatch(/config:\s*\{\s*auth:\s*'(public-read|login|required)'/);
     }

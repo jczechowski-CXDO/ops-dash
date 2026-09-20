@@ -23,6 +23,7 @@ import {
   toWire,
 } from './routes.js';
 import type { SessionAuth } from '../auth/session.js';
+import { UnknownIncident } from '../store/incidentActions.js';
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -82,6 +83,24 @@ const brokenStore = (): ApiStore => ({
     throw new Error('database connection is not open');
   },
   incidentsSince() {
+    throw new Error('database connection is not open');
+  },
+  acknowledge() {
+    throw new Error('database connection is not open');
+  },
+  mute() {
+    throw new Error('database connection is not open');
+  },
+  unmute() {
+    throw new Error('database connection is not open');
+  },
+  resolveIncident() {
+    throw new Error('database connection is not open');
+  },
+  incidentFlags() {
+    throw new Error('database connection is not open');
+  },
+  allIncidentFlags() {
     throw new Error('database connection is not open');
   },
 });
@@ -708,6 +727,174 @@ describe('GET /api/incidents', () => {
 });
 
 /* -------------------------------------------------------------- /api/health */
+
+describe('the four writes — the first routes in this repo that change anything', () => {
+  /** A store that records what it was asked to do, so a test can assert the
+   *  ARGUMENTS rather than a round trip through SQLite. The actor and the
+   *  instant are the two things a route is responsible for, and both are
+   *  invisible in a read-back. */
+  const recordingStore = () => {
+    const calls: Array<{ op: string; id: string; actor: string; at: string; until?: string | null }> = [];
+    const store: ApiStore = {
+      ...memStore(),
+      acknowledge: (id, actor, at) => void calls.push({ op: 'ack', id, actor, at }),
+      mute: (id, actor, until, at) => void calls.push({ op: 'mute', id, actor, at, until }),
+      unmute: (id, actor, at) => void calls.push({ op: 'unmute', id, actor, at }),
+      resolveIncident: (id, actor, at) => void calls.push({ op: 'resolve', id, actor, at }),
+      incidentFlags: () => ({ ack: { by: 'operator', at: NOW_ISO } }),
+      allIncidentFlags: () => ({}),
+    };
+    return { store, calls };
+  };
+
+  const NOW_ISO = '2026-09-20T09:05:00.000Z';
+
+  const post = async (deps: Partial<ApiDeps> & { store: ApiStore }, url: string, payload?: object) => {
+    const app = buildApi({ now: () => new Date(NOW_ISO), auth: authAs('operator'), ...deps });
+    try {
+      const res = await app.inject({ method: 'POST', url, ...(payload ? { payload } : {}) });
+      return { statusCode: res.statusCode, body: res.json() as Record<string, unknown> };
+    } finally {
+      await app.close();
+    }
+  };
+
+  it('acknowledges as the signed-in operator, at the injected clock', async () => {
+    // The two things this route is responsible for: WHO, from the session and
+    // nowhere else, and WHEN, from the clock the response is dated by. Both
+    // pinned as literals rather than read back off the call.
+    const { store, calls } = recordingStore();
+    const { statusCode } = await post({ store }, '/api/incidents/INC-abc123/ack');
+    expect(statusCode).toBe(200);
+    expect(calls).toEqual([{ op: 'ack', id: 'INC-abc123', actor: 'operator', at: NOW_ISO }]);
+  });
+
+  it('never reads the wall clock — the control, with two clocks that disagree', async () => {
+    const { store, calls } = recordingStore();
+    const app = buildApi({ store, now: () => new Date('2020-01-01T00:00:00.000Z'), auth: authAs('operator') });
+    try {
+      await app.inject({ method: 'POST', url: '/api/incidents/INC-abc123/ack' });
+    } finally {
+      await app.close();
+    }
+    expect(calls[0]?.at).toBe('2020-01-01T00:00:00.000Z');
+  });
+
+  it('carries the actor from the SESSION, not from the body — an actor cannot be asked for', async () => {
+    // The failure this whole seam exists to prevent: a write attributed to
+    // whoever the caller says they are. The body names somebody else and is
+    // ignored, because `actorOf(request)` is the only way a handler learns who
+    // is writing.
+    const { store, calls } = recordingStore();
+    await post({ store }, '/api/incidents/INC-abc123/ack', { actor: 'somebody else' });
+    expect(calls[0]?.actor).toBe('operator');
+  });
+
+  it('answers with the resulting flags, so the client renders what is now true', async () => {
+    const { store } = recordingStore();
+    const { body } = await post({ store }, '/api/incidents/INC-abc123/ack');
+    expect(body).toEqual({ servedAt: NOW_ISO, id: 'INC-abc123', flags: { ack: { by: 'operator', at: NOW_ISO } } });
+  });
+
+  it('mutes with an expiry, and an ABSENT until is indefinite rather than missing', async () => {
+    const { store, calls } = recordingStore();
+    await post({ store }, '/api/incidents/INC-1/mute', { until: '2026-09-20T17:00:00.000Z' });
+    await post({ store }, '/api/incidents/INC-2/mute', {});
+    await post({ store }, '/api/incidents/INC-3/mute', { until: null });
+    expect(calls.map((c) => c.until)).toEqual(['2026-09-20T17:00:00.000Z', null, null]);
+  });
+
+  it('refuses an until that is not a comparable instant, rather than storing it', async () => {
+    // An unparseable expiry is not a mute with a strange end, it is a mute that
+    // can never be compared: it folds as never-expiring or always-expired
+    // depending on which side of a NaN comparison it lands, and both are
+    // silent. Nothing is written.
+    const { store, calls } = recordingStore();
+    for (const until of ['soon', '', 42, {}]) {
+      const { statusCode } = await post({ store }, '/api/incidents/INC-1/mute', { until });
+      expect(statusCode, JSON.stringify(until)).toBe(400);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('unmutes and resolves, each reaching its own store call', async () => {
+    const { store, calls } = recordingStore();
+    await post({ store }, '/api/incidents/INC-1/unmute');
+    await post({ store }, '/api/incidents/INC-1/resolve');
+    expect(calls.map((c) => c.op)).toEqual(['unmute', 'resolve']);
+  });
+
+  it('answers 404 for an incident that does not exist, without echoing the id back', async () => {
+    // `UnknownIncident` is the only error these handlers map. The id is not
+    // echoed: the caller knows what it asked for, and a value from the URL
+    // reappearing in a response body is what becomes reflected content the day
+    // somebody renders an error into something other than text.
+    const store: ApiStore = {
+      ...memStore(),
+      acknowledge: () => {
+        throw new UnknownIncident('INC-nope');
+      },
+    };
+    const { statusCode, body } = await post({ store }, '/api/incidents/INC-nope/ack');
+    expect(statusCode).toBe(404);
+    expect(body).toEqual({ error: { code: 'unknown_incident', message: 'no such incident' } });
+    expect(JSON.stringify(body)).not.toContain('INC-nope');
+  });
+
+  it('does NOT map anything else — a store that throws is a 500, deliberately', async () => {
+    // `m4-store` designed `recordAction` to throw a plain Error on an empty
+    // actor so that no route acquires a branch for "no actor". A handler that
+    // caught this would be inventing an answer to a wiring mistake.
+    const store: ApiStore = {
+      ...memStore(),
+      acknowledge: () => {
+        throw new Error('actor must not be empty');
+      },
+    };
+    const { statusCode } = await post({ store }, '/api/incidents/INC-1/ack');
+    expect(statusCode).toBe(500);
+  });
+
+  it('refuses every one of them without a session, and writes nothing', async () => {
+    // The whole reason the seam was built before these routes existed.
+    const { store, calls } = recordingStore();
+    for (const url of ['/api/incidents/INC-1/ack', '/api/incidents/INC-1/mute', '/api/incidents/INC-1/unmute', '/api/incidents/INC-1/resolve']) {
+      const { statusCode } = await post({ store, auth: authAs(null) }, url);
+      expect(statusCode, url).toBe(401);
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('GET /api/incidents hydrates the operator’s own actions', () => {
+  it('carries ack and muted onto the incident they belong to, and nothing onto the others', async () => {
+    const store = memStore();
+    const flags = { 'INC-1': { ack: { by: 'operator', at: '2026-09-20T08:00:00.000Z' } } };
+    const hydrated: ApiStore = { ...store, openIncidents: () => rows, allIncidentFlags: () => flags };
+    const rows = [
+      { id: 'INC-1', rule_key: 'vendor', service_id: 'jira', severity: 'sev2', opened_at: '2026-09-20T07:00:00.000Z', summary: 'one' },
+      { id: 'INC-2', rule_key: 'vendor', service_id: 'jira', severity: 'sev2', opened_at: '2026-09-20T07:00:00.000Z', summary: 'two' },
+    ];
+    const { body } = await get({ store: hydrated }, '/api/incidents');
+    const [first, second] = (body as IncidentsResponse).result.data!;
+    expect(first?.ack).toEqual({ by: 'operator', at: '2026-09-20T08:00:00.000Z' });
+    // ABSENT, not null and not an empty object: an omitted key survives a
+    // spread in the web layer and `exactOptionalPropertyTypes` makes the
+    // distinction the typechecker's business.
+    expect('ack' in (second ?? {})).toBe(false);
+    expect('muted' in (second ?? {})).toBe(false);
+  });
+
+  it('folds the flags against the route’s clock, so a lapsed mute is not muted', async () => {
+    // The route passes `clock()`, not the store's default. Asserted by handing
+    // the store a spy that records the instant it was folded against.
+    const store = memStore();
+    let asked: unknown;
+    const spied: ApiStore = { ...store, allIncidentFlags: (now) => { asked = now; return {}; } };
+    await get({ store: spied, now: () => new Date('2026-09-20T09:05:00.000Z') }, '/api/incidents');
+    expect(asked).toEqual(new Date('2026-09-20T09:05:00.000Z'));
+  });
+});
 
 describe('GET /api/entra mirrors the stored snapshot', () => {
   const SNAPSHOT = { fetchedAt: '2026-09-20T09:00:00.000Z', degraded: false, data: { stats: { guests: 514 } } } as unknown as SourceResult<unknown>;

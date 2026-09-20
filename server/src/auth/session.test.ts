@@ -63,6 +63,16 @@ const quietStore = (): ApiStore => ({
   percentiles: () => undefined,
   uptime: () => undefined,
   incidentsSince: () => [],
+  // The writers, present because `ApiStore` requires them and doing nothing
+  // because these tests are about the seam rather than about what it writes.
+  // Required rather than optional on purpose: a store that cannot write is a
+  // state nobody would compose and a branch nobody would test.
+  acknowledge: () => undefined,
+  mute: () => undefined,
+  unmute: () => undefined,
+  resolveIncident: () => undefined,
+  incidentFlags: () => ({}),
+  allIncidentFlags: () => ({}),
 });
 
 const withApp = async <T>(fn: (app: ReturnType<typeof buildApi>) => Promise<T>): Promise<T> => {

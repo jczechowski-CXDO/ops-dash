@@ -37,6 +37,16 @@ const quietStore = (): ApiStore => ({
   percentiles: () => undefined,
   uptime: () => undefined,
   incidentsSince: () => [],
+  // The writers, present because `ApiStore` requires them and doing nothing
+  // because these tests are about the seam rather than about what it writes.
+  // Required rather than optional on purpose: a store that cannot write is a
+  // state nobody would compose and a branch nobody would test.
+  acknowledge: () => undefined,
+  mute: () => undefined,
+  unmute: () => undefined,
+  resolveIncident: () => undefined,
+  incidentFlags: () => ({}),
+  allIncidentFlags: () => ({}),
 });
 
 type Row = { method: string; url: string; policy: AuthPolicy | undefined };
@@ -101,6 +111,10 @@ describe('the route table — every route declares a policy, and every write nee
       { method: 'GET', url: '/api/entra', policy: 'public-read' },
       { method: 'GET', url: '/api/health', policy: 'public-read' },
       { method: 'GET', url: '/api/incidents', policy: 'public-read' },
+      { method: 'POST', url: '/api/incidents/:id/ack', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/mute', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/resolve', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/unmute', policy: 'required' },
       { method: 'GET', url: '/api/services', policy: 'public-read' },
       { method: 'DELETE', url: '/api/session', policy: 'required' },
       { method: 'POST', url: '/api/session', policy: 'login' },
@@ -142,24 +156,41 @@ describe('the route table — every route declares a policy, and every write nee
     // move to the root instance; that file is not mine and the change is
     // requested rather than made.
     expect(await composedTable()).toEqual([
-      { method: 'GET', url: '/*', policy: undefined },
+      { method: 'GET', url: '/*', policy: 'public-read' },
       { method: 'GET', url: '/api/checks', policy: 'public-read' },
       { method: 'GET', url: '/api/entra', policy: 'public-read' },
       { method: 'GET', url: '/api/health', policy: 'public-read' },
       { method: 'GET', url: '/api/incidents', policy: 'public-read' },
+      { method: 'POST', url: '/api/incidents/:id/ack', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/mute', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/resolve', policy: 'required' },
+      { method: 'POST', url: '/api/incidents/:id/unmute', policy: 'required' },
       { method: 'GET', url: '/api/services', policy: 'public-read' },
       { method: 'DELETE', url: '/api/session', policy: 'required' },
       { method: 'POST', url: '/api/session', policy: 'login' },
     ]);
   });
 
-  it('nothing that can change something is registered outside the seam', async () => {
-    // The rule the pinned list above exists to serve, derived from the composed
-    // router rather than from that list. A mutating route added to `main.ts` or
-    // `static.ts` — where the hook cannot reach it — fails HERE, which is the
-    // only place it would fail at all.
-    const outside = (await composedTable()).filter((r) => r.policy === undefined);
-    expect(outside.map((r) => `${r.method} ${r.url}`)).toEqual(['GET /*']);
+  it('every route the PROCESS serves declares a policy — including the ones outside the plugin', async () => {
+    // M-2, both halves now closed. The guard half is the enumeration above; the
+    // runtime half is `static.ts` declaring `'public-read'` on the SPA
+    // wildcard, which let the hook move from inside the plugin to the ROOT
+    // instance — so a route registered from `main.ts` or `static.ts` is now
+    // refused for having no policy exactly as one in `api/routes.ts` is.
+    //
+    // Stated positively: every route has a policy, and the set that can change
+    // something is exactly these six. A route added anywhere fails one of the
+    // two.
+    const composed = await composedTable();
+    expect(composed.filter((r) => r.policy === undefined)).toEqual([]);
+    expect(composed.filter((r) => r.method !== 'GET').map((r) => `${r.method} ${r.url}`).sort()).toEqual([
+      'DELETE /api/session',
+      'POST /api/incidents/:id/ack',
+      'POST /api/incidents/:id/mute',
+      'POST /api/incidents/:id/resolve',
+      'POST /api/incidents/:id/unmute',
+      'POST /api/session',
+    ]);
   });
 
   it('reads a real, non-empty router — the control for all three above', async () => {
@@ -167,7 +198,7 @@ describe('the route table — every route declares a policy, and every write nee
     // the first would be "fixed" by deleting a row. This says the walk found a
     // router at all, against a count and a literal nobody can rename away.
     const rows = await routeTable();
-    expect(rows.length).toBeGreaterThanOrEqual(7);
+    expect(rows.length).toBeGreaterThanOrEqual(10);
     expect(rows.map((r) => `${r.method} ${r.url}`)).toContain('GET /api/services');
   });
 

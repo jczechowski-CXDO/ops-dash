@@ -10,6 +10,11 @@ import { buildTile, type ServiceTile, type TileStore } from './tile.js';
 import { SERVICE_PLATFORM } from '../services.js';
 import { sourceStaleness, type Staleness } from '../store/staleness.js';
 import { certExpiry, certNeedsAttention, type CertExpiry } from '../store/certExpiry.js';
+// The write path's one throw, and the one error mapping a handler carries.
+// `store/incidentActions.ts` argues why the WRITE path throws while nothing on
+// the read path does: a guess made on a write gets persisted and outlives the
+// bug that made it.
+import { UnknownIncident, type IncidentFlags } from '../store/incidentActions.js';
 // Type-only. The route never constructs one and never reads a file: the PEM
 // arrives as a parameter, and `store/certExpiry.ts` says why that is absolute.
 import type { X509Certificate } from 'node:crypto';
@@ -18,7 +23,7 @@ import type { X509Certificate } from 'node:crypto';
 // cookie, read a header or check a password, and `server/src/auth/guards.test.ts`
 // enforces that by name. A route with its own idea of "authenticated" is the
 // `publishedLevel`/`vendorLevel` fork with a much worse failure mode.
-import { createSessionAuth, principalOf, registerAuth, type SessionAuth } from '../auth/session.js';
+import { actorOf, createSessionAuth, principalOf, registerAuth, type SessionAuth } from '../auth/session.js';
 // The source key Entra's snapshot is stored under, imported rather than
 // respelled. A key spelled two ways reads as a source that has never been
 // polled, which is indistinguishable from one that genuinely has not — the
@@ -124,6 +129,28 @@ import { ENTRA_SOURCE } from '../index.js';
 export type ApiStore = TileStore & {
   getSnapshot(source: string): SourceResult<unknown> | undefined;
   openIncidents(): Array<Record<string, unknown>>;
+  /**
+   * The four writes, and the two reads that render their result.
+   *
+   * **Required, not optional.** An optional writer would make a route branch on
+   * "this store cannot write", which is a state nobody would ever compose and a
+   * branch nobody would ever test — and the honest answer to it does not exist:
+   * a dashboard that silently declines to acknowledge is worse than one that
+   * cannot start. `index.ts` passes the real store; a test passes one that
+   * records or one that throws.
+   *
+   * `actor` and `at` are parameters on every one of them, which is the seam:
+   * the store never asks who is calling and never reads a clock.
+   */
+  acknowledge(incidentId: string, actor: string, at: string): void;
+  mute(incidentId: string, actor: string, until: string | null, at: string): void;
+  unmute(incidentId: string, actor: string, at: string): void;
+  resolveIncident(incidentId: string, actor: string, at: string): void;
+  /** One incident's live flags, folded against a clock this route passes. */
+  incidentFlags(incidentId: string, now: Date | number | string): IncidentFlags;
+  /** Every incident that HAS flags, in one query — the list hydration. An
+   *  incident with none is absent rather than present-and-empty. */
+  allIncidentFlags(now: Date | number | string): Record<string, IncidentFlags>;
 };
 
 /**
@@ -311,6 +338,21 @@ export type ApiIncident = {
   openedAt: string;
   resolvedAt?: string;
   summary: string;
+  /**
+   * The operator's own actions, hydrated from `incident_actions`.
+   *
+   * **Not a contract change**: `shared/src/contracts.ts` has declared both
+   * optional fields since M1 and nothing had ever filled them. Optional and
+   * ABSENT rather than `null` — an omitted key survives a spread in the web
+   * layer, an explicit `undefined` does not, and `exactOptionalPropertyTypes`
+   * makes the distinction the typechecker's business rather than a convention.
+   *
+   * An expired mute is **not** muted: the store folds that on read against the
+   * clock this route passes it, so a mute that lapsed at noon stops rendering
+   * at noon rather than at the next poll.
+   */
+  ack?: IncidentFlags['ack'];
+  muted?: IncidentFlags['muted'];
 };
 
 export type IncidentsResponse = {
@@ -591,10 +633,20 @@ export function decodeSeverity(raw: unknown): { severity: Severity; fellBack: bo
     : { severity: 1, fellBack: true };
 }
 
-function toIncident(row: Record<string, unknown>): ApiIncident {
+/**
+ * **The single join site for operator actions**, and deliberately the only one.
+ *
+ * `index.ts`'s `rowToIncident` feeds `correlate` and does NOT get these fields:
+ * the engine must not become a function of what an operator clicked, or an
+ * acknowledgement starts changing what the next tick detects. Two shapes from
+ * one table, each built for its own consumer, with a guard on the engine's
+ * side. This is the view-model half.
+ */
+function toIncident(row: Record<string, unknown>, flags: IncidentFlags = {}): ApiIncident {
   const resolvedAt = row['resolved_at'];
   const { severity, fellBack } = decodeSeverity(row['severity']);
   return {
+    ...flags,
     id: String(row['id']),
     ruleKey: String(row['rule_key']),
     serviceId: String(row['service_id']),
@@ -674,25 +726,28 @@ export function toWire<T>(result: SourceResult<T>): SourceResult<T> {
   return result.error === undefined ? result : { ...result, error: wireError(result.error) };
 }
 
+/** A mute whose `until` is not a comparable instant. Its own class so the
+ *  route can map it to 400 without string-matching a message, and so it cannot
+ *  be confused with the store's `UnknownIncident`. */
+class BadMuteUntil extends Error {
+  constructor() {
+    super('until must be an ISO 8601 timestamp, or null for an indefinite mute');
+    this.name = 'BadMuteUntil';
+  }
+}
+
 /* ----------------------------------------------------------------- routes */
 
 export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
   const { store, poller } = deps;
   const clock = deps.now ?? (() => new Date());
+  // `deps.auth` is always present in practice: `buildApi` resolves it once and
+  // hands it down, so the hook at the root and the login route below are the
+  // same object rather than two instances of it — two would mean two throttles
+  // and two ideas of the credential. The fallback is for a caller that
+  // registers this plugin directly, which `auth/guards.test.ts` confines to
+  // `buildApi`.
   const auth = deps.auth ?? createSessionAuth();
-
-  /**
-   * Installed here, inside the plugin, so Fastify's encapsulation confines it
-   * to the routes below. `static.ts` registers the SPA on the root instance and
-   * must stay outside this — it serves files, it has no policy to declare, and
-   * pulling it in would mean either exempting it or teaching the hook about a
-   * second kind of route.
-   *
-   * Every route in this file declares `config.auth`, and one that does not is
-   * refused with 500 before its handler runs. That is the whole seam: this file
-   * declares, `auth/session.ts` decides.
-   */
-  registerAuth(app, auth, clock);
 
   app.get('/api/services', { config: { auth: 'public-read' } }, async (): Promise<ServicesResponse> => {
     const at = clock();
@@ -745,13 +800,24 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
     // `clock()`, like the other two. One route reading the wall clock while its
     // neighbours read an injected one is how a test comes to pass against a
     // clock it did not choose.
-    const servedAt = clock().toISOString();
+    const at = clock();
+    const servedAt = at.toISOString();
     try {
       const rows = store.openIncidents();
+      // ONE query for every incident's flags, not one per row. The list route
+      // already reads every open incident; an N+1 here would make the cost of
+      // the dashboard a function of how much has gone wrong.
+      //
+      // `at`, not the store's default: a mute that lapsed at noon must stop
+      // rendering at noon, and the clock that decides is the same one the rest
+      // of this response is dated by. A route reading the wall clock while its
+      // neighbours read an injected one is how a test passes against a clock it
+      // did not choose.
+      const flags = store.allIncidentFlags(at);
       return {
         servedAt,
         result: {
-          data: rows.map(toIncident),
+          data: rows.map((row) => toIncident(row, flags[String(row['id'])])),
           fetchedAt: servedAt,
           degraded: false,
           // amendment 4: the query completed and returned no records. That is
@@ -815,6 +881,96 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
       };
     }
   });
+
+  /* ------------------------------------------------------------- the writes */
+
+  /**
+   * Acknowledge, mute, unmute, resolve.
+   *
+   * **The first four routes in this repo that change anything**, and the whole
+   * reason the auth seam was built before them. Each is `'required'`; the
+   * route-table guard pins that as a literal, and a fifth added without a
+   * policy is refused before its handler runs.
+   *
+   * Four properties hold across all of them, and each is somebody else's design
+   * that this file must not second-guess:
+   *
+   *  - **`actorOf(request)` is the only way a handler learns who is writing.**
+   *    It throws if the request was never authenticated, and no handler catches
+   *    that: reaching it means the route is missing `'required'`, which is a
+   *    wiring mistake of ours and a 500, not a condition to branch on. A
+   *    `?? 'John H.'` here is exactly how the literal actor M4 replaces would
+   *    come back, on the one path nobody tests.
+   *  - **`at` comes from `clock()`**, never `new Date()` in the handler. The
+   *    store takes it as a parameter precisely so the route owns the time.
+   *  - **`UnknownIncident` → 404 is the only error a handler maps.** Everything
+   *    else — including the store's refusal of an empty actor — is a plain
+   *    `Error` and a 500 on purpose. `m4-store` designed it that way so no
+   *    route acquires a branch for "no actor".
+   *  - **The reply carries the resulting flags**, so the client renders what is
+   *    now true rather than refetching and racing its own write.
+   */
+  const writeRoute = (
+    url: string,
+    write: (id: string, actor: string, at: string, body: unknown) => void,
+  ) =>
+    app.post<{ Params: { id: string } }>(url, { config: { auth: 'required' } }, async (request, reply) => {
+      const at = clock();
+      const id = request.params.id;
+      try {
+        write(id, actorOf(request), at.toISOString(), request.body);
+      } catch (cause) {
+        if (cause instanceof BadMuteUntil) {
+          void reply.code(400);
+          return { error: { code: 'bad_request', message: cause.message } };
+        }
+        if (cause instanceof UnknownIncident) {
+          void reply.code(404);
+          // Deliberately does not echo the id back. The caller already knows
+          // what it asked for, and a value from the URL that reappears in a
+          // response body is the shape that becomes reflected content the day
+          // somebody renders an error into something other than text.
+          return { error: { code: 'unknown_incident', message: 'no such incident' } };
+        }
+        throw cause;
+      }
+      return { servedAt: at.toISOString(), id, flags: store.incidentFlags(id, at) };
+    });
+
+  writeRoute('/api/incidents/:id/ack', (id, actor, at) => store.acknowledge(id, actor, at));
+
+  /**
+   * Mute, with an expiry that is allowed to be absent.
+   *
+   * `until: null` is an indefinite mute and crosses the wire as explicit
+   * `null` — the contract's own shape. An **absent** `until` means the same
+   * thing and is normalised here, once, rather than at each caller.
+   *
+   * The date is validated because an unparseable one is not a mute with a
+   * strange expiry, it is a mute whose expiry can never be compared: it would
+   * fold as either never-expiring or always-expired depending on which side of
+   * a `NaN` comparison it landed, and both are silent. A 400 says which.
+   */
+  writeRoute('/api/incidents/:id/mute', (id, actor, at, body) => {
+    const raw = (body as { until?: unknown } | null | undefined)?.until;
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') throw new BadMuteUntil();
+    if (typeof raw === 'string' && Number.isNaN(Date.parse(raw))) throw new BadMuteUntil();
+    store.mute(id, actor, raw ?? null, at);
+  });
+
+  writeRoute('/api/incidents/:id/unmute', (id, actor, at) => store.unmute(id, actor, at));
+
+  /**
+   * Resolve by hand.
+   *
+   * **A manual resolve does not make a live condition false.** If the rule is
+   * still firing, the next correlation tick reopens the incident with the same
+   * id and the ack intact, which falls out of `carryForward` and is correct.
+   * This route does not pretend otherwise and must not acquire a branch that
+   * tries to prevent it — the honest account belongs on screen, where
+   * `m4-views` owes a sentence, not in a handler suppressing the detector.
+   */
+  writeRoute('/api/incidents/:id/resolve', (id, actor, at) => store.resolveIncident(id, actor, at));
 
   /**
    * The Entra directory snapshot.
@@ -970,6 +1126,29 @@ export function credentialHealth(graph: CertHealth, authenticated: boolean): Cre
  */
 export function buildApi(deps: ApiDeps, opts: FastifyServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false, exposeHeadRoutes: false, ...opts });
-  void app.register(apiRoutes, deps);
+  // Resolved ONCE and handed down, so the hook below and the login route inside
+  // the plugin are the same object. Two `createSessionAuth()` calls would be
+  // two throttles, and the one that counted failures would not be the one that
+  // refused them.
+  const auth = deps.auth ?? createSessionAuth();
+
+  /**
+   * **The hook goes on the ROOT instance, not inside the plugin.**
+   *
+   * It lived inside `apiRoutes` until M-2, which was wrong in a way that was
+   * invisible: Fastify's encapsulation confined it to the API's own routes,
+   * while the process also registers the SPA's `GET /*` out here from
+   * `main.ts`. A mutating route added to `main.ts` or `static.ts` would have
+   * run with no policy and no refusal. At the root it covers everything
+   * registered on this instance, whenever it is registered — which is why
+   * `static.ts` now declares `config: { auth: 'public-read' }` on the wildcard
+   * rather than being exempted.
+   *
+   * Added BEFORE the plugin so the plugin's routes inherit it: a hook added to
+   * an instance applies to everything registered on it afterwards, and the
+   * ordering is the whole mechanism.
+   */
+  registerAuth(app, auth, deps.now ?? (() => new Date()));
+  void app.register(apiRoutes, { ...deps, auth });
   return app;
 }
