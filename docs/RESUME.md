@@ -2183,6 +2183,33 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## `$?` after a pipe is the pipe's, and it is always zero (2026-09-20)
+
+```
+(exit 7)              -> exit=7
+(exit 7) | head -1    -> exit=0        <- head's
+(exit 7) | head -1    -> ${PIPESTATUS[0]} = 7
+```
+
+**Every verification in this repo that pipes to `head`, `grep` or `tail` and then reads `$?` is
+reporting on the filter, not on the thing being checked** — and it reports success, because a
+filter almost always succeeds. `npx tsc -b … 2>&1 | head -4; echo "exit=$?"` prints `exit=0`
+with compiler errors on the screen above it.
+
+**Three of us hit this today, including me, twice, while quoting the rule at other people.**
+`m4-auth` caught it before reporting a finding built on it. `m4-store` read `exit=0` with a
+real error in the log. I printed `exit=0` under visible `tsc` output in two separate messages
+and did not notice either time.
+
+Read the output, not the code — or use `${PIPESTATUS[0]}`, or run the command bare first and
+pipe only for display.
+
+**The family this belongs to** is the one already running through this file: *the check
+reported on something other than what was being checked.* A parallel corpus instead of the one
+the guard read. A mutant that was never planted. A typecheck that aborted before reaching your
+file. A backup taken at the wrong moment. Every one of them answers a question truthfully and
+it is not the question you asked.
+
 ## A magic string is the divergence nothing typechecks (2026-09-20)
 
 Three agents named one concept three different ways, without conferring:
