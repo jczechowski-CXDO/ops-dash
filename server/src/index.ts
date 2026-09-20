@@ -55,6 +55,10 @@ export const SERVICE_PLATFORM: Record<ServiceId, VendorPlatform> = {
 };
 
 export const VENDOR_INTERVAL_MS = 60_000;
+/** Retention runs hourly, not per poll. The windows are 45 and 180 DAYS, so a
+ *  prune a minute late costs nothing and a prune every minute is 1,440 pointless
+ *  transactions a day against a table the poller is writing to. */
+export const PRUNE_INTERVAL_MS = 60 * 60_000;
 export const PROBE_INTERVAL_MS = 60_000;
 export const CORRELATE_INTERVAL_MS = 60_000;
 
@@ -63,6 +67,7 @@ export const CORRELATE_INTERVAL_MS = 60_000;
  *  failure look like a feed failure on `/api/health`. */
 export const PROBES_SOURCE = 'probes';
 export const CORRELATE_SOURCE = 'correlate';
+export const PRUNE_SOURCE = 'prune';
 
 export type AppOptions = {
   /** `:memory:` in tests. */
@@ -174,7 +179,12 @@ export function createApp(opts: AppOptions = {}) {
     // cannot recognise a prior it was never given.
     const since = new Date(Date.parse(at) - WINDOW_MS).toISOString();
     const open = store.incidentsSince(since).map(rowToIncident);
-    const incidents = correlate({ at, services: signals(), open, windowMs: WINDOW_MS });
+    // The operator's overrides, read fresh every tick rather than at boot: a
+    // rule muted from the Settings screen has to take effect on the next poll,
+    // not on the next restart. An absent key is "no override" and `evaluate`
+    // falls back to the rule's own default — see `store.ruleState`.
+    const enabledRules = store.ruleState();
+    const incidents = correlate({ at, services: signals(), open, enabledRules, windowMs: WINDOW_MS });
     for (const incident of incidents) store.putIncident(toStoreRow(incident));
     return incidents;
   }
@@ -196,7 +206,26 @@ export function createApp(opts: AppOptions = {}) {
   // them. It is not a guarantee — they are all async — and it does not need to
   // be: a correlation that runs a tick early sees `never_polled`, which is
   // true, and the next tick corrects it.
-  const sources: Source[] = [...vendorSources, probeSource, correlateSource];
+  /**
+   * Retention, as a source like any other.
+   *
+   * Not a `setInterval` of its own: a source gets the poller's error boundary,
+   * its in-flight guard and its place in `/api/health` for free, and a prune
+   * that started failing in its own timer would be invisible until the disk
+   * filled. It returns the counts it deleted so a silent no-op prune — the
+   * classic version of this bug — shows up as data rather than as nothing.
+   */
+  const pruneSource: Source = {
+    name: PRUNE_SOURCE,
+    intervalMs: PRUNE_INTERVAL_MS,
+    run: async () => {
+      const at = now();
+      const counts = store.prune(at);
+      return { data: counts, fetchedAt: at.toISOString(), degraded: false };
+    },
+  };
+
+  const sources: Source[] = [...vendorSources, probeSource, correlateSource, pruneSource];
   const schedule = createSchedule(sources);
   const api = buildApi({ store, poller: schedule });
 

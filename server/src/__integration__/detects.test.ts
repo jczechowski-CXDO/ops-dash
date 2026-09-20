@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FetchLike } from '../http/fetchJson.js';
-import { createApp, CORRELATE_SOURCE } from '../index.js';
+import { createApp, CORRELATE_SOURCE, PRUNE_SOURCE } from '../index.js';
 import type { ProbeSpec } from '../adapters/synthetic/probe.js';
 
 /**
@@ -460,5 +460,83 @@ describe('across repeated cycles', () => {
     a.store.putIncident({ ...row, severity: '2' });
     a.store.putIncident({ ...row, severity: '1' });
     expect(String(a.store.openIncidents()[0]!['severity'])).toBe('1');
+  });
+});
+
+describe('the operator can turn a rule off', () => {
+  /** The `vendor` Sev1 condition, live: Claude in outage with our probe failing. */
+  const outageApp = () =>
+    createApp({
+      dbPath: ':memory:',
+      fetchImpl: stubFetch(
+        (() => {
+          const p = realPayloads();
+          const claude = p.get('https://status.claude.com/api/v2/summary.json') as Record<string, unknown>;
+          p.set('https://status.claude.com/api/v2/summary.json', withComponentStatus(claude, 0, 'major_outage'));
+          return p;
+        })(),
+        (u) => (u.endsWith('claude') ? 503 : allWell(u)),
+      ).impl,
+      now: () => new Date('2026-09-19T12:00:00.000Z'),
+      probes: [...PROBES, { serviceId: 'claude', check: 'Claude API', url: 'https://probe.test/claude', region: 'us-east' }],
+      tokens: stubTokens,
+    });
+
+  it('an empty rule_state leaves every rule ON', async () => {
+    // The failure this prevents is the worst kind: a reader that returned
+    // `false` for untouched rules, or a caller that treated absent as disabled,
+    // would silently turn the whole product off — and a dashboard that never
+    // raises anything is indistinguishable from a quiet day.
+    const a = outageApp();
+    await cycle(a);
+    expect(a.store.ruleState()).toEqual({});
+    expect(a.correlateNow('2026-09-19T12:00:00.000Z').filter((i) => i.severity === SEV1)).toHaveLength(1);
+  });
+
+  it('disabling the vendor rule stops it firing, through the whole chain', async () => {
+    const a = outageApp();
+    await cycle(a);
+    a.store.setRuleState('vendor', false);
+    expect(a.correlateNow('2026-09-19T12:00:00.000Z').filter((i) => i.severity === SEV1)).toEqual([]);
+  });
+
+  it('re-enabling it takes effect on the next tick, not the next restart', async () => {
+    // Read fresh every correlation rather than captured at boot. An operator who
+    // un-mutes a rule and watches nothing happen for an hour has learned that
+    // the switch does not work.
+    const a = outageApp();
+    await cycle(a);
+    a.store.setRuleState('vendor', false);
+    expect(a.correlateNow('2026-09-19T12:00:00.000Z')).toEqual([]);
+    a.store.setRuleState('vendor', true);
+    expect(a.correlateNow('2026-09-19T12:00:00.000Z').filter((i) => i.severity === SEV1)).toHaveLength(1);
+  });
+
+  it('disabling one rule leaves the other alone', async () => {
+    // Asserted positively, on the rule that stays: an override keyed wrongly
+    // would disable everything and "no incidents" would still look plausible.
+    const a = outageApp();
+    await cycle(a);
+    a.store.setRuleState('blackout', false);
+    expect(a.correlateNow('2026-09-19T12:00:00.000Z').filter((i) => i.ruleKey === 'vendor')).toHaveLength(1);
+  });
+});
+
+describe('retention runs as a source', () => {
+  it('is scheduled, and reports what it deleted rather than nothing', async () => {
+    // A prune whose WHERE clause matches nothing is silent while the log still
+    // says "pruned". Returning the counts is what makes a no-op visible, and
+    // running it as a source rather than its own timer is what puts a failing
+    // prune into /api/health instead of leaving it invisible until the disk
+    // fills.
+    const a = app(stubFetch(realPayloads(), allWell).impl, () => new Date('2026-09-19T12:00:00.000Z'));
+    const prune = a.sources.find((s) => s.name === PRUNE_SOURCE);
+    expect(prune, 'retention is not scheduled at all').toBeDefined();
+    // Hourly, not per poll: the windows are 45 and 180 days.
+    expect(prune!.intervalMs).toBe(60 * 60_000);
+
+    const result = await prune!.run();
+    expect(result.error).toBeUndefined();
+    expect(result.data).toMatchObject({ checkRuns: expect.any(Number), incidents: expect.any(Number) });
   });
 });
