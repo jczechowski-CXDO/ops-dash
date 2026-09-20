@@ -261,9 +261,80 @@ describe('no credentials, ever', () => {
     // server/src included from Milestone 2. It holds no credential today and
     // must hold none in M3 either — the adapters read from disk at runtime, and
     // the PATHS are what must never be transcribed here.
-    const pattern = /C:\\+secure|cert\.pem|refresh_token|client_secret|api_key|Zoho-oauthtoken|BEGIN (RSA )?PRIVATE KEY/i;
+    // NARROWED 2026-09-20, and the reason matters more than the change.
+    //
+    // This forbade the *names of fields* when what it means to forbid is a
+    // *credential value transcribed into source*. Zoho OAuth — which the
+    // Endpoint Central adapter must speak — cannot be written at all without
+    // the identifiers `client_secret`, `refresh_token` and `Zoho-oauthtoken`.
+    // `graphToken.ts` never tripped it only by luck of spelling: certificate
+    // auth happens to use `tenant_id`/`client_id`/`cert_pem`.
+    //
+    // `m4-entra` hit it, verified it by running this regex rather than
+    // predicting it, and **refused to route around it** — which is the whole
+    // point. `RESUME.md` records that assembling a literal from fragments is
+    // WORSE than weakening a guard, because `raw['client' + '_secret']` passes
+    // while leaving the guard looking intact. A guard that forces that is a
+    // guard that has stopped guarding and started teaching evasion.
+    //
+    // So: reading a field off a config object is fine, and only an assignment
+    // to a LITERAL is refused. `cfg.client_secret` passes; `client_secret:
+    // "abc123"` does not. The bare-value shapes below are unchanged, because a
+    // PEM block or a hard-coded Windows secrets path in source is a value
+    // however it got there.
+    const VALUE_SHAPES = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
+    /** `name: "..."` or `name = '...'` — the field assigned a literal secret.
+     *  Not `name` alone, not `{ name }`, not `cfg.name`. */
+    const ASSIGNED_LITERAL = /\b(client_secret|refresh_token|api_key)\b\s*[:=]\s*['"`]/i;
+    /** Zoho's scheme followed by something that is not an interpolation.
+     *  `\`Zoho-oauthtoken ${t}\`` is the correct way to write it; the same
+     *  string with the token typed in is the thing to refuse.
+     *
+     *  Deliberately NOT generic `Bearer`. Widening it there caught three
+     *  existing `'Bearer stub-token'` assertions in adapter tests, which are
+     *  obviously fake and legitimately literal — and `password` and
+     *  `access_token`, which I also tried, caught `session.test.ts`'s test
+     *  password. Both were scope creep on a change whose whole job is to
+     *  unblock three Zoho identifiers. A guard widened past its reason
+     *  collects false positives, and false positives are how a guard gets
+     *  disabled by someone in a hurry. */
+    const INLINE_BEARER = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
+    const pattern = new RegExp(
+      `${VALUE_SHAPES.source}|${ASSIGNED_LITERAL.source}|${INLINE_BEARER.source}`,
+      'i',
+    );
     const offenders = sources().filter((f) => pattern.test(read(f)));
     expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('the narrowed credential rule still refuses a transcribed secret — the controls', () => {
+    // Every branch of the narrowing proved in BOTH directions, because a guard
+    // relaxed without controls is a guard nobody can tell from a deleted one.
+    // Assembled from fragments so this file does not itself trip the rule.
+    const q = String.fromCharCode(34);
+    const VALUE_SHAPES = /C:\\+secure|cert\.pem|BEGIN (RSA )?PRIVATE KEY/i;
+    const ASSIGNED_LITERAL = /\b(client_secret|refresh_token|api_key)\b\s*[:=]\s*['"`]/i;
+    const INLINE_BEARER = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
+    const fires = (line: string) =>
+      VALUE_SHAPES.test(line) || ASSIGNED_LITERAL.test(line) || INLINE_BEARER.test(line);
+
+    // MUST still fire — a real secret, transcribed.
+    expect(fires(`client_secret: ${q}1000.abcdef0123456789${q}`)).toBe(true);
+    expect(fires(`refresh_token = ${q}1000.zyxw9876${q}`)).toBe(true);
+    expect(fires(`api_key: ${q}sk-live-000111222${q}`)).toBe(true);
+    // Assembled, not written — the same reason the zero-GUID control above is
+    // assembled: this guard forbids these shapes in source and its own control
+    // must not be the one exception to it. A self-exclusion would work and is
+    // strictly worse, because it exempts the whole file forever.
+    expect(fires('authorization: `' + ['Zoho', 'oauthtoken'].join('-') + ' 1000.deadbeefcafe`')).toBe(true);
+    expect(fires(['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' '))).toBe(true);
+
+    // MUST NOT fire — the adapter that has to exist.
+    expect(fires('const { client_id, client_secret, refresh_token } = raw;')).toBe(false);
+    expect(fires('grant_type: ' + q + 'refresh_token' + q)).toBe(false);
+    expect(fires('authorization: `Zoho-oauthtoken ${token}`')).toBe(false);
+    expect(fires('body.set(' + q + 'refresh_token' + q + ', cfg.refresh_token);')).toBe(false);
+    expect(fires('if (!cfg.client_secret) return missing(' + q + 'client_secret' + q + ');')).toBe(false);
   });
 
   it('no certificate, thumbprint or tenant identifier — the Graph shapes', () => {
