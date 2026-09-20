@@ -2217,6 +2217,33 @@ The practical form: **when you reach for a measurement, name which rule governs 
 read the result.** Not afterwards, when the number is already in your head and has started
 being evidence.
 
+**And the mechanism, which says where to spend the effort.** In all three cases the rule was
+loaded *as a thing to tell somebody else*, and the next action was **instrumentation** — a
+grep, a log check, a control. `m4-email`'s diagnosis:
+
+> **Instrumentation is where rules go unapplied, because it does not feel like the work.**
+> Nobody forgets to redact a fixture; everybody forgets that the tool they reached for to
+> measure the fixture has the same failure mode.
+
+So the guards should point at measurement code as hard as they point at product code. A repo
+that greps `web/src` for a forbidden shape and never greps the test that proves the grep works
+has defended the easy half.
+
+**The corollary: your control is probably self-selected.** Two agents built tree-hash detectors
+for each other's holes, and each tested theirs against exactly the shape their own version
+handled — one used a single top-level file, which was the only case its `git status` parse
+could see. The instrument passed its author's test because its author chose the test. That is
+the same defect as a fixture that cannot express the bug, one layer out, and the cure is the
+same: **have the other person test it.** Two rounds of mutual testing found what four careful
+readings had not, and the final version was correct in a way neither could have reached alone.
+
+**A failure that goes to stderr never enters a hashed stream.** The last limitation found in
+that detector: a path listed by `git status` and then deleted before hashing produced an
+*identical* hash, because the error text went to stderr and the exit code was the pipe's. It
+reported "the tree did not move" with total confidence. Fold the failure into the measured
+input — `|| echo "HASH-FAILED"` — so a broken instrument changes the answer rather than
+quietly agreeing with the last one.
+
 **And one of them got away with it by luck, which is the detail worth having.** `m4-email`'s
 earlier consumer-set verification happened to be sound only because they grepped
 `vendorText.js` *with the extension*, which in that tree appears only inside import specifiers.
