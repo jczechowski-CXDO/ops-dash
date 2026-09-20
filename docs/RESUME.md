@@ -1902,34 +1902,25 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
 
 ## Still open at the close
 
-- **"Survives a night."** Running since 2026-09-20 05:17Z, PID 1797770 against
-  `/tmp/longrun.sqlite`, sampled every 120s to `/tmp/samples.log`. **Seven falsifiable
-  predictions are written down in `/tmp/overnight-predictions.txt` before the fact**, because
-  a soak test that is "passed" because nothing obviously broke has tested nothing. The one to
-  look at first: the main db file is still 4096 bytes and the WAL is growing ~123KB/2min, so
-  **nothing has ever checkpointed.** `wal_autocheckpoint` is 1000 pages, so it should plateau
-  near 4MB around 06:20Z; if the db file is still empty at dawn, a read connection is pinning
-  the WAL and the checkpoint can never complete. That is a bug a green test suite cannot have
-  and only elapsed time can show — which is the whole reason this clause exists.
+- **"Survives a night." MET, 2026-09-20.** One process, **9h 42m unattended**, 5257 poll
+  cycles, **zero errors and zero skipped cycles across all 399 samples**, `poller.ok` true,
+  ten sources healthy, nothing stale. All eleven predictions written down beforehand held:
 
-  **The first draft of those predictions had the defect the same night's practice was about.**
-  "RSS grows sublinearly, no leak" is a total reported as a verdict: at this resolution a
-  decelerating cache and a slow leak look identical, so nothing could have falsified it. The
-  amended form names the discriminator instead — *a leak is a constant delta, a cache is a
-  shrinking one* — and, following the survivor rule, names what is **expected to grow
-  legitimately** so growth is not mistaken for the finding: `check_runs` gains ~250 rows an
-  hour all night and should, while `snapshots` must stay pinned at seven.
+  | | Predicted | Observed |
+  |---|---|---|
+  | P1 | WAL plateaus near 4MB | 4.14MB, flat for 8h |
+  | P2 | db grows once the checkpoint fires, ~06:20Z | 4096 → 397312 B, fired 05:44–06:44 |
+  | P3 | fds stable | 27, no climb |
+  | P4 | a leak is a constant delta, a cache is a shrinking one | +0.9MB/h decelerating, then a 10MB **drop** — collectable, so not a leak |
+  | P8 | check_runs grows ~250/h, and that is correct | 2340 rows, 241/h |
+  | P10 | `snapshots` pinned at 7 | 7 |
+  | P11 | one incident, still resolved | one, resolved |
 
-  **One limit, stated accurately on the second attempt.** Retention is 45 days against a
-  database created this morning, so the hourly prune correctly deletes zero rows all night and
-  P9 pins that. My first version of this line went further — "this night cannot prove retention
-  works, its only evidence remains unit tests, and that needs a seeded-old-rows run against a
-  scratch db, which is its own task." **The task already exists.** `retention.test.ts` seeds
-  old rows against a real file at `mkdtempSync`, calls `prune(NOW)` with **no override** so the
-  production 45/180 constants are the ones under test, and asserts the boundary row, the
-  idempotent second pass, the FK cascade, the kept-open incident, and that a 30-day p95 and
-  `uptime30d` are identical before and after. Retention is well covered. What the night adds is
-  only that the *scheduled* prune fires and reports, which is P9 and nothing more.
+  **The value was in the discriminators, not the uptime.** "No leak" was unfalsifiable until
+  it became "constant delta versus shrinking one", and what settled it was a 10MB drop — a
+  leaked object cannot be collected. `snapshots` pinned at seven is the `INSERT`-where-an-
+  `UPSERT`-was-meant check, and it only exists because naming the legitimate growth forced
+  naming what must not grow.
 - **Three services have no probe of our own** — proofpoint, claude, openai — which is why
   the Overview reads 3 affirmed / 4 unknown rather than 6 / 1, and why five of seven have no
   `uptime30d`. Credential-free product endpoints exist for all three and are stable

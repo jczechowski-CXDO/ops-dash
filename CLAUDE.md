@@ -395,8 +395,11 @@ IncidentDetail render real vendor data, with failure visible as failure — load
 with last-good, "we could not look", and "we looked and there is nothing" are four different
 panels.
 
-**The one clause of its definition of done that is unmet is "survives a night."** Everything
-else is verified; that needs elapsed time and has not had it.
+**Milestone 3 is fully closed.** "Survives a night" was met on 2026-09-20: one process,
+9h 42m unattended, 5257 poll cycles, zero errors, zero skipped cycles, WAL checkpointing and
+plateauing as predicted, no handle or memory growth. It found a real defect in its first
+fifteen minutes — a cold start opened a phantom Sev2, fixed at `600fdea` — which no test
+could have caught, because every test in that file constructs already-polled signals.
 
 Milestone 4 — the Entra, Endpoints and Email adapters, the auth seam, and the mutating
 routes that need it — is planned in
