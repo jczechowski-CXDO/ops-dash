@@ -167,6 +167,46 @@ describe('Sparkline', () => {
       expect(dot?.getAttribute('stroke-linecap')).toBe('round');
     });
 
+    it('draws a genuine 0 ms sample as a measurement, not as a hole', () => {
+      // `parse.ts` maps a non-finite entry to `null`, so a `0` that arrives
+      // here is a probe that answered in under a millisecond. The hole test is
+      // `v !== null` and never falsiness; `!v` would delete a real reading.
+      const { container } = render(
+        <Sparkline values={[0, 100, 200]} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const line = container.querySelector('polyline');
+      expect(container.querySelectorAll('polyline')).toHaveLength(1); // one run, no break
+      expect(line?.getAttribute('points')).toBe('0.0,24.0 50.0,13.0 100.0,2.0');
+    });
+
+    it('spans the ORIGINAL indices on the series measured off the live store', () => {
+      // The lead wrote an island into the live store — two timeouts, one lone
+      // answer, two more timeouts on a Zendesk pod — and photographed the old
+      // rendering in Chromium: 17 points at an even 6.25 spacing, because 21
+      // samples minus 4 dropped is 17 and 100/16 is 6.25. The gaps had closed
+      // up completely while the copy beside the chart correctly read "4 of 21
+      // samples are missing". A true label on a misleading shape.
+      //
+      // 21 slots means a step of 100/20 = 5.0, and the answered samples must
+      // land on multiples of it. 6.25 anywhere means the gap is still closing.
+      const values = [...Array.from({ length: 16 }, (_, i) => 100 + i), null, null, 240, null, null];
+      const { container } = render(
+        <Sparkline values={values} color="var(--success-main)" height={26} viewBoxHeight={26} />,
+      );
+      const runs = [...container.querySelectorAll('polyline')];
+      expect(runs).toHaveLength(2);
+      expect(xs(container).slice(0, 16)).toEqual(
+        Array.from({ length: 16 }, (_, i) => (i * 5).toFixed(1)),
+      );
+      // Index 18 of 21 — the lone answer between two pairs of timeouts. It is
+      // the highest sample in the series, so it sits at the top of the box.
+      expect(runs[1]?.getAttribute('points')).toBe('90.0,2.0 90.0,2.0');
+      expect(runs[1]?.getAttribute('stroke-linecap')).toBe('round');
+      // Nothing is drawn past the trailing holes: the series ends at 90, not
+      // at 100, because the last two probes did not answer.
+      expect(xs(container).at(-1)).toBe('90.0');
+    });
+
     it('draws no line at all when nothing answered', () => {
       const { container } = render(
         <Sparkline values={[null, null, null]} color="var(--success-main)" height={26} viewBoxHeight={26} />,

@@ -32,6 +32,15 @@ const PAD = 2;
  *
  * How MANY holes there were is a sentence for the view to render beside the
  * chart. A primitive does not know what page it is on.
+ *
+ * ## What is not proven about the dot
+ *
+ * That a zero-length subpath paints at all depends on `stroke-linecap` being
+ * round, and jsdom cannot tell you whether anything painted — the unit tests
+ * assert the markup, the points and the cap, and no more than that. No visual
+ * baseline reaches it either: no fixture spark contains a hole, so the dot
+ * renders on no photographed screen. **Asserted in markup, unverified on
+ * screen.** An island sample only occurs under live data.
  */
 export function Sparkline({
   values,
