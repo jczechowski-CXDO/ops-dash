@@ -92,6 +92,42 @@ renders, and the adapter brief should name the required permissions explicitly s
 can be minted narrowly rather than re-minted broadly. `~/.config/ops-dash/hornet.json` still
 exists and now holds a dead token; it is John's file and nobody else touches it.
 
+## Review gates — the cadence, because M4 ran without one
+
+**This milestone reached 48 commits, 53 files and 9,152 insertions with zero review gates.**
+M1 ran G0-G4, M2 and M3 ran gates between waves; M4 substituted the lead answering whatever
+agents chose to report. That is not a review. It responds to the questions that were asked and
+is blind to everything else.
+
+The proof is in *how* M4's defects surfaced — every one incidentally, by an agent doing
+something unrelated:
+
+| defect | found by | while doing |
+|---|---|---|
+| a guard with every assertion of the form "what I found is allowed", passing over an extraction that finds nothing | `m4-views` | mutation-testing a different file |
+| `reasonTone` collapsing **100%** of live vendor strings to neutral — 94 phishing and 4 malware rendering as 422 spam | `m4-views` | answering an unrelated question |
+| the engine-purity rule defended by a docblock and nothing else | `m4-store` | reading before building |
+| `RULES` non-null assertions over a seven-member union with three rows — a `TypeError` inside the correlation tick, once a minute, forever | `m4-store` | reading a neighbour's file |
+| **the typecheck silently blind for over an hour** — one file's syntax error aborted `tsc` before any other file was checked, so every agent got a false all-clear about their own code | `m4-entra` | running controls for something else |
+
+Five defects, five accidents. **Whatever nobody tripped over is still there**, which is exactly
+what a gate is for.
+
+### The cadence from here
+
+- **A gate runs at the end of every wave, before the next is dispatched.** Not at the end of
+  the milestone. `G6` at the bottom of this plan was scheduled too late and that is a plan
+  defect, not an oversight in execution.
+- **A gate reviews the committed tree**, and says so when something looks half-landed. In-flight
+  work gets the next gate.
+- **The highest-risk category is a guard that was relaxed**, and M4 relaxed several — the
+  credential rule narrowed to unblock Zoho OAuth, the redaction rule widened to `server/src`
+  with allowlists of domains and IP literals. An allowlist entry added to make a build pass is a
+  hole with a comment on it. Every gate reads what each guard now excludes and asks what the
+  exclusion hides.
+- **The reviewer is never the author.** A reviewer re-reviewing its own work is worth nothing,
+  and a guard whose subject is your own directory is grading your own homework.
+
 ## Global constraints — these bind every task
 
 Carried forward and non-negotiable.
