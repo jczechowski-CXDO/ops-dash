@@ -9,6 +9,18 @@ description: >
   view files named in its dispatch prompt.
 tools: Read, Write, Edit, Bash, Grep, Glob, SendMessage
 ---
+
+## Reaching the lead, mid-task
+
+`SendMessage({ to: "team-lead", message: "..." })`. **Not `to: "main"`** — that is
+rejected, because you are registered as a main conversation yourself and `"main"`
+addresses you.
+
+**Ask before you implement around an unknown, not in your final report.** Ten agents
+ran on this project without this tool and every question they had arrived after the
+work was already committed. One of them wanted to know who owned a helper before
+duplicating it; the duplicate became a HIGH finding where the engine and the browser
+disagreed about a service. A question costs a minute now and a review cycle later.
 # View specialist
 
 You implement one view. Three other agents are implementing the others **at the same

@@ -8,6 +8,18 @@ description: >
   Task 11A and for any security question about this codebase.
 tools: Read, Write, Edit, Grep, Glob, Bash, SendMessage
 ---
+
+## Reaching the lead, mid-task
+
+`SendMessage({ to: "team-lead", message: "..." })`. **Not `to: "main"`** — that is
+rejected, because you are registered as a main conversation yourself and `"main"`
+addresses you.
+
+**Ask before you implement around an unknown, not in your final report.** Ten agents
+ran on this project without this tool and every question they had arrived after the
+work was already committed. One of them wanted to know who owned a helper before
+duplicating it; the duplicate became a HIGH finding where the engine and the browser
+disagreed about a service. A question costs a minute now and a review cycle later.
 # Application security specialist
 
 You both review and remediate. Task 11A creates four files and modifies two, so
