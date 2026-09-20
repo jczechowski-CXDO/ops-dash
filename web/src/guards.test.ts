@@ -124,14 +124,67 @@ describe('nothing reaches off-box', () => {
 });
 
 describe('no credentials, ever', () => {
+  /** Everything a human might paste while wiring an adapter up. */
+  const sources = () => [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc()];
+
   it('no credential path or secret-shaped key in the repo source', () => {
     // server/src included from Milestone 2. It holds no credential today and
     // must hold none in M3 either — the adapters read from disk at runtime, and
     // the PATHS are what must never be transcribed here.
-    const files = [...src(), ...walk(join(REPO, 'shared'), ['.ts']), ...serverSrc()];
     const pattern = /C:\\+secure|cert\.pem|refresh_token|client_secret|api_key|Zoho-oauthtoken|BEGIN (RSA )?PRIVATE KEY/i;
-    const offenders = files.filter((f) => pattern.test(read(f)));
+    const offenders = sources().filter((f) => pattern.test(read(f)));
     expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('no certificate, thumbprint or tenant identifier — the Graph shapes', () => {
+    // Written BEFORE the Graph credential exists, which is the only time this
+    // guard can be added without the thing it forbids already being in the
+    // history. `git log -p` keeps a pasted secret forever, and this repo is
+    // pushed.
+    //
+    // The three shapes an msgraph app registration brings, none of which the
+    // adapter needs in source because it reads them from a file outside the
+    // repo at runtime:
+    //
+    //   BEGIN CERTIFICATE          the public cert, harmless but a sign the
+    //                              private half is nearby and pasted too
+    //   a GUID                     tenant id / client id — not secret, but they
+    //                              identify the tenant, and fixtures here are
+    //                              permanently redacted for exactly that reason
+    //   40 hex characters          a certificate thumbprint
+    const shapes: [string, RegExp][] = [
+      ['a PEM certificate block', /-----BEGIN CERTIFICATE-----/],
+      ['a GUID (tenant or client id)', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+      ['a certificate thumbprint', /\bthumbprint\b\s*[:=]\s*['"`]?[0-9a-f]{40}\b/i],
+    ];
+    const offenders: string[] = [];
+    for (const file of sources()) {
+      const text = read(file);
+      for (const [what, pattern] of shapes) {
+        if (pattern.test(text)) offenders.push(`${rel(file)}: ${what}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('this guard can actually fail — the shapes are real ones', () => {
+    // A guard written against a secret that does not exist yet is the easiest
+    // kind to get wrong, and the easiest kind never to notice is wrong. These
+    // are syntactically real and semantically nothing: an all-zero GUID, the
+    // PEM header with no body, forty zeros.
+    expect(/-----BEGIN CERTIFICATE-----/.test('-----BEGIN CERTIFICATE-----')).toBe(true);
+    expect(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(
+      'tenantId: "00000000-0000-0000-0000-000000000000"',
+    )).toBe(true);
+    expect(/\bthumbprint\b\s*[:=]\s*['"`]?[0-9a-f]{40}\b/i.test(
+      `thumbprint: "${'0'.repeat(40)}"`,
+    )).toBe(true);
+
+    // And does not fire on things that legitimately look close: status.io's
+    // 24-hex page id, and a sha256 incident digest.
+    const guid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+    expect(guid.test('591aaa7fe69f388425000fda')).toBe(false);
+    expect(guid.test('INC-a3f9c2d1')).toBe(false);
   });
 });
 
