@@ -1,4 +1,5 @@
 import type { EndpointIssue } from '@ops-dash/shared';
+import { safeText } from '../../vendorText.js';
 import type { Row } from './client.js';
 
 /**
@@ -75,11 +76,37 @@ export function instant(v: unknown): number | undefined {
  * the true thing, which is that EPC does not know either.
  */
 export function assignedTo(row: Row): string {
-  return asString(row['agent_logged_on_users']) ?? asString(row['owner_email_id']) ?? 'unattributed';
+  return safeText(asString(row['agent_logged_on_users']) ?? asString(row['owner_email_id']), 'unattributed');
 }
 
-export const computerName = (row: Row): string => asString(row['resource_name']) ?? asString(row['full_name']) ?? 'unknown';
-export const osName = (row: Row): string => asString(row['os_name']) ?? asString(row['os_platform_name']) ?? 'unknown';
+export const computerName = (row: Row): string =>
+  safeText(asString(row['resource_name']) ?? asString(row['full_name']), 'unknown');
+export const osName = (row: Row): string =>
+  safeText(asString(row['os_name']) ?? asString(row['os_platform_name']), 'unknown');
+
+/**
+ * Why these three go through `safeText` and the rest do not.
+ *
+ * `asString` handles EPC's own sentinels — an empty string, and the literal
+ * `--` it writes for an unknown OS — which are this vendor's vocabulary and
+ * nobody else's. `safeText` handles what any vendor-authored string can carry:
+ * a codepoint that does not render as itself, and a length nothing bounds.
+ * Two different jobs, so both, in that order.
+ *
+ * **Lower severity here than on the Email screen, and worth saying why rather
+ * than adopting by reflex.** A mail subject is authored by somebody whose whole
+ * purpose is to be misread; a computer name comes from our own console and our
+ * own directory. But `agent_logged_on_users` is a UPN and `resource_name` is
+ * whatever was typed when the machine was built, and a right-to-left override
+ * in either reorders what the operator reads with no markup involved for React
+ * to escape. It costs four characters.
+ *
+ * The other `EndpointIssue` fields are NOT vendor text and deliberately do not
+ * go through it: `issue` is assembled here from a number and a literal,
+ * `issueKind` is a contract union, and `lastCheckIn` is an ISO string this
+ * module generates. Running them through would suggest they carry a risk they
+ * cannot, which is its own kind of misleading.
+ */
 
 /* ------------------------------------------------------------ the readings */
 

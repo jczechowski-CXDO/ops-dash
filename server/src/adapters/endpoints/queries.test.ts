@@ -127,6 +127,50 @@ describe('naming a computer and its owner', () => {
   });
 });
 
+describe('vendor-authored text cannot reorder what the operator reads', () => {
+  // Adopted from `server/src/vendorText.ts`, published by `m4-email`. Asserted
+  // at MY call sites rather than trusted from theirs: their tests prove the
+  // helper works, and these prove it is actually reached from here.
+  const RLO = String.fromCodePoint(0x202e);
+
+  it('escapes an invisible codepoint in a name, a user and an OS string', () => {
+    expect(computerName({ resource_name: `DEMO-${RLO}gpj.exe` })).toBe('DEMO-[U+202E]gpj.exe');
+    expect(assignedTo({ agent_logged_on_users: `a.nguyen${RLO}@example.com` })).toBe('a.nguyen[U+202E]@example.com');
+    expect(osName({ os_name: `Windows${RLO} 11` })).toBe('Windows[U+202E] 11');
+  });
+
+  it('is the identity on ordinary text, including a real language', () => {
+    // The control. A helper that mangled normal input would be worse than none,
+    // and a Cyrillic machine name is a legitimate name and not an attack.
+    expect(computerName({ resource_name: 'DEMO-LT-0412' })).toBe('DEMO-LT-0412');
+    expect(osName({ os_name: 'macOS - Sequoia' })).toBe('macOS - Sequoia');
+    const cyrillic = String.fromCodePoint(0x41c, 0x43e, 0x439);
+    expect(computerName({ resource_name: cyrillic })).toBe(cyrillic);
+  });
+
+  it('still falls back rather than coercing a non-string', () => {
+    // `String(value)` on a parsed payload runs vendor-shaped code; on null it
+    // writes the word "null" into a cell, which reads as a machine named null
+    // rather than a missing one.
+    expect(computerName({ resource_name: null })).toBe('unknown');
+    expect(assignedTo({ agent_logged_on_users: { toString: () => 'pwned' } })).toBe('unattributed');
+  });
+
+  it('reaches the attention rows, not just the helpers', () => {
+    // The adoption is worth nothing if the rows are built from the raw fields.
+    const row: Row = {
+      resource_id: 700, resource_id_string: '700', resource_name: `DEMO-${RLO}0700`,
+      agent_logged_on_users: `victim${RLO}@example.com`, os_name: 'Windows 11',
+      agent_last_contact_time: NOW - 40 * 86_400_000, agent_installed_on: 1785000000000,
+    };
+    const [issue] = attentionRows([row], new Map(), [], NOW);
+    expect(issue!.computer).toBe('DEMO-[U+202E]0700');
+    expect(issue!.assignedTo).toBe('victim[U+202E]@example.com');
+    // And the field this module writes itself is untouched by it.
+    expect(issue!.issueKind).toBe('stale_agent');
+  });
+});
+
 describe('the attention list', () => {
   const patchByResource = new Map(PATCHES.map((p) => [String(p['resource_id_string']), p]));
 
