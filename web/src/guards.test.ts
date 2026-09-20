@@ -457,17 +457,55 @@ describe('fixtures stay redacted', () => {
     'invoice-secure.net', 'sharefile-cloud.ru', 'ms-verify.co', 'example-hr.com', 'exarnple.com',
     // commit trailer
     'noreply.anthropic.com',
+    // RFC 2606 reserves `.example` as a TLD, exactly as it reserves the three
+    // second-level names above, so a name under it can never be anybody's real
+    // address. `server/src/auth/session.test.ts` uses it for the origin-
+    // confusion cases — `http://ops-dash.local:4000@evil.example`, which is a
+    // userinfo attack that `startsWith`/`includes` all accept — and the
+    // `host:port@domain` form is a syntactically valid address, so this
+    // extraction sees it. Listed rather than exempted: the guard is right that
+    // every domain in the tree should be one somebody decided on, and this is
+    // the deciding.
+    'evil.example',
   ];
+
+  /** The extraction, named once so the guard below and its control cannot
+   *  drift into asking two different questions. */
+  const domainsIn = (text: string): string[] =>
+    (text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).map((addr) =>
+      addr.slice(addr.indexOf('@') + 1).toLowerCase(),
+    );
 
   it('every address in the repo is a documentation or fabricated address', () => {
     // The POSITIVE form, and it is the half that catches what nobody listed. The
     // not.toMatch assertions above can only refuse domains somebody thought of;
     // this requires every address to be one we allow. Assert what a value must
     // be, never what it must not be.
-    for (const addr of fixtures().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []) {
-      const domain = addr.slice(addr.indexOf('@') + 1).toLowerCase();
+    for (const domain of domainsIn(fixtures())) {
       expect(ALLOWED_DOMAINS).toContain(domain);
     }
+  });
+
+  it('that guard can fail — the extraction and the allowlist are both live', () => {
+    // The control, and this guard needed one badly: every assertion it makes is
+    // "the domain I found is allowed", which passes perfectly over a regex that
+    // finds nothing at all. A walk that stopped reading, an extraction that
+    // stopped matching, or an allowlist widened to a wildcard would all leave it
+    // green while guarding nothing.
+    //
+    // Same `domainsIn`, so this proves the extraction the guard above actually
+    // uses, not a second copy of it that could agree while both are wrong.
+    expect(domainsIn('contact person@acme-corporation.co.uk for details')).toEqual([
+      'acme-corporation.co.uk',
+    ]);
+    expect(ALLOWED_DOMAINS).not.toContain('acme-corporation.co.uk');
+    // …and the extraction really does see the userinfo form, which is the shape
+    // that brought `evil.example` into the list and is easy to lose in a regex
+    // change.
+    expect(domainsIn('http://ops-dash.local:4000@evil.example')).toEqual(['evil.example']);
+    // Non-vacuity of the run itself: the tree genuinely contains addresses, so
+    // the loop above is not iterating over an empty list.
+    expect(domainsIn(fixtures()).length).toBeGreaterThan(5);
   });
 
   /** Dotted quads that are not our estate leaking. Each is named because the
