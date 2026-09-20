@@ -1,0 +1,14 @@
+{
+  "emails_total": 10000,
+  "data": [
+    { "type": 2, "value": 8200, "name": "clean" },
+    { "type": 11, "value": 1200, "name": "info" },
+    { "type": 1, "value": 500, "name": "spam" },
+    { "type": 8, "value": 0, "name": "content" },
+    { "type": 5, "value": 90, "name": "threat" },
+    { "type": 12, "value": 4, "name": "advthreat" },
+    { "type": 3, "value": 6, "name": "rejected" },
+    { "type": 16, "value": 0, "name": "rescanned" },
+    { "type": 15, "value": 0, "name": "deleted" }
+  ]
+}
