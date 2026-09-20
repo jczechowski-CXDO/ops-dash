@@ -76,7 +76,23 @@ describe('panelStateFor maps a load to the state the Panel renders', () => {
       kind: 'stale',
       source: 'Services',
       fetchedAt: '2026-09-19T09:00:00Z',
+      // The reason travels with the age. `toEqual` is exhaustive, so this also
+      // asserts nothing ELSE was added to the state.
+      reason: 'Failed to fetch',
     });
+  });
+
+  it('a stale state with no message says nothing rather than inventing one', () => {
+    // `loadKind` is what decides stale, and it needs both fields — so this is
+    // reachable only through a `Load` whose error has no message. The panel
+    // then renders exactly what it rendered before the field existed, which is
+    // the branch that keeps every existing stale literal honest.
+    const state = panelStateFor({ data: [1], servedAt: '2026-09-19T09:00:00Z', error: { code: 'x', message: '' } }, 'Services');
+    expect(state).toEqual({ kind: 'stale', source: 'Services', fetchedAt: '2026-09-19T09:00:00Z', reason: '' });
+    // And the key is genuinely absent, not `undefined`, when there is no error
+    // at all — `exactOptionalPropertyTypes` makes those different types and a
+    // spread of `{ reason: undefined }` would not compile in `Panel`'s callers.
+    expect('reason' in panelStateFor({ data: [1] }, 'Services')).toBe(false);
   });
 
   it('empty only when a successful load really is empty', () => {

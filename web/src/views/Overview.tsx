@@ -7,11 +7,9 @@ import {
   latencyText,
   panelStateFor,
   sparkSamples,
-  staleReason,
   type IncidentView,
   type ServiceView,
 } from '../live/model.js';
-import { StaleReason } from '../live/StaleReason.js';
 import { Card } from '../components/Card.js';
 import { Panel, type PanelState } from '../components/Panel.js';
 import { SectionHeading } from '../components/SectionHeading.js';
@@ -337,12 +335,12 @@ export function StatusStrip({ services }: { services: ServiceView[] }) {
  *
  *   - `spark === null`: no probe has ever run. A line would be a fabrication,
  *     so the row says so in words and keeps the tile the same height.
- *   - holes in the series: those probes did not answer. `Sparkline` takes
- *     `number[]` and cannot break a line at a gap, so the answered samples are
- *     drawn and the holes are COUNTED in a label — never dropped silently
+ *   - holes in the series: those probes did not answer. The raw series goes to
+ *     `Sparkline`, which breaks the line at each hole — never dropped silently
  *     (which leaves a shorter, healthier-looking line) and never zeroed (which
  *     dives the line to instantaneous: an outage drawn as the best news on the
- *     page). Requested: `Sparkline` accepting `Array<number | null>`.
+ *     page). The count stays as a label beside it: a 26px strip on a 190px tile
+ *     is not where anyone counts gaps.
  *   - a clean series: exactly Milestone 1's chart, unchanged.
  */
 function TileSpark({ spark, color }: { spark: Array<number | null> | null; color: string }) {
@@ -359,7 +357,9 @@ function TileSpark({ spark, color }: { spark: Array<number | null> | null; color
   }
   return (
     <>
-      <Sparkline values={values} color={color} height={26} viewBoxHeight={26} />
+      {/* The raw series, holes and all. `values` above is only used to decide
+          whether anything answered, and to count what did not. */}
+      <Sparkline values={spark ?? []} color={color} height={26} viewBoxHeight={26} />
       {missing === 0 ? null : (
         <div data-testid="tile-spark-holes" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
           {`${missing} of ${values.length + missing} probes did not answer`}
@@ -625,15 +625,12 @@ export default function Overview() {
     message: 'No service status has been collected yet.',
   });
   const incidentsState = panelStateFor(dashboard.incidents, 'Incidents');
-  const statusStale = staleReason(dashboard.services);
-  const incidentsStale = staleReason(dashboard.incidents);
 
   return (
     <div data-testid="view-overview" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Status: the compressed strip when nothing is running, the expanded
           tile grid when something is. */}
       <Panel state={statusState}>
-        <StaleReason reason={statusStale} testId="services-stale-reason" />
         {quiet ? (
           <StatusStrip services={services} />
         ) : (
@@ -683,7 +680,6 @@ export default function Overview() {
             Active incidents
           </SectionHeading>
           <Panel state={incidentsState}>
-            <StaleReason reason={incidentsStale} testId="incidents-stale-reason" />
             {open.map((incident) => {
               const state = stateOf(incident);
               return (

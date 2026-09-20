@@ -172,6 +172,25 @@ const live = (client: ApiClient, children: ReactNode, path = '/', intervalMs = 1
 
 const app = (client: ApiClient, path = '/', intervalMs = 1_000_000) => live(client, <App />, path, intervalMs);
 
+/**
+ * The warning alert whose age line names this source.
+ *
+ * Panels do not carry a per-site testid for their stale reason and should not:
+ * the Overview can have TWO stale panels on screen at once, both failing with
+ * the same message, so a unique id would not be what distinguishes them anyway.
+ * Finding the alert by the source it names and asserting the reason INSIDE it
+ * asserts the pairing — this source's alert carries this source's reason —
+ * which a per-site id cannot: the services reason rendered in the incidents
+ * panel would satisfy it.
+ */
+const staleAlertFor = (source: string): HTMLElement => {
+  const found = screen
+    .getAllByRole('alert')
+    .filter((a) => a.textContent?.includes(`${source} data is`));
+  expect(found, `no stale alert naming ${source}`).toHaveLength(1);
+  return found[0]!;
+};
+
 afterEach(() => vi.useRealTimers());
 
 /* ------------------------------------------------------------- 1. loading */
@@ -272,7 +291,9 @@ describe('state 3: the last good numbers, visibly stale, with the reason', () =>
     expect(screen.getByText('Jira')).toBeInTheDocument();
     expect(screen.getByText('220 ms')).toBeInTheDocument();
     // And the reason, which the age alone does not give.
-    expect(screen.getByTestId('services-stale-reason')).toHaveTextContent('Failed to fetch');
+    expect(within(staleAlertFor('Service status')).getByTestId('panel-stale-reason')).toHaveTextContent(
+      'Failed to fetch',
+    );
   });
 
   it('stops being stale the moment the source answers again', async () => {
@@ -291,7 +312,34 @@ describe('state 3: the last good numbers, visibly stale, with the reason', () =>
     // aged out.
     expect(await screen.findByText('Jira')).toBeInTheDocument();
     expect(screen.queryByText(/Service status data is/)).not.toBeInTheDocument();
-    expect(screen.queryByTestId('services-stale-reason')).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('panel-stale-reason')).toHaveLength(0);
+  });
+
+  it('gives each stale panel its OWN reason, with two of them on screen', async () => {
+    // The world where the candidates differ. With one stale panel, a view that
+    // rendered the wrong source's reason — or one that rendered the same
+    // sentence in both — passes every assertion. Two panels, stale for two
+    // DIFFERENT causes, is the only shape that can tell those apart.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-09-19T12:13:00.000Z'));
+    const client = clientOf({
+      '/api/services': flaky(SERVICES),
+      // The incidents envelope carries data AND its own error, so this panel is
+      // stale on its first answer, for a reason of its own.
+      '/api/incidents': () => ok(incidentsBody([INCIDENT], { code: 'store_unavailable', message: 'database is locked' })),
+    });
+    app(client, '/', 60_000);
+    await screen.findByText('Jira');
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+
+    const services = within(staleAlertFor('Service status')).getByTestId('panel-stale-reason');
+    const incidents = within(staleAlertFor('Incidents')).getByTestId('panel-stale-reason');
+    expect(services).toHaveTextContent('Failed to fetch');
+    expect(incidents).toHaveTextContent('database is locked');
+    // Neither carries the other's, which is the half a single-panel test cannot
+    // see: two elements, two sentences, each in the alert that names its source.
+    expect(services).not.toHaveTextContent('database is locked');
+    expect(incidents).not.toHaveTextContent('Failed to fetch');
   });
 
   it('marks ONE service whose own feed is stale, without staling the others', async () => {
@@ -679,7 +727,9 @@ describe('the check-runs table reads the API', () => {
     expect(await screen.findByText(/Check history data is 14 minutes old/)).toBeInTheDocument();
     // The rows are STILL THERE — the last runs anyone has beat a blank panel.
     expect(runRows()).toHaveLength(2);
-    expect(screen.getByTestId('checks-stale-reason')).toHaveTextContent('database is locked');
+    expect(within(staleAlertFor('Check history')).getByTestId('panel-stale-reason')).toHaveTextContent(
+      'database is locked',
+    );
   });
 
   it('does not show one service\'s runs on another service\'s page', async () => {

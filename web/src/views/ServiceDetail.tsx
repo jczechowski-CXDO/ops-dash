@@ -9,7 +9,6 @@ import { StatCard } from '../components/StatCard.js';
 import { Table, type Column } from '../components/aurora/Table.js';
 import { useDemoMode } from '../app/DemoModeProvider.js';
 import { useChecks, useDashboard } from '../live/DataSource.js';
-import { StaleReason } from '../live/StaleReason.js';
 import {
   countText,
   lastSeenLine,
@@ -319,7 +318,6 @@ export default function ServiceDetail({
       : runs.length === 0
         ? { kind: 'empty', message: 'No check runs recorded in this window.' }
         : { kind: 'ready' };
-  const checksStale = checks === null ? null : staleReason(checks);
   const { values: sparkValues, missing: sparkMissing } = sparkSamples(service.spark);
   const feedStale = staleReason(service.feed);
   const lastSeen = lastSeenLine(service.feed);
@@ -414,7 +412,10 @@ export default function ServiceDetail({
             </Panel>
           ) : (
             <Sparkline
-              values={sparkValues}
+              // The raw series: `Sparkline` breaks the line at each hole, so
+              // `sparkValues` is only used above to decide whether anything
+              // answered at all.
+              values={service.spark ?? []}
               color={statusColor(service.ours.level)}
               height={120}
               viewBoxHeight={30}
@@ -423,7 +424,7 @@ export default function ServiceDetail({
         </div>
         {sparkMissing === 0 ? null : (
           <div data-testid="spark-holes" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-            {`${sparkMissing} of ${sparkValues.length + sparkMissing} samples are missing: those probes did not answer. The line is drawn over the ones that did.`}
+            {`${sparkMissing} of ${sparkValues.length + sparkMissing} samples are missing: those probes did not answer, and the line breaks where each of them should be.`}
           </div>
         )}
       </Card>
@@ -469,10 +470,6 @@ export default function ServiceDetail({
           <SectionHeading meta={`${service.short} · newest first`}>Check history</SectionHeading>
         </div>
         <Panel state={checkState}>
-          {/* Inside the panel, so it renders in the one state that has both
-              data and a failure. The stale alert above it carries the age; this
-              carries the reason, which the age alone does not give. */}
-          <StaleReason reason={checksStale} testId="checks-stale-reason" />
           <Table columns={CHECK_COLUMNS} rows={runs} dense />
         </Panel>
       </Card>

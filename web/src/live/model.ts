@@ -74,11 +74,23 @@ export function panelStateFor<T>(
       };
     case 'stale':
       // Children still render: the last good data is the best answer we have.
-      // The REASON is not expressible in `PanelState` — Panel's stale alert
-      // carries a source and an age and nothing else — so the caller renders
-      // `staleReason` as the panel's first child. Requested as
-      // `PanelState.stale.reason`; see the report.
-      return { kind: 'stale', source, fetchedAt: load.servedAt ?? '' };
+      //
+      // The reason travels WITH the age now — `PanelState.stale.reason`, which
+      // `Panel` renders inside the same `role="alert"` as the age. Three views
+      // used to compose it as the panel's first child, where a screen reader
+      // heard "Services data is 14 minutes old" and never heard why. An age
+      // with no cause tells an operator to refresh; the cause tells them where
+      // to go, and only one of those is useful when the feed is 503ing.
+      //
+      // Spread conditionally rather than set to `undefined`:
+      // `exactOptionalPropertyTypes` makes those different types, and absent is
+      // the shape that renders byte-identically to before.
+      return {
+        kind: 'stale',
+        source,
+        fetchedAt: load.servedAt ?? '',
+        ...(load.error === undefined ? {} : { reason: load.error.message }),
+      };
     case 'ready': {
       const data = load.data as T;
       return empty && empty.when(data) ? { kind: 'empty', message: empty.message } : { kind: 'ready' };
@@ -287,12 +299,17 @@ export function countText(n: number | null): string {
 /**
  * The samples a sparkline can actually draw, and how many were holes.
  *
- * `Sparkline` takes `number[]` and has no way to break the line at a gap, so a
- * probe that did not answer cannot be drawn today. It is NOT dropped silently
- * and it is NOT zeroed — zero would dive the line to instantaneous, drawing an
- * outage as the best news on the page. The holes are counted and the count is
- * rendered beside the chart. Requested: `Sparkline` accepting
- * `Array<number | null>`; see the report.
+ * `Sparkline` now takes `Array<number | null>` and breaks the line at a gap, so
+ * the holes are DRAWN as holes and this function no longer decides what the
+ * chart sees — the raw series goes straight to it. What is left here is the
+ * count, which the views render as a sentence beside the chart.
+ *
+ * Both survive on purpose: a broken line and "2 of 28 probes did not answer"
+ * answer different questions, and the count is what survives a glance at a 26px
+ * strip on a 190px tile. `values` is still returned because the views branch on
+ * whether anything answered at all — which is two different sentences, not a
+ * chart state (`spark === null` is "no probe has ever run"; an all-null series
+ * is "every recent probe failed to answer").
  */
 export function sparkSamples(spark: Array<number | null> | null): { values: number[]; missing: number } {
   if (spark === null) return { values: [], missing: 0 };
