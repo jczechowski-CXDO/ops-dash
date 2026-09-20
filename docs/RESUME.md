@@ -2196,6 +2196,49 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
+## A fixture default is a lie in the live world (2026-09-20)
+
+Wiring the ack button, `m4-views` found a defect that would have shipped:
+
+```tsx
+incident.ack?.by ?? ACTOR          // ACTOR is the hard-coded demo name, 'John H.'
+```
+
+A live acknowledgement sets the row's state from the **server's reply** immediately, while
+`incident.ack` stays undefined until the next poll — up to thirty seconds. So the credit line
+fell through to the fixture default and printed **"Acknowledged by John H." for an action the
+server had attributed to whoever was actually signed in.**
+
+**A wrong name on an audit line is worse than no name**, and this one was wrong *only in the
+live world* and *only for one poll interval* — which is precisely the window nobody
+screenshots, nobody demos, and no baseline covers.
+
+The general shape, and it will recur wherever a fixture and a live path share a component:
+**a `??` fallback written when only the fixture world existed becomes a confident falsehood the
+day a second world arrives.** It does not fail; it substitutes. Look for them wherever a
+default was chosen before the live path was built.
+
+**What surfaced it was the instruction to assert what an operator SEES rather than that a
+request was made.** A test checking *we POSTed `ack`* passes over this all day.
+
+### Three refusals from the same discipline, worth copying
+
+- **No optimistic update.** A live click can fail, and an optimistic "Acknowledged" over a
+  write that never happened is the most direct wrong-green available here — the operator
+  believes the alert is handled and it is not. A failed write leaves the row exactly as it was
+  and says why in a `role="alert"`.
+- **A 200 answering about a different incident is not a success**, and is not applied to this
+  row.
+- **Flags are rebuilt from the reply, never merged**, so an unmute cannot leave a stale `muted`
+  behind.
+
+### And a non-event recorded on purpose
+
+`Button` had no `title` prop and the agent **did not add one**, reporting the non-event
+instead: *"I needed a prop and quietly added it to a shared primitive" is how four agents
+inventing four things begins.* It turned out not to be needed — rendered text beats a tooltip,
+being reachable by touch and reliable to screen readers — but the discipline is the point.
+
 ## A rule that cannot fire breaks no test (2026-09-20)
 
 Two half-built seams found in one afternoon, and **neither was found by anything failing.**
