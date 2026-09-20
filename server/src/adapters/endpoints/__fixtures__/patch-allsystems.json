@@ -1,0 +1,16 @@
+{
+  "message_type": "allsystems",
+  "message_version": "1.4",
+  "status": "success",
+  "message_response": {
+    "total": 4,
+    "limit": 500,
+    "page": 1,
+    "allsystems": [
+      { "resource_id": 101, "resource_id_string": "101", "resource_health_status": 3, "missing_ms_patches": 6, "critical_patch_count": 2, "important_patch_count": 4 },
+      { "resource_id": 102, "resource_id_string": "102", "resource_health_status": 3, "missing_ms_patches": 11, "critical_patch_count": 1, "important_patch_count": 9 },
+      { "resource_id": 103, "resource_id_string": "103", "resource_health_status": 1, "missing_ms_patches": 0, "critical_patch_count": 0, "important_patch_count": 0 },
+      { "resource_id": 104, "resource_id_string": "104", "resource_health_status": 1, "missing_ms_patches": 2, "critical_patch_count": 0, "important_patch_count": 2 }
+    ]
+  }
+}

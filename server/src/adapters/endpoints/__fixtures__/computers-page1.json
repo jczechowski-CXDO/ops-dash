@@ -1,0 +1,15 @@
+{
+  "message_type": "computers",
+  "message_version": "1.4",
+  "status": "success",
+  "message_response": {
+    "total": 5,
+    "limit": 3,
+    "page": 1,
+    "computers": [
+      { "resource_id": 101, "resource_id_string": "101", "resource_name": "DEMO-LT-0412", "full_name": "DEMO-LT-0412.demo.example", "os_name": "Windows 11 Professional Edition (x64)", "os_platform_name": "Windows", "agent_logged_on_users": "a.nguyen@example.com", "owner_email_id": "", "domain_netbios_name": "DEMO-DOMAIN", "agent_last_contact_time": 1786017600000 },
+      { "resource_id": 102, "resource_id_string": "102", "resource_name": "DEMO-LT-0288", "full_name": "DEMO-LT-0288.demo.example", "os_name": "Windows 11 Professional Edition (x64)", "os_platform_name": "Windows", "agent_logged_on_users": "r.patel@example.com", "owner_email_id": "", "domain_netbios_name": "DEMO-DOMAIN", "agent_last_contact_time": 1789819200000 },
+      { "resource_id": 103, "resource_id_string": "103", "resource_name": "DEMO-DT-0117", "full_name": "DEMO-DT-0117.demo.example", "os_name": "Windows 10 Enterprise Edition (x64)", "os_platform_name": "Windows", "agent_logged_on_users": "", "owner_email_id": "", "domain_netbios_name": "DEMO-DOMAIN", "agent_last_contact_time": 1789646400000 }
+    ]
+  }
+}

@@ -211,7 +211,7 @@ describe('the API knows only the published surface', () => {
     // registered here without a policy breaks the first.
     const code = stripComments(read(ROUTES));
     const registrations = [...code.matchAll(/app\.(get|post|put|patch|delete)\(\s*'([^']+)'\s*,\s*(\{[^}]*\}[^,]*)?/g)];
-    expect(registrations.length).toBe(6);
+    expect(registrations.length).toBe(7);
     for (const [, method, url, options] of registrations) {
       expect(options ?? '', `${method} ${url}`).toMatch(/config:\s*\{\s*auth:\s*'(public-read|login|required)'/);
     }

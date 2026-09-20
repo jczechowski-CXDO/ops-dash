@@ -1,0 +1,12 @@
+{
+  "message_type": "summary",
+  "message_version": "1.4",
+  "status": "success",
+  "message_response": {
+    "summary": {
+      "system_summary": { "total_systems": 4, "healthy_systems": 3, "highly_vulnerable_systems": 1, "moderately_vulnerable_systems": 0, "health_unknown_systems": 0 },
+      "patch_summary": { "installed_patches": 900, "applicable_patches": 919, "missing_patches": 19 },
+      "missing_patch_severity_summary": { "critical_count": 7, "important_count": 15, "moderate_count": 3, "low_count": 1, "unrated_count": 0, "total_count": 26 }
+    }
+  }
+}

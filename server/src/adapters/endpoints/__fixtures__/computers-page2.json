@@ -1,0 +1,14 @@
+{
+  "message_type": "computers",
+  "message_version": "1.4",
+  "status": "success",
+  "message_response": {
+    "total": 5,
+    "limit": 3,
+    "page": 2,
+    "computers": [
+      { "resource_id": 104, "resource_id_string": "104", "resource_name": "DEMO-LT-0355", "full_name": "DEMO-LT-0355.demo.example", "os_name": "macOS - Sequoia", "os_platform_name": "Mac", "agent_logged_on_users": "k.obrien@example.com", "owner_email_id": "", "domain_netbios_name": "DEMO-DOMAIN", "agent_last_contact_time": 1787313600000 },
+      { "resource_id": 105, "resource_id_string": "105", "resource_name": "DEMO-DT-0092", "full_name": "DEMO-DT-0092.demo.example", "os_name": "--", "os_platform_name": "--", "agent_logged_on_users": "", "owner_email_id": "", "domain_netbios_name": "DEMO-DOMAIN", "agent_last_contact_time": 0 }
+    ]
+  }
+}

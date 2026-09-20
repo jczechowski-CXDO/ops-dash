@@ -709,6 +709,125 @@ describe('GET /api/incidents', () => {
 
 /* -------------------------------------------------------------- /api/health */
 
+describe('GET /api/entra mirrors the stored snapshot', () => {
+  const SNAPSHOT = { fetchedAt: '2026-09-20T09:00:00.000Z', degraded: false, data: { stats: { guests: 514 } } } as unknown as SourceResult<unknown>;
+
+  it('serves the stored result in the same envelope as every other read', async () => {
+    const store = memStore();
+    store.putSnapshot('entra', SNAPSHOT);
+    const { statusCode, body } = await get({ store, now: () => new Date('2026-09-20T09:05:00.000Z') }, '/api/entra');
+    expect(statusCode).toBe(200);
+    expect(body).toEqual({
+      servedAt: '2026-09-20T09:05:00.000Z',
+      result: { fetchedAt: '2026-09-20T09:00:00.000Z', degraded: false, data: { stats: { guests: 514 } } },
+    });
+  });
+
+  it('carries data AND error together for a stale read — mirrored, never reassembled', async () => {
+    // What the browser half depends on: previous data, visibly stale, with the
+    // reason attached. `putSnapshot` assembles it; this route copies it. The
+    // route must NOT re-derive this, which is how the two halves come to
+    // disagree.
+    const store = memStore();
+    store.putSnapshot('entra', SNAPSHOT);
+    store.putSnapshot('entra', {
+      fetchedAt: '2026-09-20T09:15:00.000Z',
+      degraded: true,
+      error: { code: 'entra_partial', message: 'These counts are lower bounds: one page failed.' },
+    } as unknown as SourceResult<unknown>);
+
+    const { body } = await get({ store }, '/api/entra');
+    const { result } = body as { result: SourceResult<unknown> };
+    expect(result.data).toEqual({ stats: { guests: 514 } });
+    expect(result.error?.code).toBe('entra_partial');
+    expect(result.degraded).toBe(true);
+  });
+
+  it('a FIRST poll that is partial reaches the client with no data — a finding, not this route’s doing', async () => {
+    // Pinned because it is surprising and because the route is not the place to
+    // fix it. `store/db.ts:262` branches on `result.error` alone, so a result
+    // carrying BOTH a payload and an error is written as a failure and the
+    // payload is discarded. The Entra adapter's partial path returns exactly
+    // that shape.
+    //
+    // Two consequences, both reported to the lead, `m4-entra`, `m4-store` and
+    // `m4-views` rather than absorbed here:
+    //   - a cold start whose first poll is partial serves an error with no data
+    //   - a later partial serves the last FULLY GOOD payload with the partial's
+    //     message attached, so the sentence "these counts are lower bounds"
+    //     describes numbers that are not the numbers on screen
+    //
+    // If the store changes, this test goes red and should be rewritten to the
+    // new truth. That is the point of pinning it: today's behaviour is recorded
+    // as today's, not blessed.
+    const store = memStore();
+    store.putSnapshot('entra', {
+      fetchedAt: '2026-09-20T09:00:00.000Z',
+      degraded: true,
+      data: { stats: { guests: 514 } },
+      error: { code: 'entra_partial', message: 'These counts are lower bounds: one page failed.' },
+    } as unknown as SourceResult<unknown>);
+
+    const { body } = await get({ store }, '/api/entra');
+    const { result } = body as { result: SourceResult<unknown> };
+    expect(result.data).toBeUndefined();
+    expect(result.error?.code).toBe('entra_partial');
+  });
+
+  it('never sets empty — a snapshot is one object, not a list', async () => {
+    // `empty` on a snapshot has no meaning the view can render. "We looked and
+    // there is nothing" is a fact about each table INSIDE it.
+    const store = memStore();
+    store.putSnapshot('entra', SNAPSHOT);
+    const { body } = await get({ store }, '/api/entra');
+    expect(Object.keys((body as { result: object }).result).sort()).toEqual(['data', 'degraded', 'fetchedAt']);
+  });
+
+  it('says NO CREDENTIAL, not never polled, when this host has no Graph certificate', async () => {
+    // The distinction the whole route turns on. `index.ts` registers the source
+    // only when a credential exists, so an unconfigured box has no row — and
+    // `never_polled` would be true and would read as a failure. The browser
+    // picks a panel's severity from this code.
+    const { body } = await get({ store: memStore() }, '/api/entra');
+    expect((body as { result: SourceResult<unknown> }).result.error).toEqual({
+      code: 'graph_unconfigured',
+      message: 'No Graph credential is configured on this host, so Entra has never been polled.',
+    });
+  });
+
+  it('says NEVER POLLED when a credential IS configured and no row exists — the world where the two differ', async () => {
+    // The other half, and the run that makes the assertion above mean
+    // something: same empty store, one dependency apart. Without this pair, a
+    // route that answered `graph_unconfigured` unconditionally would pass.
+    // A supplier that returns something unparseable is still a CONFIGURED
+    // credential — `graphHealth` reports `configured: true, level: 'unreadable'`
+    // — which is the right control here: the branch keys off whether a
+    // credential exists, not off whether it is healthy. A box whose certificate
+    // is corrupt has been set up and has not polled; that is `never_polled`.
+    const { body } = await get({ store: memStore(), graphCert: () => 'not a certificate' }, '/api/entra');
+    expect((body as { result: SourceResult<unknown> }).result.error?.code).toBe('never_polled');
+  });
+
+  it('a store that throws is an error with no data, at HTTP 200', async () => {
+    const { statusCode, body } = await get({ store: brokenStore() }, '/api/entra');
+    expect(statusCode).toBe(200);
+    const { result } = body as { result: SourceResult<unknown> };
+    expect(result.data).toBeUndefined();
+    expect(result.error?.code).toBe('store_unavailable');
+  });
+
+  it('strips retryAfterMs here too, so one route cannot leak what another hides', async () => {
+    const store = memStore();
+    store.putSnapshot('entra', {
+      fetchedAt: '2026-09-20T09:00:00.000Z',
+      degraded: true,
+      error: { code: 'http_429', message: '429 Too Many Requests', retryAfterMs: 30_000 },
+    } as unknown as SourceResult<unknown>);
+    const { body } = await get({ store }, '/api/entra');
+    expect(Object.keys((body as { result: SourceResult<unknown> }).result.error ?? {}).sort()).toEqual(['code', 'message']);
+  });
+});
+
 describe('GET /api/health reports the store and the poller separately', () => {
   /**
    * Thirty seconds after `statusOf()`'s last success, so those sources are

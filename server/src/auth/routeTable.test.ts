@@ -68,6 +68,7 @@ describe('the route table — every route declares a policy, and every write nee
     // the tautology this repo has now paid for four times.
     expect(await routeTable()).toEqual([
       { method: 'GET', url: '/api/checks', policy: 'public-read' },
+      { method: 'GET', url: '/api/entra', policy: 'public-read' },
       { method: 'GET', url: '/api/health', policy: 'public-read' },
       { method: 'GET', url: '/api/incidents', policy: 'public-read' },
       { method: 'GET', url: '/api/services', policy: 'public-read' },
@@ -97,7 +98,7 @@ describe('the route table — every route declares a policy, and every write nee
     // the first would be "fixed" by deleting a row. This says the walk found a
     // router at all, against a count and a literal nobody can rename away.
     const rows = await routeTable();
-    expect(rows.length).toBeGreaterThanOrEqual(6);
+    expect(rows.length).toBeGreaterThanOrEqual(7);
     expect(rows.map((r) => `${r.method} ${r.url}`)).toContain('GET /api/services');
   });
 

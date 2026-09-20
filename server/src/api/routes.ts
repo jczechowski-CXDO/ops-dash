@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
-import type { CheckRun, ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
+import type { CheckRun, EntraSnapshot, ServiceId, Severity, SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared';
 import type { SourceStatus } from '../poller/schedule.js';
 // The ONE definition of "what is this service now", shared with `index.ts` and
 // the engine. Imported rather than reimplemented: a second copy of this rule
@@ -19,6 +19,20 @@ import type { X509Certificate } from 'node:crypto';
 // enforces that by name. A route with its own idea of "authenticated" is the
 // `publishedLevel`/`vendorLevel` fork with a much worse failure mode.
 import { createSessionAuth, principalOf, registerAuth, type SessionAuth } from '../auth/session.js';
+// The source key Entra's snapshot is stored under, imported rather than
+// respelled. A key spelled two ways reads as a source that has never been
+// polled, which is indistinguishable from one that genuinely has not — the
+// same argument `vendorSource` exists for, and the reason this is an import
+// even though it costs an import cycle with the composition root.
+//
+// The cycle is benign in both load orders and was verified rather than assumed:
+// neither module touches the other's exports at evaluation time — `index.ts`
+// reads `vendorSource`/`SERVICE_ORDER` inside `createApp`, and this file reads
+// `ENTRA_SOURCE` inside a request handler. **It is still a smell**, and the
+// right home is `services.ts`, which both the root and the API already import
+// for exactly this reason. That is a one-line move on each side in a file I do
+// not own; flagged to the lead rather than done quietly here.
+import { ENTRA_SOURCE } from '../index.js';
 
 /**
  * The API.
@@ -290,6 +304,31 @@ export type IncidentsResponse = {
   result: SourceResult<ApiIncident[]>;
 };
 
+/**
+ * Entra, in the same envelope as everything else on this surface.
+ *
+ * `{ servedAt, result }` and not a second pattern — `m4-views` specified this
+ * shape against the browser half they had already built, and it is
+ * `/api/incidents`' envelope. Three properties they depend on, each of which is
+ * a decision rather than an accident:
+ *
+ *  - **The stored result is mirrored, not re-derived.** `putSnapshot` already
+ *    attaches the newest failure to the last good payload, so stale-with-last-
+ *    good arrives assembled and the browser infers nothing. Re-deriving it is
+ *    how the two halves come to disagree.
+ *  - **No `empty`.** A snapshot is one object, never a list; "we looked and
+ *    there is nothing" is a fact about each table *inside* it, which the view
+ *    renders per table.
+ *  - **`data` and `error` survive together.** The adapter's partial path
+ *    returns the snapshot plus `entra_partial`, and the browser renders the
+ *    numbers with the reason attached. Collapsing that either way throws away
+ *    one of the two facts.
+ */
+export type EntraResponse = {
+  servedAt: string;
+  result: SourceResult<EntraSnapshot>;
+};
+
 export type HealthResponse = {
   servedAt: string;
   /** Store and poller are reported separately because they fail separately: a
@@ -432,6 +471,35 @@ const neverPolled = (at: string): SourceResult<never> => ({
   fetchedAt: at,
   degraded: true,
   error: { code: 'never_polled', message: 'no poll of this source has ever been recorded' },
+});
+
+/**
+ * No Graph credential on this host — which is NOT a failure, and the whole
+ * reason this is a separate code from `never_polled`.
+ *
+ * `index.ts` registers the Entra source only when a credential exists, so an
+ * unconfigured box has no row and would otherwise serve `never_polled`: *"no
+ * poll of this source has ever been recorded"*. True, and the wrong sentence.
+ * Nothing is unavailable, nothing failed, and somebody deliberately did not set
+ * this up — while `/api/health` has distinguished exactly that with
+ * `configured: false` since M3.
+ *
+ * **Its own code, and it stays its own code.** `m4-views` renders the message
+ * verbatim and chooses the panel's severity from the code, so folding this into
+ * `never_polled` — or into `auth_unconfigured`, which is about our *operator*
+ * credential and is a different absence about a different thing — paints a
+ * deliberate absence as a red outage. Three absences, three codes, three
+ * screens. That is `CLAUDE.md`'s rule that a permanently-red tile is as bad as
+ * a permanently-green one, and it is the third time in two days this shape has
+ * been found.
+ */
+const graphUnconfigured = (at: string): SourceResult<never> => ({
+  fetchedAt: at,
+  degraded: true,
+  error: {
+    code: 'graph_unconfigured',
+    message: 'No Graph credential is configured on this host, so Entra has never been polled.',
+  },
 });
 
 const storeUnavailable = (at: string, cause: unknown): SourceResult<never> => ({
@@ -731,6 +799,37 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
         degraded: true,
         error: { code: 'store_unavailable', message: String((cause as Error)?.message ?? cause) },
       };
+    }
+  });
+
+  /**
+   * The Entra directory snapshot.
+   *
+   * Four lines of route and a paragraph of reasons, all of them the browser
+   * half's: mirror the stored result, set no `empty`, keep `data` and `error`
+   * together, and distinguish "no credential" from "never polled".
+   */
+  app.get('/api/entra', { config: { auth: 'public-read' } }, async (): Promise<EntraResponse> => {
+    const at = clock();
+    const servedAt = at.toISOString();
+    try {
+      const stored = store.getSnapshot(ENTRA_SOURCE);
+      if (stored !== undefined) {
+        // The cast is a LABEL, not a check. The store is schemaless, the
+        // adapter wrote an `EntraSnapshot`, and the browser re-validates every
+        // one of the eight stats rather than trusting this annotation — because
+        // a `0` on that screen reads as good news.
+        return { servedAt, result: toWire(stored) as SourceResult<EntraSnapshot> };
+      }
+      // No row at all. Which of the two absences it is, is answered by the same
+      // function `/api/health` answers it with — not by a second reading of the
+      // credential taken here.
+      return {
+        servedAt,
+        result: graphHealth(deps.graphCert, at).configured ? neverPolled(servedAt) : graphUnconfigured(servedAt),
+      };
+    } catch (cause) {
+      return { servedAt, result: storeUnavailable(servedAt, cause) };
     }
   });
 
