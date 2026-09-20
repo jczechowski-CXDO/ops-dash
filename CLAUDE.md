@@ -306,6 +306,29 @@ branch — just stop adding them.
 assigned and unused — a type error — and Vitest warns that unhandled source errors *"may cause
 false positive tests"*. Re-run with a type-*valid* mutation of the same intent before believing
 either outcome.
+
+**5. A clean control and a suite that never ran are the same observation.** Both produce zero
+failing lines. An A/B/A whose controls are *"no reds"* cannot tell a quiet tree from a suite
+that aborted — and **this is not hypothetical here.** While one agent's file had a syntax
+error, `tsc -b` aborted before `pretest` finished and `npm test` never reached the suite at
+all. **The team sat inside that window for about an hour.** Any control taken in it returns
+empty, every red in the mutated leg gets attributed to the mutation, and *both controls agree*.
+
+So **carry positive evidence that the question was asked.** Keep `Tests N passed` in the
+stream, not just the absence of `×` lines, and run a negative control against a path that does
+not exist so you can see what "did not run" looks like:
+
+```
+control (before)   Tests  139 passed (139)
+mutant planted     Tests  2 failed | 137 passed (139)
+control (after)    Tests  139 passed (139)
+negative control   RUN-FAILED                      <- a nonexistent path
+```
+
+`RUN-FAILED` and `139 passed` must not be the same value. The general rule, which now has four
+siblings in this file: **an empty result means two things and the instrument records one.** A
+failure marker catches *"the command errored"*; only a witness catches *"the command succeeded
+at doing nothing"*.
 - `git stash` — removes other agents' uncommitted files from the shared tree.
 - `git checkout -- <file>` / `git restore` — restores to **HEAD, not to your edit**, and the
   suite goes green afterwards because green was also the state you just lost. Cost one agent
