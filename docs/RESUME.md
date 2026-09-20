@@ -2183,9 +2183,22 @@ The fix is an `evaluable` set: a rule that was **not evaluated** carries its ope
 forward untouched, and can neither open nor clear. Staleness beyond three poll intervals means
 not evaluated.
 
-## Three ways a restore or a retry lies (2026-09-20)
+## Four ways a restore or a retry lies (2026-09-20)
 
-All three found inside one afternoon, all three by the instrument rather than by the work.
+All four found inside one afternoon, all four by the instrument rather than by the work — and
+**three of them share one trap: the suite went green afterwards, because green was also the
+state you just lost.** The tests confirm the loss instead of catching it.
+
+**The rule that covers all three**, in `m4-entra`'s wording after the third: *back up the state
+you want to **return to**, which is after the change, not before — and verify a restore by
+grepping for a symbol the change introduced, never by the suite going green.* The mechanism
+they adopted: re-take the backup immediately after the edit, and `diff -q` every touched file
+against it when the battery ends.
+
+**0. A backup taken at the wrong moment.** The third instance, and the one that completes the
+family. `m4-entra`'s mutation restore put back a scratchpad copy taken *before* the edit,
+silently discarding an entire `correlate` change — then the suite failed in a way they first
+read as a mutation result. The copy was faithful; the moment was wrong.
 
 **1. `git checkout -- <file>` restores to HEAD, not to your edit.** `m4-entra` restored a
 mutation that way and silently discarded the entire in-progress seam rework, because the file
@@ -2218,6 +2231,18 @@ and the `lastSeen` sweep fell too, because the phantom row joins both.
 
 This is the useful half of predicting: the *shape* of the miss is reusable where the instance
 is not. Forecast the enumerating assertions first, then the named one.
+
+**Fourth occurrence, and the refinement that would actually have prevented it.** Building the
+§7 rules, `m4-entra` predicted five reds for "legacy always fires" and got eight. They had
+named the family correctly and then **enumerated it by the wrong index**: they listed the two
+tests whose *names* mention `legacy`, and missed three more — `spray fires above 500`, `risky
+fires on any confirmed compromise`, `secrets counts only FUTURE expiry` — all of which assert
+an exact sorted array from the same helper.
+
+So the rule sharpens from "forecast the enumerating assertions" to: **enumerate by the
+assertion's shape, not by the test's name.** Every `toEqual([...])` over a finding list is a
+casualty of any mutation that changes what fires, whatever that test happens to be called.
+Three formulations of this were needed before one was mechanical enough to apply.
 
 ## Two agents, one tree (2026-09-20)
 
