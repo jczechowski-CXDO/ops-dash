@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SERVICE_PLATFORM as FROM_INDEX } from '../index.js';
+import { SERVICE_PLATFORM as FROM_INDEX } from '../services.js';
 import { SERVICE_PLATFORM } from './platforms.js';
 import { loadVendorFeeds } from '../adapters/vendorstatus/common.js';
 

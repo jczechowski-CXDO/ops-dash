@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SourceResult, StatusLevel } from '@ops-dash/shared';
 import { openStore } from './db.js';
-import { currentLevel, isStatusLevel, vendorLevel } from './currentLevel.js';
+import { publishedLevel, isStatusLevel, vendorLevel } from './currentLevel.js';
 import { vendorHalfSatisfied, ourCheckFailing } from '../engine/rules.js';
 
 const good = (level: string): SourceResult<unknown> => ({
@@ -13,7 +13,7 @@ const good = (level: string): SourceResult<unknown> => ({
 describe('currentLevel', () => {
   it('reports the level of a successful read', () => {
     for (const level of ['operational', 'degraded', 'outage', 'maintenance', 'unknown'] as const) {
-      expect(currentLevel(good(level))).toBe(level);
+      expect(publishedLevel(good(level))).toBe(level);
     }
   });
 
@@ -21,30 +21,30 @@ describe('currentLevel', () => {
     // The whole point. Assert `unknown` positively rather than "not
     // operational": a bug that returned `degraded` here would satisfy the
     // negative form and still open a Sev1 on a three-hour-old reading.
-    expect(currentLevel({ ...good('operational'), degraded: true, error: { code: 'http_503', message: 'x' } })).toBe('unknown');
-    expect(currentLevel({ ...good('degraded'), degraded: true, error: { code: 'network', message: 'x' } })).toBe('unknown');
+    expect(publishedLevel({ ...good('operational'), degraded: true, error: { code: 'http_503', message: 'x' } })).toBe('unknown');
+    expect(publishedLevel({ ...good('degraded'), degraded: true, error: { code: 'network', message: 'x' } })).toBe('unknown');
   });
 
   it('reports unknown for a source never polled, and for one with no payload', () => {
-    expect(currentLevel(undefined)).toBe('unknown');
-    expect(currentLevel({ fetchedAt: '2026-09-19T10:00:00.000Z', degraded: true })).toBe('unknown');
+    expect(publishedLevel(undefined)).toBe('unknown');
+    expect(publishedLevel({ fetchedAt: '2026-09-19T10:00:00.000Z', degraded: true })).toBe('unknown');
   });
 
   it('reports unknown rather than trusting a payload with a nonsense level', () => {
     // A cast would let this straight through into a colour. A half-written row,
     // a schema change or a future writer can all put something else there.
     for (const level of ['OPERATIONAL', 'green', '', null, 1, {}]) {
-      expect(currentLevel({ ...good('operational'), data: { level } })).toBe('unknown');
+      expect(publishedLevel({ ...good('operational'), data: { level } })).toBe('unknown');
     }
   });
 
   it('counts an empty result as a real read, not a failure', () => {
     // amendment 4. `empty` means the feed published nothing, which is a fact.
-    expect(currentLevel({ ...good('operational'), empty: true })).toBe('operational');
+    expect(publishedLevel({ ...good('operational'), empty: true })).toBe('operational');
   });
 
   it('is not fooled by degraded alone — degraded is a partial read, not a failed one', () => {
-    expect(currentLevel({ ...good('operational'), degraded: true })).toBe('operational');
+    expect(publishedLevel({ ...good('operational'), degraded: true })).toBe('operational');
   });
 
   it('isStatusLevel accepts exactly the five contract levels', () => {
@@ -77,7 +77,7 @@ describe('the seam G2 HIGH 4 found, through the real store', () => {
     expect(snapshot.error?.code).toBe('http_503');
 
     // And the one thing anybody may colour a tile from says we do not know.
-    expect(currentLevel(snapshot)).toBe('unknown');
+    expect(publishedLevel(snapshot)).toBe('unknown');
     store.close();
   });
 });

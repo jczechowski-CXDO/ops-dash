@@ -141,7 +141,7 @@ export type ServiceEntry = {
    * correlation engine. One rule, one definition: the API and the correlator
    * cannot disagree about whether a vendor is green.
    *
-   * It was `currentLevel(result)` until 2026-09-19, and they DID disagree —
+   * It was `publishedLevel(result)` until 2026-09-19, and they DID disagree —
    * the route served Zendesk `unknown` while the engine, in the same process
    * and against the same store, had it `operational` with 2/2 of our probes
    * passing. `currentLevel` answers the narrower question "what did the vendor

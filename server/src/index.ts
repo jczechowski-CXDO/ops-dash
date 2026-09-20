@@ -21,9 +21,10 @@
  *     service nobody notices is missing.
  */
 
-import type { ServiceId, VendorPlatform, Incident, CheckRun } from '@ops-dash/shared';
+import type { ServiceId, Incident, CheckRun } from '@ops-dash/shared';
 import { openStore, type Store } from './store/db.js';
 import { vendorLevel } from './store/currentLevel.js';
+import { SERVICE_PLATFORM } from './services.js';
 import { loadVendorFeeds } from './adapters/vendorstatus/common.js';
 import { pollVendor } from './adapters/vendorstatus/index.js';
 import type { TokenSource } from './http/graphToken.js';
@@ -34,25 +35,6 @@ import type { ServiceSignal } from './engine/rules.js';
 import { buildApi, vendorSource, SERVICE_ORDER } from './api/routes.js';
 import type { FetchLike } from './http/fetchJson.js';
 
-/**
- * Which platform each service's vendor half comes from.
- *
- * A `Record<ServiceId, …>` rather than a lookup over `vendors.json`, and that
- * is deliberate: this way an eighth `ServiceId` fails the typecheck instead of
- * silently acquiring no platform. `statusio` and `msgraph` have no adapter in
- * this milestone and are listed anyway — `blackout` groups by platform, so a
- * service whose platform were merely absent would group with everything else
- * that had none and could manufacture a blackout out of unrelated services.
- */
-export const SERVICE_PLATFORM: Record<ServiceId, VendorPlatform> = {
-  proofpoint: 'statusio',   // Milestone 3
-  m365: 'msgraph',          // Milestone 3
-  jira: 'statuspage',
-  helpjuice: 'statuspage',
-  claude: 'statuspage',
-  openai: 'statuspage',
-  zendesk: 'zendesk-ssp',
-};
 
 export const VENDOR_INTERVAL_MS = 60_000;
 /** Retention runs hourly, not per poll. The windows are 45 and 180 DAYS, so a

@@ -6,7 +6,17 @@ import type { SourceResult, StatusLevel, VendorPlatform } from '@ops-dash/shared
 type HasLevel = { level?: unknown };
 
 /**
- * The only honest way to read a health level off a stored snapshot.
+ * What the vendor PUBLISHED, with staleness applied — a source, not an answer.
+ *
+ * **Almost nothing should call this.** `vendorLevel` below is the one public
+ * reading, and a guard in `server/src/guards.test.ts` enforces that only this
+ * file may import this function. The rename from `currentLevel` is the third
+ * defence at this seam: twice the fix for "two components disagree about a
+ * service's level" was to put the honest answer in a shared function, and twice
+ * a caller then reached for the wrong sibling — because `currentLevel` and
+ * `vendorLevel` both sound like the answer. One of them now sounds like a
+ * source, and the guard makes it mechanical rather than a third paragraph of
+ * documentation.
  *
  * G2 HIGH 4, and the trap is subtle enough that it got past a whole milestone.
  *
@@ -33,7 +43,7 @@ type HasLevel = { level?: unknown };
  * rendering "was operational, 3h ago" may read `data.level` directly — that is
  * what it is for.
  */
-export function currentLevel(snapshot: SourceResult<unknown> | undefined): StatusLevel {
+export function publishedLevel(snapshot: SourceResult<unknown> | undefined): StatusLevel {
   // Never polled, or no such source. Not a statement of health.
   if (!snapshot) return 'unknown';
   // The newest attempt failed. Whatever the stored payload says, we do not know
@@ -115,11 +125,11 @@ export function vendorLevel(
   platform: VendorPlatform,
   ours: { passing: number; total: number },
 ): { level: StatusLevel; inferred?: { basis: string } } {
-  const published = currentLevel(snapshot);
+  const published = publishedLevel(snapshot);
   // The vendor spoke. Nothing to infer, in either direction.
   if (published !== 'unknown') return { level: published };
   if (!PLATFORMS_WITHOUT_PUBLISHED_HEALTH.has(platform)) return { level: 'unknown' };
-  // Conditions 2 and 3. `currentLevel` already returned `unknown` for a failed
+  // Conditions 2 and 3. `publishedLevel` already returned `unknown` for a failed
   // read, but it returns `unknown` for several reasons and only one of them is
   // inferable, so this re-checks rather than trusting the shared verdict.
   if (!snapshot || snapshot.error) return { level: 'unknown' };
