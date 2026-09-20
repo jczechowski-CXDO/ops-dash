@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   BLOCKED_TYPE_NAMES,
-  MAX_FIELD_CHARS,
   PASSED_TYPE_NAMES,
   REASON_MAP,
   foundCount,
@@ -12,7 +11,6 @@ import {
   mapReason,
   parseByType,
   parseSearch,
-  safeText,
 } from './parse.js';
 import { BLOCKED_CLASSIFICATION_IDS } from './index.js';
 
@@ -27,60 +25,6 @@ const fixture = (name: string): unknown =>
  *  and a test that contains the literal it forbids is the shape `RESUME.md`
  *  records four separate agents getting wrong. */
 const RTL_OVERRIDE = String.fromCharCode(0x202e);
-const ZERO_WIDTH = String.fromCharCode(0x200b);
-const NUL = String.fromCharCode(0x00);
-
-describe('safeText — the one function standing between a mail filter and a browser', () => {
-  it('makes a right-to-left override visible instead of letting it reverse the text', () => {
-    // The attack: U+202E before 'txt.exe' displays as 'exe.txt'. React escapes
-    // markup and does nothing about this, because there is no markup in it.
-    const subject = `invoice_${RTL_OVERRIDE}txt.exe`;
-    expect(safeText(subject, 'x')).toBe('invoice_[U+202E]txt.exe');
-  });
-
-  it('escapes zero-width and control characters, which are the same trick with different codepoints', () => {
-    expect(safeText(`pay${ZERO_WIDTH}pal`, 'x')).toBe('pay[U+200B]pal');
-    expect(safeText(`a${NUL}b`, 'x')).toBe('a[U+0000]b');
-  });
-
-  it('leaves real languages completely alone — this is not an ASCII filter', () => {
-    // A subject in Cyrillic, Greek or CJK is ordinary mail. Narrowing the escape
-    // to printable ASCII would mangle legitimate content, and an operator who
-    // cannot read the table stops reading the table.
-    for (const text of ['Здравствуйте', 'παραλαβή', '請查收附件', 'Grüße — Rechnung №4', 'ceo@exarnple.com']) {
-      expect(safeText(text, 'x')).toBe(text);
-    }
-  });
-
-  it('refuses a non-string rather than coercing one', () => {
-    // `String(value)` on an object runs vendor-shaped code; on null it writes
-    // the word 'null' into a table cell, which reads as a sender named null.
-    expect(safeText(null, '(none)')).toBe('(none)');
-    expect(safeText(undefined, '(none)')).toBe('(none)');
-    expect(safeText(42, '(none)')).toBe('(none)');
-    expect(safeText({ toString: () => 'ceo@example.com' }, '(none)')).toBe('(none)');
-    expect(safeText(['a', 'b'], '(none)')).toBe('(none)');
-  });
-
-  it('marks a truncation rather than presenting a prefix as the whole string', () => {
-    const long = 'A'.repeat(MAX_FIELD_CHARS + 50);
-    const out = safeText(long, 'x');
-    expect(out).toBe(`${'A'.repeat(MAX_FIELD_CHARS)}… [truncated]`);
-    // The literal boundary, pinned rather than derived: a cut that happened
-    // silently is a benign prefix hiding a hostile suffix.
-    expect(out.startsWith('A'.repeat(MAX_FIELD_CHARS))).toBe(true);
-    expect(safeText('A'.repeat(MAX_FIELD_CHARS), 'x')).toBe('A'.repeat(MAX_FIELD_CHARS));
-  });
-
-  it('passes hostile-looking TEXT straight through — the hostility is the product', () => {
-    // These are the strings the page exists to show. None of them is a sink
-    // here: the adapter emits no href, no src and no style. Defanging them
-    // would hide the finding from the only person who can act on it.
-    for (const text of ['javascript:alert(1)', '<script>x</script>', 'http://evil.example.net/pay', "'; DROP TABLE"]) {
-      expect(safeText(text, 'x')).toBe(text);
-    }
-  });
-});
 
 describe('the vendor reason vocabulary, measured against a live 24-hour window', () => {
   it('maps the five reasons that have a contract equivalent', () => {

@@ -1,4 +1,8 @@
 import type { BlockedMessage } from '@ops-dash/shared';
+// Published at the top level beside services.ts: Endpoints and Entra carry
+// vendor-authored free text too, and two correct copies of this would diverge
+// the moment either premise moved.
+import { safeText } from '../../vendorText.js';
 
 /**
  * Everything this adapter does to a vendor payload, with no I/O in it.
@@ -7,120 +11,20 @@ import type { BlockedMessage } from '@ops-dash/shared';
  * plainly: *"The Email page's whole job is to display attacker-authored
  * content."* A subject line and a sender address on this screen were chosen on
  * purpose by someone hostile, and they travel from a mail filter, through here,
- * into a browser. Everything below exists because of that sentence.
+ * into a browser.
  *
- * Three rules, and they pull against each other, which is why they are written
- * down rather than left to taste:
+ * **The handling of hostile text itself now lives in `server/src/vendorText.ts`
+ * and its three rules are argued there**, because Endpoints and Entra carry
+ * vendor-authored free text too and this page should not be the only one that
+ * thought about it. Read that module first; this one is what remains once the
+ * text is safe. In short: nothing emitted here may become a sink, the vendor's
+ * own words pass through verbatim because the hostility is the finding, and
+ * only the codepoints that do not render as themselves are made visible.
  *
- * 1. **Nothing here may become a sink.** No value this module emits is a URL, a
- *    style, or markup. The four fields it fills — `at`, `from`, `to`, `subject`
- *    — are rendered by `Email.tsx` as text in a table, and `reason` picks a
- *    *tone* from a mapping rather than colouring itself. React escapes text;
- *    an `href`, a `src` or a `style` string is where it does not, and none of
- *    those is reachable from this data.
- * 2. **The hostility is the product.** An operator looking at this page needs
- *    to see the lookalike domain exactly as it was sent. So this module does
- *    **not** sanitise, strip, defang, lowercase or "clean up" vendor text. A
- *    sender of `ceo@exarnple.com` renders as `ceo@exarnple.com`, because the
- *    homoglyph *is* the finding.
- * 3. **But invisible hostility is not content, it is a rendering attack.** Rule
- *    2 stops at the codepoints that do not render as themselves — a
- *    right-to-left override in a subject makes `invoice-exe.txt` display as
- *    `invoice-txt.exe`, and React's escaping does nothing about it because
- *    there is no markup involved. Those are made **visible** (`[U+202E]`)
- *    rather than removed, which serves rule 2 rather than breaking it: the
- *    operator learns that the sender used an override, which is itself a
- *    stronger signal than the text would have been.
+ * What stays here is the part that is genuinely about *mail*: which vendor
+ * classification counts as blocked, which reason maps onto the contract's
+ * vocabulary, and the two payload shapes this API answers with.
  */
-
-// ------------------------------------------------------------- hostile text
-
-/**
- * The longest vendor string carried into a table cell.
- *
- * Not a security boundary on its own — `fetchJson`'s 5 MB cap is the one that
- * stops a memory attack, and it is upstream of this. This is about the screen:
- * `Email.tsx` truncates the subject column with CSS, which does nothing for the
- * other three, and a 40,000-character sender would push the table's layout off
- * the page for every row. 512 is roughly four times the longest subject in a
- * live 24-hour sample, so nothing real is reached by it.
- */
-export const MAX_FIELD_CHARS = 512;
-
-/**
- * Codepoints that do not render as themselves, escaped so that they do. The
- * ranges are enumerated in the table below rather than spelled out in this
- * comment, for the reason given beneath it: a comment naming these characters
- * has to contain them.
- *
- * **Deliberately NOT a general "printable ASCII only" filter.** Real senders
- * write in real languages; a subject in Cyrillic, Greek or CJK is ordinary mail
- * and must survive untouched. Narrowing this to an allowlist of ASCII would
- * mangle legitimate content into unreadability, which is the failure mode this
- * page can least afford — an operator who cannot read the table stops reading
- * the table.
- *
- * That leaves homoglyph attacks (`а` U+0430 for `a`) rendering as themselves,
- * which is correct and is the point: the *vendor* is the one positioned to
- * judge that, and it does — a confusable sender domain arrives classified, and
- * the classification is what `reason` carries.
- */
-const INVISIBLE_RANGES: readonly [number, number][] = [
-  [0x0000, 0x001f], // C0 controls
-  [0x007f, 0x009f], // DEL and the C1 controls
-  [0x200b, 0x200f], // zero-width space/joiner + the LTR/RTL marks
-  [0x2028, 0x2029], // line and paragraph separators
-  [0x202a, 0x202e], // bidi embedding and OVERRIDE — the filename trick
-  [0x2066, 0x2069], // bidi isolates — the same attack, newer syntax
-  [0xfeff, 0xfeff], // zero-width no-break space / BOM
-];
-
-/** Written as codepoint ranges rather than as a regular expression literal, on
- *  purpose. A character class spelling these out has to contain them, and a
- *  source file containing U+2028 is a source file whose next editor cannot see
- *  what they are editing — one of these codepoints terminates a JavaScript line
- *  on its own. The table is also the documentation, which a `\u`-soup class is
- *  not. */
-const isInvisible = (code: number): boolean =>
-  INVISIBLE_RANGES.some(([lo, hi]) => code >= lo && code <= hi);
-
-const escapeInvisible = (s: string): string => {
-  let out = '';
-  for (const ch of s) {
-    const code = ch.codePointAt(0)!;
-    out += isInvisible(code) ? `[U+${code.toString(16).toUpperCase().padStart(4, '0')}]` : ch;
-  }
-  return out;
-};
-
-/**
- * A vendor string, made safe to render as text — or `fallback` if what arrived
- * was not a string at all.
- *
- * **The type check is the load-bearing half, and it is checked rather than
- * coerced.** `String(value)` on `{ toString: () => '…' }` runs vendor-shaped
- * code from a JSON payload; on `null` it produces the word "null" in a table
- * cell, which reads as a sender named null rather than as a missing sender.
- * JSON cannot carry a function, so the first of those is not reachable through
- * `fetchJson` today — but `fetchJson` is not the only thing that could ever
- * hand this a parsed object, and "not reachable today" is how the last three
- * defects in this repo were described before they shipped.
- *
- * A note on the escape's own ambiguity: a subject containing the literal text
- * `[U+202E]` is indistinguishable afterwards from one containing the override.
- * Accepted. The alternative is a scheme nobody reading the screen can decode,
- * and the confusion is in the safe direction — the operator looks harder at a
- * message either way.
- */
-export function safeText(value: unknown, fallback: string): string {
-  if (typeof value !== 'string') return fallback;
-  const escaped = escapeInvisible(value);
-  if (escaped.length <= MAX_FIELD_CHARS) return escaped;
-  // The marker says a cut happened. A silent truncation is a different string
-  // presented as the whole one, and on this page that is how a benign prefix
-  // hides a hostile suffix.
-  return `${escaped.slice(0, MAX_FIELD_CHARS)}… [truncated]`;
-}
 
 // ------------------------------------------------------------------- reasons
 

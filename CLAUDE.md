@@ -114,6 +114,56 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   call and is the trigger for everything on the "Reopens at release" list in
   `docs/superpowers/security/2026-09-18-m1-review.md`.
 
+## The machine this runs on
+
+Facts agents keep rediscovering, one at a time, at the cost of a round trip each.
+
+| | |
+|---|---|
+| **Runtime** | Node 24 (`node:sqlite` is a built-in). Linux. |
+| **The live server** | `http://192.168.1.201:4400` — bound `0.0.0.0` by John's ruling. `PORT=4400 OPS_DASH_DB=… node server/dist/main.js`. |
+| **Its store** | `/tmp/longrun.sqlite` holds real overnight data. **Point your own runs at a different `OPS_DASH_DB`.** |
+| **Credentials** | `~/.config/ops-dash/{graph,epc,hornet,auth}.json`, mode 600. Located by `OPS_DASH_*_CONFIG` env vars **which are not set** — every loader falls back to `join(homedir(), '.config', 'ops-dash', …)`, and the fallback is what has always been used. Do not export anything. |
+| **Scratchpad** | Use it for backups, probes and throwaway specs. Never `/tmp` for repo-adjacent work, and never a scratch file under `server/src` or `web/src` — the guards walk those and a stray file reddens somebody else's build. |
+| **Baselines** | Generated on Linux. Platform-sensitive; they will not match Windows. |
+
+**`npm test` runs `typecheck` first via `pretest`, and `tsc -b` aborts on the first file
+that fails to PARSE.** A syntax error anywhere in `server/src` or `web/src` therefore makes
+the typecheck **blind, not merely red** — every other file goes unchecked and every agent
+reads a clean-looking result as being about their own code. Measured: a deliberate type error
+in `rules.ts` produced no output at all while an unrelated file was unparseable. If you see
+only other people's errors, you have learned nothing about yours.
+
+**The one command that always tells the truth is `npm test` from the repo root.** A scoped run
+(`--root server`, a single file path) prints "Type Errors: no errors" about that scope only,
+and has produced a red branch twice.
+
+## What needs a human, and what does not
+
+**Never prompts, run freely:** the project's own `npm`/`npx` commands, read-only `git`
+(`log`, `status`, `diff`, `show`, `ls-files`), the usual inspection tools, `node -e` and
+`python3 -c` for proving a claim rather than asserting it, and `curl` against
+`127.0.0.1`/`localhost`.
+
+**Deliberately still asks, and should:** `curl` to any external host. Probing a vendor is a
+decision with consequences — one over-privileged token has already been revoked over exactly
+that, and an adapter's first live call is the moment to think rather than the moment to be
+unblocked.
+
+**Never, and these are denied at the permission layer rather than merely written down here**,
+because this project has counted four accurate comments that failed to prevent the thing they
+described:
+
+- `git add -A` / `git add .` — captures another agent's in-flight work under your message.
+- `git stash` — removes other agents' uncommitted files from the shared tree.
+- `git checkout -- <file>` / `git restore` — restores to **HEAD, not to your edit**, and the
+  suite goes green afterwards because green was also the state you just lost. Cost one agent
+  an entire seam rework. **Restore a mutation from a copy you made.**
+- `git reset --hard`, `git push --force`, `git rebase`, `git clean` — four agents are live on
+  this branch.
+- `rm -rf` — the tree holds uncommitted work that is not yours.
+- `npm audit fix --force` — installs vitest 5 as a breaking change mid-build.
+
 ## Working with the agent team
 
 The specialists live in `.claude/agents/`. They are long-lived collaborators, not
