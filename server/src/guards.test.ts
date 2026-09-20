@@ -242,8 +242,14 @@ describe('only its own module may read the vendor’s published level', () => {
  * **Detection that changes because somebody clicked a button is not detection.**
  *
  * `Incident.ack` and `Incident.muted` exist and are real from Milestone 4 — the
- * store folds an append-only log into them and the API serves them. The engine
- * must never read either. An acknowledged incident must be incapable of
+ * store folds an append-only log into them. The engine must never read either.
+ *
+ * **CORRECTED. This docblock said "and the API serves them". It does not** —
+ * `ApiStore` has no flags reader and `/api/incidents` omits both fields, so the
+ * whole ack/mute feature is currently invisible to every screen. That is a
+ * queued route, not a defect; the sentence asserting it was done was the defect.
+ * Found by `g6` (M-3), in a guard I wrote two hours after committing about
+ * comments that were accurate when written and false when they mattered. An acknowledged incident must be incapable of
  * behaving differently from an identical unacknowledged one, or the thing we
  * call detection is partly a function of who was at their desk.
  *
@@ -297,8 +303,29 @@ const engineFiles = () => sources().filter((f) => rel(f.path).startsWith('server
  *  `sources()`, which matters more than it sounds: `correlate.ts`'s own docblock
  *  names ack and mute in the very sentence describing correct behaviour, so a
  *  guard without that would fire on the comment documenting its own compliance. */
+/**
+ * Three ways to read the forbidden field, not one.
+ *
+ * G6 M-3: the first version tested only `/\.\s*(ack|muted)\b/` — property access.
+ * It missed `const { ack, muted } = prior;` and `prior['ack']`, which are the
+ * two other natural ways to write exactly the thing this forbids. A guard that
+ * catches one spelling of a rule teaches the other spellings, which is worse
+ * than no guard because it looks like coverage.
+ *
+ * The destructure pattern deliberately requires the braces, so the permitted
+ * `const { resolvedAt, ...rest } = prior` still passes — that spread is how ack
+ * and mute are carried through opaquely, which is required. Carrying a value
+ * through is fine; naming it is not.
+ */
+const READ_SHAPES: ReadonlyArray<[string, RegExp]> = [
+  ['property access', /\.\s*(ack|muted)\b/],
+  ['bracket access', /\[\s*['"`](ack|muted)['"`]\s*\]/],
+  ['destructure', /\{[^}]*\b(ack|muted)\b[^}]*\}\s*=/],
+];
+
 const readsOperatorAction = (code: string) =>
-  /\.\s*(ack|muted)\b/.test(code) || ENGINE_MUST_NOT_READ.some((n) => new RegExp(`\\b${n}\\b`).test(code));
+  READ_SHAPES.some(([, re]) => re.test(code)) ||
+  ENGINE_MUST_NOT_READ.some((n) => new RegExp(`\\b${n}\\b`).test(code));
 
 describe('the engine reads no operator action', () => {
   it('scans the engine, and is not passing because it found nothing to scan', () => {
@@ -327,6 +354,10 @@ describe('the engine reads no operator action', () => {
     // is proven able to fail without anybody writing a broken engine.
     expect(readsOperatorAction('if (prior.ack) return carryForward(prior);')).toBe(true);
     expect(readsOperatorAction('if (prior.muted) continue;')).toBe(true);
+    // The two shapes the first version of this guard missed (G6 M-3).
+    expect(readsOperatorAction('const { ack, muted } = prior;')).toBe(true);
+    expect(readsOperatorAction("if (prior['ack']) continue;")).toBe(true);
+    expect(readsOperatorAction('const { muted } = prior;')).toBe(true);
     expect(readsOperatorAction("import { foldActions } from '../store/incidentActions.js';")).toBe(true);
 
     // Must NOT fire: the docblock sentence that describes correct behaviour,
