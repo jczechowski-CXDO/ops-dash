@@ -25,6 +25,7 @@ const load = (name: string): Record<string, unknown> =>
 /** The committed captures, keyed by the URL `vendors.json` actually requests. */
 function realPayloads(): Map<string, unknown> {
   return new Map<string, unknown>([
+    ['https://api.status.io/1.0/status/591aaa7fe69f388425000fda', load('statusio-hornet.json')],
     ['https://jira-software.status.atlassian.com/api/v2/summary.json', load('statuspage-jira-summary.json')],
     ['https://status.helpjuice.com/api/v2/summary.json', load('statuspage-helpjuice-summary.json')],
     ['https://status.claude.com/api/v2/summary.json', load('statuspage-claude-summary.json')],
@@ -154,8 +155,13 @@ describe('the chain, end to end, on the real captured payloads', () => {
 
     const byId = Object.fromEntries(a.signals().map((s) => [s.serviceId, s]));
     expect(Object.keys(byId)).toHaveLength(7);
-    expect(byId['proofpoint']!.vendor).toMatchObject({ level: 'unknown', platform: 'statusio', errorCode: 'platform_unsupported' });
+    // m365 is the last service with no adapter — its own needs a credential and
+    // is Milestone 3. proofpoint joined the polled set when Hornetsecurity's
+    // status.io feed landed, and reads `maintenance` off the captured payload
+    // because Hornet.email was in a planned window in our datacentre that day.
     expect(byId['m365']!.vendor).toMatchObject({ level: 'unknown', platform: 'msgraph', errorCode: 'platform_unsupported' });
+    expect(byId['proofpoint']!.vendor).toMatchObject({ level: 'maintenance', platform: 'statusio' });
+    expect(byId['proofpoint']!.vendor.errorCode).toBeUndefined();
     expect(byId['jira']!.vendor.level).toBe('operational');
   });
 });

@@ -3,6 +3,7 @@ import type { FetchLike } from '../../http/fetchJson.js';
 import { unknownVendor, type Vendor, type VendorFeed } from './common.js';
 import { pollStatuspage } from './statuspage.js';
 import { pollZendeskSsp } from './zendeskSsp.js';
+import { pollStatusio } from './statusio.js';
 
 export { loadVendorFeeds, VENDORS_JSON } from './common.js';
 export type { Vendor, VendorFeed } from './common.js';
@@ -27,9 +28,11 @@ export async function pollVendor(feed: VendorFeed, fetchImpl?: FetchLike): Promi
     case 'zendesk-ssp':
       return pollZendeskSsp(feed, fetchImpl);
     case 'statusio':
+      return pollStatusio(feed, fetchImpl);
     case 'msgraph':
-      // Milestone 3 builds these. Until then the honest answer is "no adapter",
-      // reported without making a request at all.
+      // Milestone 3 builds this one; it is the first adapter that needs a
+      // credential. Until then the honest answer is "no adapter", reported
+      // without making a request at all.
       return {
         fetchedAt: new Date().toISOString(),
         degraded: false,

@@ -10,12 +10,22 @@
     "page-level rollup with no components, incidents or maintenance.",
     "Zendesk: the url is the SSP base; the adapter appends /incidents.json and, only when a",
     "component is configured, /services.json.",
-    "proofpoint (statusio) and m365 (msgraph) are deliberately absent: their adapters are",
     "Milestone 3. index.ts answers for them with an explicit unsupported-platform error, so",
     "adding them here before the adapter exists reads unknown rather than green.",
-    "Zendesk: 'tenants' scopes the feed per account via ?subdomain=. We have two \u2014 crexendo and netsapiens \u2014 and BOTH are queried and merged, deduped by incident id. They share Pod 23 today, so one query would happen to cover both; that coincidence is exactly what not to build on."
+    "Zendesk: 'tenants' scopes the feed per account via ?subdomain=. We have two \u2014 crexendo and netsapiens \u2014 and BOTH are queried and merged, deduped by incident id. They share Pod 23 today, so one query would happen to cover both; that coincidence is exactly what not to build on.",
+    "proofpoint is Hornetsecurity on status.io (live.hornet-status.com); the page id is in its HTML. 'locations' filters to OUR datacentres \u2014 the feed publishes ten and an unfiltered Frankfurt outage would land on our tile. Ours is named two mutually-exclusive ways: 'United States - Atlanta' carries the 13 core email services, 'United States - Georgia' the 3 newer 365 products. Both, or a third of the estate drops out.",
+    "m365 (msgraph) is still deliberately absent: its adapter needs a credential and is Milestone 3. index.ts answers for it with an explicit unsupported-platform error, so it reads unknown rather than green."
   ],
   "feeds": [
+    {
+      "id": "proofpoint",
+      "platform": "statusio",
+      "url": "https://api.status.io/1.0/status/591aaa7fe69f388425000fda",
+      "locations": [
+        "United States - Atlanta",
+        "United States - Georgia"
+      ]
+    },
     {
       "id": "jira",
       "platform": "statuspage",

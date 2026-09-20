@@ -58,9 +58,15 @@ self-hosted. Read-only upstream; the only writes are to our own store.
   ever — fixtures are committed and pushed, so they leave the machine even though the
   app does not.
 - **A failed fetch must never render as green.** `unknown` is neutral grey, never counts
-  toward the all-clear, and never satisfies the vendor half of the Sev1 rule. Two of the
-  seven services are permanently `unknown`, so **"ALL SYSTEMS OPERATIONAL" is unreachable
-  in production** — that is correct, not a bug to fix.
+  toward the all-clear, and never satisfies the vendor half of the Sev1 rule. `m365` is
+  permanently `unknown` until its adapter exists, so **"ALL SYSTEMS OPERATIONAL" is
+  unreachable in production** — that is correct, not a bug to fix.
+- **Filter every vendor feed to the part of it that serves us.** Zendesk publishes every
+  pod worldwide (`tenants` → `?subdomain=`, 17 incidents down to 10) and Hornetsecurity
+  publishes ten datacentres (`locations` → `containers`, and a service can read
+  `maintenance` globally while our region is fine). An unfiltered feed puts other people's
+  outages on our tiles, and a tile whose incidents are usually irrelevant is one the
+  operator stops reading — the same failure as a permanently-red tile, from the other side.
 - **Everything upstream is read-only.** No mutating third-party call belongs in this repo.
 - **Every network call goes through `server/src/http/fetchJson.ts`.** It owns the failure
   rules — non-2xx, a 2xx carrying non-JSON, an empty body, a throw, a body over the 5 MB
@@ -109,11 +115,11 @@ passes, prove it can fail.
 Milestone 1 (offline scaffold) is complete: 539 unit tests, 153 e2e tests, 152 visual
 baselines, eighteen repository guards, zero AA contrast failures across both themes.
 
-Milestone 2 (detection) is complete: 910 unit tests. The chain reads five real vendor
-status feeds, runs three synthetic probes, correlates two rules, and serves the result
+Milestone 2 (detection) is complete: 1067 unit tests. The chain reads six real vendor
+status feeds, runs four synthetic probes, correlates two rules, and serves the result
 read-only. It has been run against the live internet and detects a simulated outage end
-to end. Two of the seven services have no adapter until M3 and read `unknown` by design.
+to end. Only `m365` has no adapter — its own is the first that needs a credential.
 
-Milestones 3-4 — the remaining adapters (statusio, msgraph) and live wiring plus auth —
-each get their own plan under `docs/superpowers/plans/`. **The server needs Node 24**:
+Milestone 3 — the msgraph adapter and live UI wiring plus auth — gets its own plan under
+`docs/superpowers/plans/`. **The server needs Node 24**:
 the store is `node:sqlite`, a built-in.

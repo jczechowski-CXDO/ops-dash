@@ -43,6 +43,23 @@ export type VendorFeed = {
    * Zendesk subdomain".
    */
   tenants?: string[];
+  /**
+   * The vendor's datacentres that actually serve us, when the vendor publishes
+   * per-location health.
+   *
+   * status.io is the reason this exists. Hornetsecurity publishes ten
+   * `containers` — Frankfurt, Montreal, Lille, Hannover, Düsseldorf, London,
+   * Central Switzerland, Europe-West and two United States entries — and
+   * without a filter a Frankfurt outage lands on our tile. Same shape as
+   * `tenants`, different axis: that one narrows WHOSE account, this one narrows
+   * WHERE it runs.
+   *
+   * Ours is named two ways and they are mutually exclusive, not duplicates:
+   * `United States - Atlanta` carries the 13 core email services and
+   * `United States - Georgia` the 3 newer 365 products. Listing only one
+   * silently drops a third of the estate from the rollup.
+   */
+  locations?: string[];
 };
 
 /** The vendor half of a service tile, as the contract defines it. */
@@ -160,7 +177,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
   return feeds.map((entry, i) => {
     const where = `${path}: feeds[${i}]`;
     if (typeof entry !== 'object' || entry === null) throw new Error(`${where}: not an object`);
-    const { id, platform, url, component, tenants } = entry as Record<string, unknown>;
+    const { id, platform, url, component, tenants, locations } = entry as Record<string, unknown>;
     if (typeof id !== 'string' || !(id in SERVICE_IDS)) {
       throw new Error(`${where}: id ${JSON.stringify(id)} is not a ServiceId`);
     }
@@ -172,6 +189,11 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
     }
     if (component !== undefined && typeof component !== 'string') {
       throw new Error(`${where}: component must be a string when present`);
+    }
+    if (locations !== undefined) {
+      if (!Array.isArray(locations) || locations.length === 0 || !locations.every((l) => typeof l === 'string' && l.length > 0)) {
+        throw new Error(`${where}: locations must be a non-empty array of non-empty strings when present`);
+      }
     }
     if (tenants !== undefined) {
       // Validated, because each is interpolated into a query string. A hostname
@@ -193,6 +215,7 @@ export function loadVendorFeeds(path: string = VENDORS_JSON): VendorFeed[] {
       url,
       ...(component === undefined ? {} : { component }),
       ...(tenants === undefined ? {} : { tenants: tenants as string[] }),
+      ...(locations === undefined ? {} : { locations: locations as string[] }),
     };
   });
 }

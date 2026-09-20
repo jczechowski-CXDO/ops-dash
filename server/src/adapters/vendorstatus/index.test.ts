@@ -45,16 +45,21 @@ const recording = (body: string) => {
 };
 
 describe('the shipped vendors.json', () => {
-  it('lists the five public feeds this milestone polls', () => {
+  it('lists the six public feeds we poll, and only m365 is left without one', () => {
     const feeds = loadVendorFeeds();
-    expect(feeds.map((f) => f.id)).toEqual(['jira', 'helpjuice', 'claude', 'openai', 'zendesk']);
+    expect(feeds.map((f) => f.id)).toEqual(['proofpoint', 'jira', 'helpjuice', 'claude', 'openai', 'zendesk']);
     expect(feeds.map((f) => f.platform)).toEqual([
+      'statusio',
       'statuspage',
       'statuspage',
       'statuspage',
       'statuspage',
       'zendesk-ssp',
     ]);
+    // m365 is the only service with no feed: its adapter needs a credential and
+    // is Milestone 3. Asserted positively so that adding a feed for it without
+    // updating this test fails here rather than passing quietly.
+    expect(feeds.some((f) => f.id === 'm365')).toBe(false);
   });
 
   it('points only at https URLs', () => {
@@ -140,24 +145,27 @@ describe('the config claim: a fifth Statuspage vendor is a config line and no co
     // change to statuspage.ts to pass, the claim is false and the design owes
     // an answer. It did not, on 2026-09-19.
     const shipped = loadVendorFeeds();
+    // `m365` is the only ServiceId with no shipped feed, so it is the only one
+    // this test can add without colliding. It was `proofpoint` until
+    // Hornetsecurity's status.io feed landed.
     const fifth = {
-      id: 'proofpoint',
+      id: 'm365',
       platform: 'statuspage',
-      url: 'https://status.hornetsecurity.example/api/v2/summary.json',
+      url: 'https://status.example/api/v2/summary.json',
     };
     const path = tempConfig({ feeds: [...shipped, fifth] });
 
     const feeds = loadVendorFeeds(path);
-    expect(feeds.length).toBe(6);
+    expect(feeds.length).toBe(7);
     expect(feeds.filter((f) => f.platform === 'statuspage').length).toBe(5);
 
-    const added = feeds.find((f) => f.id === 'proofpoint')!;
+    const added = feeds.find((f) => f.id === 'm365')!;
     const { urls, respond } = recording(fixture('statuspage-helpjuice-summary.json'));
     const result = await pollVendor(added, respond);
 
     expect(vendorOf(result).level).toBe('operational');
     expect(vendorOf(result).platform).toBe('statuspage');
-    expect(urls).toEqual(['https://status.hornetsecurity.example/api/v2/summary.json']);
+    expect(urls).toEqual(['https://status.example/api/v2/summary.json']);
   });
 
   it('honours a component filter that exists only in a config file', async () => {

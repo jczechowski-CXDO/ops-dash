@@ -1,0 +1,1105 @@
+{
+  "result": {
+    "status_overall": {
+      "updated": "2026-09-19T05:42:40.361Z",
+      "status": "Planned Maintenance",
+      "status_code": 200
+    },
+    "status": [
+      {
+        "id": "65b77c7564e53106578d27f8",
+        "name": "365 Permission Manager",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-09-07T18:50:07.928Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdae04ec6fa05edefdd80",
+            "name": "United States - Georgia",
+            "updated": "2026-09-16T12:14:40.249Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-09-16T12:14:40.249Z"
+      },
+      {
+        "id": "679a0215d4200105d45b8748",
+        "name": "365 Multi Tenant Manager",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:27:02.890Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdae04ec6fa05edefdd80",
+            "name": "United States - Georgia",
+            "updated": "2026-06-18T09:44:45.788Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-18T09:44:45.788Z"
+      },
+      {
+        "id": "61caf4b6714e1f053880dd12",
+        "name": "365 Total Backup",
+        "status": "Planned Maintenance",
+        "status_code": 200,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-08-29T13:04:24.530Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:56:39.592Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-09-16T08:00:04.042Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-09-03T14:17:59.298Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdac58612a305a8631485",
+            "name": "United Kingdom - London",
+            "updated": "2026-09-16T08:00:04.041Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdae04ec6fa05edefdd80",
+            "name": "United States - Georgia",
+            "updated": "2026-09-03T14:17:59.299Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-09-16T08:00:04.042Z"
+      },
+      {
+        "id": "5d2c48502c9a4a587f9b43a6",
+        "name": "365 Total Protection",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:46:20.921Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:56:53.915Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:56:53.959Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:46:20.922Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:56:53.960Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:56:53.960Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:08:03.330Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:56:53.960Z"
+      },
+      {
+        "id": "65b77ca11c9db205d1a298c7",
+        "name": "AI Recipient Validation",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:26:19.171Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:26:19.171Z"
+      },
+      {
+        "id": "59301d63b611ce1e0d0011e9",
+        "name": "Advanced Threat Protection",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:46:51.742Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:57:27.066Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:57:27.067Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:57:27.068Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:09:40.175Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:46:51.741Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:09:40.174Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:57:27.068Z"
+      },
+      {
+        "id": "592da05eef3e6af26b000c4f",
+        "name": "Control Panel",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-09-03T09:58:19.099Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-09-03T09:58:19.100Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-09-03T09:58:19.098Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-09-03T09:58:19.097Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-09-03T09:58:19.099Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-09-02T13:30:28.965Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-09-02T13:30:29.011Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-09-03T09:58:19.100Z"
+      },
+      {
+        "id": "6a2fd88af7a0500610c18346",
+        "name": "DMARC Manager",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:47:35.981Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:57:49.319Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:57:49.318Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:57:49.317Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:11:09.097Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:47:35.982Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:11:09.096Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:57:49.319Z"
+      },
+      {
+        "id": "59b7a78eed25a2800500084a",
+        "name": "Email Archiving",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:11:48.756Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:57:58.449Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:57:58.448Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:57:58.450Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:11:48.758Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:11:48.754Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:11:48.712Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:57:58.450Z"
+      },
+      {
+        "id": "59b7a933d031972d0500088b",
+        "name": "Email Continuity",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:48:22.332Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:58:12.362Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:58:12.363Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:58:12.364Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:12:14.927Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:48:22.333Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:48:22.334Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:58:12.364Z"
+      },
+      {
+        "id": "5a69bac556ffde047746c9d4",
+        "name": "Email Encryption",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-08-04T14:21:46.599Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-08-04T14:21:46.597Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-08-04T14:21:46.598Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-08-04T14:21:46.633Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-08-04T14:21:46.598Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-08-04T14:21:46.600Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:12:53.954Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-08-04T14:21:46.633Z"
+      },
+      {
+        "id": "5d2c48084a79f15365373a1f",
+        "name": "Email Signature and Disclaimer",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:48:38.525Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:58:38.769Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:58:38.770Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:58:38.770Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:14:55.030Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:48:38.524Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:14:55.029Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:58:38.770Z"
+      },
+      {
+        "id": "5f1800ce05b97804bda9688b",
+        "name": "Hornet.email",
+        "status": "Planned Maintenance",
+        "status_code": 200,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-09-17T12:45:09.332Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-09-17T12:45:09.331Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-09-17T12:45:09.333Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-09-17T12:45:09.333Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-09-17T12:45:09.334Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-09-17T12:45:09.367Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-09-17T12:45:09.367Z",
+            "status": "Planned Maintenance",
+            "status_code": 200
+          }
+        ],
+        "updated": "2026-09-17T12:45:09.367Z"
+      },
+      {
+        "id": "592da031a0ece01d0d000075",
+        "name": "Mail Traffic",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:59:03.347Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:14:04.395Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:14:04.359Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:14:04.358Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:14:04.359Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:14:04.433Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:14:04.357Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:59:03.347Z"
+      },
+      {
+        "id": "6a2fd90376286d0608722b5b",
+        "name": "Spam and Malware Protection",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:49:20.023Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-08-19T16:07:37.817Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-08-19T16:07:37.817Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-08-19T16:07:37.819Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-08-19T16:07:37.818Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-08-19T16:07:37.815Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:14:32.268Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-08-19T16:07:37.819Z"
+      },
+      {
+        "id": "63971c87f1c65f058ac513a5",
+        "name": "Security Awareness Service",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:49:31.903Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:59:29.050Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:59:29.091Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:59:29.089Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:15:16.728Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:49:31.904Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:15:16.727Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:59:29.091Z"
+      },
+      {
+        "id": "6a2fd9857d1bb705af924cad",
+        "name": "Teams Protection",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdbe97d1bb705af924cb1",
+            "name": "Canada - Montreal",
+            "updated": "2026-06-15T11:49:41.311Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc0459348e05f706f638",
+            "name": "France - Lille",
+            "updated": "2026-06-15T11:59:43.068Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb7d7d1bb705af924cb0",
+            "name": "Germany - Düsseldorf",
+            "updated": "2026-06-15T11:59:43.069Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb6776286d0608722b5d",
+            "name": "Germany - Frankfurt",
+            "updated": "2026-06-15T11:59:43.068Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-06-15T11:15:34.359Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdc163a468f05c2280010",
+            "name": "Switzerland - Central",
+            "updated": "2026-06-15T11:49:41.312Z",
+            "status": "Operational",
+            "status_code": 100
+          },
+          {
+            "id": "6a2fdb0e7d1bb705af924caf",
+            "name": "United States - Atlanta",
+            "updated": "2026-06-15T11:15:34.360Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-06-15T11:59:43.069Z"
+      },
+      {
+        "id": "59b78ec90d66c8a305000779",
+        "name": "Ticket System",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "61caf479ea08e105461a6f39",
+            "name": "Europe - West",
+            "updated": "2026-07-29T11:23:32.643Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-07-29T11:23:32.643Z"
+      },
+      {
+        "id": "5d2f079ce3d4ca400afd0819",
+        "name": "Website",
+        "status": "Operational",
+        "status_code": 100,
+        "containers": [
+          {
+            "id": "6a2fdb758612a305a8631487",
+            "name": "Germany - Hannover",
+            "updated": "2026-09-18T11:23:42.663Z",
+            "status": "Operational",
+            "status_code": 100
+          }
+        ],
+        "updated": "2026-09-18T11:23:42.663Z"
+      }
+    ],
+    "incidents": [],
+    "maintenance": {
+      "active": [
+        {
+          "_id": "6aaa9698ea433305b418fc0e",
+          "datetime_planned_end": "2026-09-17T13:00:00.000Z",
+          "datetime_planned_start": "2026-09-17T12:30:00.000Z",
+          "name": "Hornet.email Security Maintanance",
+          "datetime_open": "2026-09-16T13:16:08.950Z",
+          "messages": [
+            {
+              "details": "At Hornetsecurity, we’re continually enhancing the security of the Hornet.email platform to keep pace with evolving best practices. As part of this ongoing work, we’re introducing a change that may affect some of your users’ accounts. \r\n\r\nUsers who regularly sign in to Hornet.email will not be affected - no action is needed for them. \r\n\r\nFor any of your users who haven’t logged into Hornet.email since April 28, 2026, their existing password will need to be reset the next time they try to access their account after September 17, 2026. \r\n\r\nWhat this means for your organisation:\r\n\r\n- Users who’ve signed in on or after April 28, 2026 are unaffected. \r\n- Users who haven’t logged in since April 28, 2026 will need a password reset the next time they access their account after September 17, 2026.\r\n - As a Control Panel administrator, you can perform this reset for any affected user whenever it’s needed. \r\n\r\nWe’re sharing this so you’re aware of the potential impact and can support any inactive users smoothly if and when they need access again. If you’d like to review which of your users may be affected, you can check sign-in activity in the Control Panel at any time.",
+              "state": 100,
+              "status": 200,
+              "datetime": "2026-09-16T13:16:08.978Z"
+            },
+            {
+              "details": "The maintenance has now started.",
+              "state": 200,
+              "status": 200,
+              "datetime": "2026-09-17T12:45:09.257Z"
+            },
+            {
+              "details": "Although the maintenance is complete, this status will remain visible for awareness until Monday, 21 September.",
+              "state": 200,
+              "status": 200,
+              "datetime": "2026-09-18T11:06:05.385Z"
+            }
+          ],
+          "containers_affected": [
+            {
+              "_id": "6a2fdbe97d1bb705af924cb1",
+              "name": "Canada - Montreal"
+            },
+            {
+              "_id": "6a2fdc0459348e05f706f638",
+              "name": "France - Lille"
+            },
+            {
+              "_id": "6a2fdb7d7d1bb705af924cb0",
+              "name": "Germany - Düsseldorf"
+            },
+            {
+              "_id": "6a2fdb6776286d0608722b5d",
+              "name": "Germany - Frankfurt"
+            },
+            {
+              "_id": "6a2fdb758612a305a8631487",
+              "name": "Germany - Hannover"
+            },
+            {
+              "_id": "6a2fdc163a468f05c2280010",
+              "name": "Switzerland - Central"
+            },
+            {
+              "_id": "6a2fdb0e7d1bb705af924caf",
+              "name": "United States - Atlanta"
+            }
+          ],
+          "components_affected": [
+            {
+              "_id": "5f1800ce05b97804bda9688b",
+              "name": "Hornet.email"
+            }
+          ]
+        },
+        {
+          "_id": "6aa0027df6933c04d812ddd3",
+          "datetime_planned_end": "2026-09-19T08:00:00.000Z",
+          "datetime_planned_start": "2026-09-16T08:00:00.000Z",
+          "name": "[HSE20260916-01-M] Scheduled Maintenance: 365 Total Backup Service (DE & UK Regions)",
+          "datetime_open": "2026-09-08T12:41:33.379Z",
+          "messages": [
+            {
+              "details": "The 365 Total Backup Service (DE & UK Regions) will undergo scheduled maintenance as we add additional resources and performance enhancements.\r\n\r\nDuring this maintenance window, the 365 Total Backup Service will be unavailable for a subset of tenants on the DE & UK Regions.\r\n\r\nNo other regions will be affected. \r\nOther services and email flow will also not be affected by this maintenance.",
+              "state": 100,
+              "status": 200,
+              "datetime": "2026-09-08T12:41:33.397Z"
+            },
+            {
+              "details": "Scheduled Maintenance has started.",
+              "state": 200,
+              "status": 200,
+              "datetime": "2026-09-16T08:00:03.978Z"
+            },
+            {
+              "details": "The scheduled maintenance for 365 Total Backup Service on the DE & UK Regions, is taking longer than initially anticipated hence the maintenance window will need to be extended further to ensure all improvements planned are fully integrated.\r\n \r\nWe apologise for any inconvenience such delay may cause and we'll make sure to keep this space updated as soon as the maintenance has completed successfully.",
+              "state": 200,
+              "status": 200,
+              "datetime": "2026-09-19T05:42:40.344Z"
+            }
+          ],
+          "containers_affected": [
+            {
+              "_id": "6a2fdb6776286d0608722b5d",
+              "name": "Germany - Frankfurt"
+            },
+            {
+              "_id": "6a2fdac58612a305a8631485",
+              "name": "United Kingdom - London"
+            }
+          ],
+          "components_affected": [
+            {
+              "_id": "61caf4b6714e1f053880dd12",
+              "name": "365 Total Backup"
+            }
+          ]
+        }
+      ],
+      "upcoming": [
+        {
+          "_id": "6aa0029df6933c04d812ddd7",
+          "datetime_planned_end": "2026-09-25T08:00:00.000Z",
+          "datetime_planned_start": "2026-09-22T08:00:00.000Z",
+          "name": "[HSE20260922-01-M] Scheduled Maintenance: 365 Total Backup Service (FR & US Regions)",
+          "datetime_open": "2026-09-08T12:42:05.474Z",
+          "messages": [
+            {
+              "details": "The 365 Total Backup Service (FR & US Regions) will undergo scheduled maintenance as we add additional resources and performance enhancements.\r\n \r\nDuring this maintenance window, the 365 Total Backup Service will be unavailable for a subset of tenants on the FR & US Regions.\r\n \r\nNo other regions will be affected. \r\nOther services and email flow will also not be affected by this maintenance.",
+              "state": 100,
+              "status": 200,
+              "datetime": "2026-09-08T12:42:05.509Z"
+            }
+          ],
+          "containers_affected": [
+            {
+              "_id": "6a2fdc0459348e05f706f638",
+              "name": "France - Lille"
+            },
+            {
+              "_id": "6a2fdafb8cc2c505f49877b4",
+              "name": "United States - Virginia"
+            }
+          ],
+          "components_affected": [
+            {
+              "_id": "61caf4b6714e1f053880dd12",
+              "name": "365 Total Backup"
+            }
+          ]
+        },
+        {
+          "_id": "6aa1023ddf35e104e6030a0d",
+          "datetime_planned_end": "2026-09-22T12:00:00.000Z",
+          "datetime_planned_start": "2026-09-22T11:30:00.000Z",
+          "name": "[HSE20260922-01-M] Maintenance: Control Panel 6.63.0.0",
+          "datetime_open": "2026-09-09T06:52:45.639Z",
+          "messages": [
+            {
+              "details": "We plan to release a major version 6.63.0.0 of the Control Panel on 2026-09-22 at 01:30pm UTC+2\r\nThis release contains functional upgrades and bug fixes.\r\n \r\nNo downtime is expected, and the Control Panel service will remain available throughout the maintenance time window.\r\n\r\nOther services and email flow will not be affected by this maintenance.",
+              "state": 100,
+              "status": 200,
+              "datetime": "2026-09-09T06:52:00.000Z"
+            }
+          ],
+          "containers_affected": [
+            {
+              "_id": "6a2fdbe97d1bb705af924cb1",
+              "name": "Canada - Montreal"
+            },
+            {
+              "_id": "6a2fdc0459348e05f706f638",
+              "name": "France - Lille"
+            },
+            {
+              "_id": "6a2fdb7d7d1bb705af924cb0",
+              "name": "Germany - Düsseldorf"
+            },
+            {
+              "_id": "6a2fdb6776286d0608722b5d",
+              "name": "Germany - Frankfurt"
+            },
+            {
+              "_id": "6a2fdb758612a305a8631487",
+              "name": "Germany - Hannover"
+            },
+            {
+              "_id": "6a2fdc163a468f05c2280010",
+              "name": "Switzerland - Central"
+            },
+            {
+              "_id": "6a2fdb0e7d1bb705af924caf",
+              "name": "United States - Atlanta"
+            }
+          ],
+          "components_affected": [
+            {
+              "_id": "592da05eef3e6af26b000c4f",
+              "name": "Control Panel"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

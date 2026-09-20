@@ -1282,3 +1282,58 @@ The three-way agreement guard failed twice in a row, correctly:
 The second is arguably the guard being fussy about formatting. It is worth keeping anyway:
 the guard's whole job is that the three declarations are transcribed from one another, and a
 transcription that reformats is one a human can no longer diff at a glance.
+
+
+## Proofpoint is Hornetsecurity on status.io (2026-09-19)
+
+John supplied `https://live.hornet-status.com/`. The `statusio` platform guess in
+`vendors.json` was right; the page id is in the page's own HTML
+(`statuspage_id: "591aaa7fe69f388425000fda"`), and the API is
+`https://api.status.io/1.0/status/<id>` — public, credential-free, 19 services.
+
+**Unlike Zendesk it genuinely publishes health**, per service and per datacentre, so no
+amendment-10 inference is needed or permitted here.
+
+### The filter is the whole job, again
+
+`containers` are datacentres and the feed lists ten. Ours is named **two mutually exclusive
+ways**, which no amount of reading the docs would have told us:
+
+```
+United States - Atlanta   13 services   the core email estate
+United States - Georgia    3 services   the newer 365 products
+```
+
+No service carries both. Listing one drops a third of the estate.
+
+The captured payload happens to contain the perfect demonstration: on 2026-09-19
+`365 Total Backup` was in **Planned Maintenance globally while its Georgia container read
+Operational**. Unfiltered we report maintenance we are not having — 2 of 19 degraded
+against the true 1 of 16. Same lesson as the Zendesk pod, third time in one day: filter
+every vendor feed to the part of it that serves us.
+
+### The mutation that mattered, and the test that lied
+
+`worstLevel` across matching containers survived being replaced with `matched[0]`. Cause:
+**no service in the real feed has both our containers**, so the rollup was always over a
+one-element list — and the test asserting it was named *"worst wins across our two
+datacentres"* while exercising one.
+
+The fix is a constructed two-container service, asserted in **both array orders** so that
+"take the last" is no more satisfiable than "take the first". The general form is already
+in this file, but here is another face of it: **a test named after a condition the fixture
+cannot produce is a test that passes on the fixture, not on the claim.** When the live data
+has no instance of the case, construct one — the absence is precisely why it will break
+unnoticed.
+
+One false survivor too, worth recording because it wastes time: a `sed` mutation whose
+pattern did not match the file's spacing reported "survived" when nothing had been mutated.
+**Check that a mutation actually changed the file before believing it survived.**
+
+### One open question for John
+
+The rollup covers all 16 Hornetsecurity services in our datacentres. Some — Security
+Awareness Service, Teams Protection, DMARC Manager — may not be in use, and each one we do
+not use is a tile that can go amber for no reason. `VendorFeed.component` already narrows
+to a named service if we want it. Not urgent: with no proofpoint probe, `ours.total === 0`,
+so the vendor half can never pair with a failing our-half and no Sev1 can fire from this.
