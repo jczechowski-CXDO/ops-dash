@@ -90,15 +90,29 @@ import { ENTRA_SOURCE } from '../index.js';
  *    rather than the edge case, and a zero there would render as a real
  *    measurement of a thing nobody measured.
  *
- * ## The auth seam, deliberately visible
+ * ## The auth seam, filled
  *
- * There is **no authentication here**, and this comment is the seam rather
- * than a `TODO` buried in a handler. Milestone 4 fills it, together with the
- * ack/mute/resolve routes that need it. Until then every route is a GET and
- * `routes.test.ts` asserts that over the registered route table — because a
- * mutating route added today would be an unauthenticated write. `/api/health`
- * reports `auth: { mode: 'none' }` so the gap is visible at runtime too, not
- * only to someone reading this file.
+ * **This paragraph made three false claims until M4 landed** — that there is no
+ * authentication here, that every route is a GET, and that `/api/health`
+ * reports `auth: { mode: 'none' }` — while the header seventy lines above said
+ * the opposite. A stale comment in the file that owns the seam is worse than no
+ * comment: it is the file a reader trusts most, and it was reassuring in the
+ * direction that costs the most to be wrong about.
+ *
+ * What is true now:
+ *
+ *  - Every route declares `config.auth`, and one that does not is refused 500
+ *    before its handler runs. This file declares; `auth/session.ts` decides.
+ *  - The reads are `'public-read'` **by decision**: that is what they were
+ *    before the seam existed, now written down rather than left as an omission.
+ *    They are on the release list to become `'required'`.
+ *  - `POST /api/session` is `'login'`, `DELETE /api/session` is `'required'`,
+ *    and `auth/routeTable.test.ts` pins the whole table as literals so a route
+ *    added later cannot ship open.
+ *  - `/api/health` reports `auth: { mode: 'local-user' | 'unconfigured',
+ *    authenticated }`, so the state is visible at runtime and not only to
+ *    someone reading this file — which was the one good property of the
+ *    paragraph this replaces.
  */
 
 /* ----------------------------------------------------------- dependencies */
@@ -899,9 +913,13 @@ export const apiRoutes: FastifyPluginAsync<ApiDeps> = async (app, deps) => {
    * set of non-GET routes that may be reached without a session has exactly one
    * member and adding a second is a failing test.
    *
-   * **The reply says nothing a caller did not already know.** One message for a
-   * wrong username and a wrong password, and the cost is paid on both paths, so
-   * this route is not an oracle for which half was right.
+   * **One message for a wrong username and a wrong password**, with the cost
+   * paid on both paths — so the credential reply does not say which half was
+   * wrong. The *throttle* is a different matter: its 429 is distinguishable
+   * from a 401 by design, which is a username oracle, accepted deliberately
+   * because closing it means either an unauthenticated memory leak or a
+   * LAN-inflictable lockout of the only operator. Argued in full at
+   * `auth/session.ts`'s `login`, and on the release list.
    */
   app.post('/api/session', { config: { auth: 'login' } }, async (request, reply) => {
     const outcome = auth.login(request.body, clock());

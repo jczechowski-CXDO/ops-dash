@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import type { ApiStore } from '../api/routes.js';
 import { buildApi } from '../api/routes.js';
+import { serveDashboard } from '../static.js';
 import { AUTH_POLICIES, createSessionAuth, registerAuth, type AuthPolicy, type SessionAuth } from './session.js';
 
 /**
@@ -21,8 +22,12 @@ import { AUTH_POLICIES, createSessionAuth, registerAuth, type AuthPolicy, type S
  *    that found nothing. This one fails when a route appears, when one
  *    disappears, and when a policy changes, which is the whole space.
  *  - **It reads the router, not the source.** `onRoute` sees what Fastify will
- *    actually dispatch, so a route registered anywhere, by anything, under any
- *    spelling, is in this list.
+ *    actually dispatch, so a route registered by any means, under any spelling,
+ *    is in the list — **for the instance it is pointed at.** That qualifier is
+ *    M-2: the first version pointed only at `buildApi` while the process also
+ *    registers the SPA's `GET /*` on the same instance from `main.ts`, so the
+ *    claim was broader than the evidence. There are now two enumerations: the
+ *    plugin's, and the composed process's.
  */
 
 const quietStore = (): ApiStore => ({
@@ -35,6 +40,31 @@ const quietStore = (): ApiStore => ({
 });
 
 type Row = { method: string; url: string; policy: AuthPolicy | undefined };
+
+/** The routes the PROCESS serves: the API plugin plus the SPA, composed the
+ *  way `main.ts` composes them. The root argument is never read — nothing here
+ *  makes a request — so a path that does not exist is the honest choice. */
+const composedTable = async (): Promise<Row[]> => {
+  const app = buildApi({ store: quietStore() });
+  const rows: Row[] = [];
+  // **The hook goes on BEFORE `serveDashboard`, and that ordering is the whole
+  // reason this enumeration is trustworthy.** `onRoute` fires only for routes
+  // registered after it is added. `buildApi` wraps the API in `register`, so
+  // those are booted at `ready()` and a hook added later still sees them —
+  // which is why the plugin enumeration above works. `serveDashboard` calls
+  // `app.get` directly, so it is registered the instant it is called and a hook
+  // added afterwards misses it silently. My first version of this helper did
+  // exactly that and reported seven routes where the process serves eight: a
+  // guard that had gone blind to the one route it was written to see.
+  app.addHook('onRoute', (route) => {
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+    for (const method of methods) rows.push({ method, url: route.url, policy: route.config?.auth });
+  });
+  serveDashboard(app, '/no/such/dist');
+  await app.ready();
+  await app.close();
+  return rows.sort((a, b) => `${a.url} ${a.method}`.localeCompare(`${b.url} ${b.method}`));
+};
 
 /** Every route the real API registers, with the policy each one declares. */
 const routeTable = async (): Promise<Row[]> => {
@@ -91,6 +121,45 @@ describe('the route table — every route declares a policy, and every write nee
   it('no route is left without a policy at all', async () => {
     const undeclared = (await routeTable()).filter((r) => r.policy === undefined).map((r) => `${r.method} ${r.url}`);
     expect(undeclared).toEqual([]);
+  });
+
+  it('the COMPOSED process has exactly these routes too — including the one outside the seam', async () => {
+    // **M-2. The three assertions above read `buildApi` alone, and the process
+    // does not run `buildApi` alone**: `main.ts` calls `serveDashboard` on the
+    // same instance, which registers `GET /*` for the SPA. That route is
+    // OUTSIDE the encapsulated plugin, so the fail-closed hook never sees it —
+    // and the docblock above used to claim that a route registered anywhere, by
+    // anything, was in this list. It was not.
+    //
+    // So this enumerates what the process actually serves. `GET /*` is pinned
+    // with `policy: undefined`, which is the honest record of the gap rather
+    // than a hole nobody can see: it is a GET, it serves files from `web/dist`
+    // and refuses `/api/*` itself, so nothing is unprotected today. The moment
+    // anything non-GET is registered outside the plugin, the next assertion
+    // fails.
+    //
+    // The runtime half needs `static.ts` to declare a policy so the hook can
+    // move to the root instance; that file is not mine and the change is
+    // requested rather than made.
+    expect(await composedTable()).toEqual([
+      { method: 'GET', url: '/*', policy: undefined },
+      { method: 'GET', url: '/api/checks', policy: 'public-read' },
+      { method: 'GET', url: '/api/entra', policy: 'public-read' },
+      { method: 'GET', url: '/api/health', policy: 'public-read' },
+      { method: 'GET', url: '/api/incidents', policy: 'public-read' },
+      { method: 'GET', url: '/api/services', policy: 'public-read' },
+      { method: 'DELETE', url: '/api/session', policy: 'required' },
+      { method: 'POST', url: '/api/session', policy: 'login' },
+    ]);
+  });
+
+  it('nothing that can change something is registered outside the seam', async () => {
+    // The rule the pinned list above exists to serve, derived from the composed
+    // router rather than from that list. A mutating route added to `main.ts` or
+    // `static.ts` — where the hook cannot reach it — fails HERE, which is the
+    // only place it would fail at all.
+    const outside = (await composedTable()).filter((r) => r.policy === undefined);
+    expect(outside.map((r) => `${r.method} ${r.url}`)).toEqual(['GET /*']);
   });
 
   it('reads a real, non-empty router — the control for all three above', async () => {

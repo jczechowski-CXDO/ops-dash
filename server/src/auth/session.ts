@@ -252,13 +252,30 @@ export function createSessionAuth(opts: SessionAuthOptions = {}): SessionAuth {
       if (typeof username !== 'string' || typeof password !== 'string') {
         return { ok: false, status: 400, error: { code: 'bad_request', message: 'expected a JSON object with username and password' } };
       }
-      // Both halves are checked and ONE message comes back. Telling a caller
-      // that the username was right narrows their search to the password, and
-      // there is exactly one account here to narrow it for.
+      // Both halves are checked and ONE message comes back, and the password is
+      // verified even when the username is wrong — so the *credential* reply
+      // takes the same time and the same words either way. scrypt is the
+      // expensive half, and skipping it on a bad username would be a free
+      // username oracle.
       //
-      // The password is verified even when the username is wrong, so the reply
-      // takes the same time either way — scrypt is the expensive half, and
-      // skipping it on a bad username is a free username oracle.
+      // **The throttle IS distinguishable, and that is accepted rather than
+      // overlooked.** Push the `OTHER` bucket to its 30s cap with junk names,
+      // then probe: a name answering 401 rather than 429 is the real account.
+      // g6 found it; the lead ruled, and the ruling is recorded here because
+      // the alternatives are both worse on this box:
+      //
+      //   - one bucket keyed by the submitted name reintroduces the
+      //     unauthenticated memory leak the two buckets exist to prevent
+      //   - applying the longer wait to both hands anyone on the LAN a lockout
+      //     of the operator's own dashboard, with three junk names and no
+      //     recovery path on a single-credential tool
+      //
+      // What leaks is a username, on a host that already serves the estate's
+      // health, the incident log and every probe result unauthenticated BY
+      // DECISION. An attacker who can reach this route can already read
+      // everything the dashboard shows; knowing which bucket they are in gets
+      // them a name, not a session. Availability wins, and it is on the release
+      // list beside the other items whose smallness rests on local-only.
       // The wait is checked BEFORE the hash is computed. Checking it after
       // would still refuse the attempt and would still burn 50ms of CPU per
       // request — a rate limit that costs the defender more than the attacker
