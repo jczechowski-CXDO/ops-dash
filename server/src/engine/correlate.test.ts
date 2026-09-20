@@ -222,6 +222,89 @@ describe('resolution, not duplication', () => {
   });
 });
 
+describe('not firing clears an incident; not LOOKING must not', () => {
+  // The same defect as the phantom cold-start Sev2, arriving from the opposite
+  // side: there, absent data manufactured an incident; here, absent data
+  // destroys one. This direction is worse, because resolving writes a timeline
+  // entry saying *the condition cleared* — a sentence that is false and that an
+  // operator will read as true.
+  const openOne = () => correlate({ at: T0, services: [jiraWith('outage')] });
+
+  it('carries the incident untouched when its rule could not be evaluated', () => {
+    const open = openOne();
+    const blind = correlate({
+      at: plus(60_000),
+      services: [svc()],                       // condition gone from the services
+      open,
+      evaluatedRules: new Set(['blackout']),   // ...but `vendor` was not looked at
+    });
+    // Nothing written at all: not a resolution, and not a second incident.
+    expect(blind).toHaveLength(0);
+    // And the prior is still open — read from the input we handed in, since
+    // correlate returns only what CHANGED.
+    expect(open[0]!.resolvedAt).toBeUndefined();
+  });
+
+  it('resolves it when the rule WAS evaluated and found nothing — the other half', () => {
+    // Without this, "carry when blind" could be implemented as "never resolve"
+    // and the test above would still pass.
+    const open = openOne();
+    const looked = correlate({
+      at: plus(60_000),
+      services: [svc()],
+      open,
+      evaluatedRules: new Set(['vendor', 'ourside', 'blackout']),
+    });
+    expect(looked).toHaveLength(1);
+    expect(looked[0]!.resolvedAt).toBe(plus(60_000));
+    expect(looked[0]!.timeline[0]!.kind).toBe('resolved');
+  });
+
+  it('omitting the field keeps today’s behaviour exactly, for every existing caller', () => {
+    // The additive claim, asserted rather than assumed. `index.ts` passes no
+    // such set and must be unaffected.
+    const open = openOne();
+    const withoutField = correlate({ at: plus(60_000), services: [svc()], open });
+    const withAllRules = correlate({
+      at: plus(60_000), services: [svc()], open,
+      evaluatedRules: new Set(['vendor', 'ourside', 'blackout']),
+    });
+    expect(withoutField).toEqual(withAllRules);
+    expect(withoutField[0]!.resolvedAt).toBe(plus(60_000));
+  });
+
+  it('blindness does not stop a rule that CAN see from resolving its own', () => {
+    // Per-rule, not global. One stale input must not freeze the whole estate.
+    const vendorOpen = correlate({ at: T0, services: [jiraWith('outage')] });
+    const out = correlate({
+      at: plus(60_000),
+      services: [svc()],
+      open: vendorOpen,
+      evaluatedRules: new Set(['vendor']),     // vendor could see; others could not
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.ruleKey).toBe('vendor');
+    expect(out[0]!.resolvedAt).toBe(plus(60_000));
+  });
+
+  it('an incident whose rule no longer exists is carried, not silently cleared', () => {
+    // Decided, not stumbled into. A caller that passes a set omitting a RETIRED
+    // rule keeps that rule's incidents forever, because nothing can fire them
+    // again and nothing here closes them. An incident outliving its rule wants a
+    // human, not an automatic claim that it cleared. Pinned so the next person
+    // meets a test rather than a mystery.
+    const stranded = {
+      ...correlate({ at: T0, services: [jiraWith('outage')] })[0]!,
+      ruleKey: 'a_rule_that_was_removed',
+    };
+    const out = correlate({
+      at: plus(60_000), services: [svc()], open: [stranded],
+      evaluatedRules: new Set(['vendor', 'ourside', 'blackout']),
+    });
+    expect(out).toEqual([]);
+  });
+});
+
 describe('the engine is pure', () => {
   it('does not mutate the incidents it was given', () => {
     const open = correlate({ at: T0, services: [jiraWith('outage')] });

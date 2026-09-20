@@ -33,6 +33,38 @@ export type CorrelateInput = {
   /** The `rule_state` table. Absent keys fall back to the rule's own default. */
   enabledRules?: Readonly<Record<string, boolean>>;
   windowMs?: number;
+  /**
+   * The rules whose input was actually present this tick.
+   *
+   * **Not the rules that FIRED.** The rules we were able to look at. A rule that
+   * ran and found nothing is in this set; a rule whose input was stale or
+   * missing is not. The distinction is the whole reason the field exists and it
+   * is the one a reader will get wrong, so the name says `evaluated` rather than
+   * anything that could be read as `firing`.
+   *
+   * **Why it has to exist.** The resolution loop below closes any open incident
+   * that is not firing — which is right when a rule looked and found the
+   * condition gone, and a lie when the rule could not look at all. Those two are
+   * indistinguishable from `findings` alone, because both produce no finding.
+   *
+   * It is the same defect as the phantom cold-start Sev2 and the `never_polled`
+   * blackout, arriving from the opposite side: there, absent data manufactured
+   * an incident; here, absent data destroys one. This direction is worse,
+   * because resolving writes a timeline entry that says *the condition cleared*
+   * in so many words. It did not. We stopped looking. An operator reading that
+   * entry has been told something false by name.
+   *
+   * Absent means everything was evaluated, so every existing caller keeps
+   * today's behaviour exactly.
+   *
+   * One consequence, decided rather than stumbled into: if a caller passes a set
+   * that omits a rule which has been **retired**, that rule's open incidents are
+   * carried forever, because nothing can ever fire them again and nothing here
+   * will close them. That is deliberate — an incident outliving its rule wants a
+   * human, not an automatic claim that it cleared — and `correlate.test.ts` pins
+   * it so the next person meets a test rather than a mystery.
+   */
+  evaluatedRules?: ReadonlySet<string>;
 };
 
 const identity = (ruleKey: string, serviceId: string) => `${ruleKey}\u0000${serviceId}`;
@@ -73,7 +105,7 @@ function stillOwns(prior: Incident, at: string, windowMs: number): boolean {
 }
 
 export function correlate(input: CorrelateInput): Incident[] {
-  const { at, services, open = [], enabledRules, windowMs = WINDOW_MS } = input;
+  const { at, services, open = [], enabledRules, windowMs = WINDOW_MS, evaluatedRules } = input;
   const findings = evaluate(services, enabledRules);
 
   // Most recent prior per rule+service. A store that somehow holds two is not
@@ -99,6 +131,9 @@ export function correlate(input: CorrelateInput): Incident[] {
     if (firing.has(k)) continue;
     // Already resolved and still clear: nothing changed, so nothing to write.
     if (prior.resolvedAt) continue;
+    // We could not look. Carry it untouched rather than claiming it cleared —
+    // see `evaluatedRules`. Not firing closes an incident; not looking must not.
+    if (evaluatedRules !== undefined && !evaluatedRules.has(prior.ruleKey)) continue;
     out.push(resolved(prior, at));
   }
 
