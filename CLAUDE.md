@@ -191,9 +191,9 @@ discipline about *when* you stage. Prefer it always; it costs nothing when you a
 working order is `git commit -F <msgfile> -- <paths>`. The natural way to type it is the way
 that breaks.
 
-## Two ways a mutation battery lies to you
+## Four ways a mutation battery lies to you
 
-Both found in one hour, both by agents who were being careful about everything else.
+All found in one afternoon, all by agents who were being careful about everything else.
 
 **1. A mutant that was never planted looks exactly like a mutant that survived.** A `sed`
 whose pattern did not match plants nothing, and if the failure breaks an `&&` chain the test
@@ -208,6 +208,36 @@ called `open()` with no argument — a compile error the root typecheck would ha
 repo root, shared across every test and persisting between runs.** Their cold-start test had
 been passing against leftover state, and the mutation that should have killed it did not.
 Re-enable the typecheck before you believe a survivor.
+
+**3. A single before-control is not a control on this branch.** It establishes the tree's state
+at one instant; the measurement happens at a different one, and the gap is exactly long enough
+for somebody else's commit.
+
+```
+17:15:28Z  control, unmutated        ->  0 failures
+17:15:53Z  mutation applied          ->  routeTable RED (2)      "reproduced against a clean control"
+17:17:43Z  control, unmutated AGAIN  ->  routeTable RED (3)      no mutation anywhere
+```
+
+**The control was true when taken and false twenty-five seconds later.** Another agent had
+committed twice in the window. One more run away from committing *"breaking the text escaper
+reddens the route table"* — a coupling that does not exist — into a module two adapters depend
+on, with a reproduction recipe that would have wasted whoever tried it.
+
+**Use interleaved A/B/A: control, mutate, control, with the second control adjacent to the
+measurement.** Three runs instead of two, sixty seconds, and it separates *my mutation did this*
+from *the tree moved* without any inference. **On a shared branch a control has a shelf life
+measured in seconds.**
+
+What a real coupling looks like, from the same battery: the escaping reds were **identical
+across all three mutated runs** — `vendorText=4, email/parse=1, endpoints/queries=2`, every
+time. The auth column moved run to run and eventually appeared with no mutation at all. Stable
+across runs is the signal; present once is not.
+
+**4. A mutation that does not typecheck is a bad instrument.** One attempt left a variable
+assigned and unused — a type error — and Vitest warns that unhandled source errors *"may cause
+false positive tests"*. Re-run with a type-*valid* mutation of the same intent before believing
+either outcome.
 - `git stash` — removes other agents' uncommitted files from the shared tree.
 - `git checkout -- <file>` / `git restore` — restores to **HEAD, not to your edit**, and the
   suite goes green afterwards because green was also the state you just lost. Cost one agent
