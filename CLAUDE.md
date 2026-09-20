@@ -154,11 +154,20 @@ verification agent reports; it does not edit the author's files.
 
 ### How peer messages actually arrive, measured
 
-**Inbound messages are delivered at a turn boundary, never mid-turn.** Established by an
-agent that sent three messages, deliberately slept 90 seconds and then 120 seconds waiting
-for an answer, received nothing, committed, reported — and then had all four of the other
-agent's replies delivered in a single batch at its next turn. Both directions worked the
-whole time. Only the timing was wrong.
+**Inbound messages were not delivered mid-turn, in the one case anyone measured
+deliberately.** An agent sent three messages, slept 90 seconds and then 120 seconds for no
+purpose but to give the other a chance to answer, received nothing, committed, reported —
+and then had six messages delivered in a single batch at its next turn boundary, including
+four from the peer it had just described as silent. Both directions had worked the whole
+time; only the timing was wrong, and only inbound.
+
+That is **one controlled observation**, and the agent that made it asked for this paragraph
+to say so rather than assert a mechanism — which is the right instinct and this file's own
+standard. What corroborates it is weaker but consistent: every teammate message the lead has
+received all session arrived batched at a turn boundary, and both agents repeatedly reported
+messages "crossing in flight" with their own. Nobody has seen the transport. Treat the
+consequences below as sound and the cause as unproven; if a message ever does arrive
+mid-turn, this paragraph is the thing to correct.
 
 Three consequences, all of which cost real time before they were understood:
 
