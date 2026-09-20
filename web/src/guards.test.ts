@@ -312,7 +312,7 @@ const INLINE_BEARER_PATTERN = /Zoho-oauthtoken\s+(?!\$\{)[A-Za-z0-9._-]{8}/;
  * assigns a literal TO the field.
  */
 const ASSIGNED_LITERAL_PATTERN =
-  /["'`]?\b(client_secret|refresh_token|api_key)\b["'`]?\s*\]?\s*[:=]\s*['"`]/i;
+  /["'`]?\b(client_secret|refresh_token|api_key)\b["'`]?\s*\]?\s*[:=]\s*['"`](?!\$\{)/i;
 
 describe('no credentials, ever', () => {
   /** Everything a human might paste while wiring an adapter up. */
@@ -598,26 +598,118 @@ describe('fixtures stay redacted', () => {
     expect(domainsIn(fixtures()).length).toBeGreaterThan(5);
   });
 
-  /** Dotted quads that are not our estate leaking. Each is named because the
-   *  alternative — a pattern loose enough to admit them — admits a real address
-   *  too. Widening the walk to `server/src` is what surfaced all of these; they
-   *  are all legitimate and none was visible while the guard read one workspace. */
-  const ALLOWED_QUADS: [string, string][] = [
-    ['0.0.0.0', 'the documented bind address; John ruled it, and it is on the release list'],
-    ['127.0.0.1', 'loopback — safeTarget proves it is REFUSED, so it must appear'],
-    ['169.254.169.254', 'cloud metadata — the classic SSRF target, same reason'],
-    ['10.0.0.5', 'RFC 1918 — an SSRF refusal case'],
-    ['192.168.1.1', 'RFC 1918 — an SSRF refusal case'],
+  /**
+   * Dotted quads that are not our estate leaking.
+   *
+   * **L-4: the two RFC 1918 entries are scoped to the files that argue for
+   * them, and the others are not.** The distinction is the whole finding.
+   * `0.0.0.0`, `127.0.0.1` and `169.254.169.254` are unmistakable — no real
+   * internal address can hide behind them, because they are not addresses of
+   * anything on our estate — so a tree-wide entry costs nothing. `10.0.0.5`
+   * and `192.168.1.1` are *weakly identifying*: they are shaped exactly like a
+   * real internal host, and a tree-wide exemption for them is a hole any future
+   * fixture can walk through by choosing the same two numbers.
+   *
+   * Scoping only those two keeps the churn where the risk is. A new file
+   * carrying an RFC 1918 address has to come here and say why, which is the
+   * point; a new file mentioning loopback does not, which is not.
+   */
+  const ALLOWED_QUADS: { quad: string; why: string; only?: string[] }[] = [
+    { quad: '0.0.0.0', why: 'the documented bind address; John ruled it, and it is on the release list' },
+    { quad: '127.0.0.1', why: 'loopback — safeTarget proves it is REFUSED, so it must appear' },
+    { quad: '169.254.169.254', why: 'cloud metadata — the classic SSRF target, same reason' },
+    {
+      quad: '10.0.0.5',
+      why: 'RFC 1918 — an SSRF refusal case',
+      only: ['server/src/http/fetchJson.test.ts'],
+    },
+    {
+      quad: '192.168.1.1',
+      why: 'RFC 1918 — an SSRF refusal case',
+      only: ['server/src/http/fetchJson.test.ts'],
+    },
     // Not an address at all. Kept explicit rather than loosening the pattern,
     // because a regex that stops matching this stops matching real quads too.
-    ['6.63.0.0', 'NOT an IP: a Hornetsecurity Control Panel version, verbatim in a vendor payload'],
+    {
+      quad: '6.63.0.0',
+      why: 'NOT an IP: a Hornetsecurity Control Panel version, verbatim in a vendor payload',
+      only: ['server/src/adapters/vendorstatus/__fixtures__/statusio-hornet.json'],
+    },
   ];
 
+  const QUAD = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.[\dx]{1,3}\b/g;
+
+  /** The decision, named so it can be exercised over pairs the tree does not
+   *  contain. Scoping is a rule about files that do not exist yet, so a test
+   *  that can only see today's files cannot tell a scoped entry from an
+   *  unscoped one — both pass while nothing violates either. */
+  const quadAllowedIn = (ip: string, path: string): boolean => {
+    const entry = ALLOWED_QUADS.find((e) => e.quad === ip);
+    return entry !== undefined && (entry.only === undefined || entry.only.includes(path));
+  };
+
   it('uses only the RFC 5737 documentation range for IP addresses', () => {
-    const allowed = new Set(ALLOWED_QUADS.map(([q]) => q));
-    for (const ip of fixtures().match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.[\dx]{1,3}\b/g) ?? []) {
-      if (allowed.has(ip)) continue;
-      expect(ip).toMatch(/^203\.0\.113\./);
+    // Per FILE rather than over one concatenated blob, which is what makes a
+    // scoped exemption expressible at all — and gives the failure a path to
+    // name instead of an address with no home.
+    let seen = 0;
+    for (const file of redactable()) {
+      const path = rel(file);
+      for (const ip of read(file).match(QUAD) ?? []) {
+        seen += 1;
+        if (quadAllowedIn(ip, path)) continue;
+        expect(ip, `${path} carries ${ip}`).toMatch(/^203\.0\.113\./);
+      }
+    }
+    // Non-vacuity, and it belongs on EVERY walk-and-assert guard in this file:
+    // the loop above is "no offender found", which a walk over nothing
+    // satisfies perfectly. Pointing this guard at an empty file list survived a
+    // mutation until this line existed — the same hole the URL-attribute guard
+    // had, found the same way, in the same session.
+    expect(redactable().length, 'the redaction walk read no files').toBeGreaterThan(50);
+    expect(seen, 'the walk found no dotted quads at all').toBeGreaterThan(5);
+  });
+
+  it('a scoped quad is refused outside the file that argues for it', () => {
+    // The control the tree cannot provide. Nothing in the repo currently
+    // carries `10.0.0.5` outside `fetchJson.test.ts`, so scoping and not
+    // scoping look identical from the corpus — removing `only` entirely
+    // survived a mutation until this test existed. These pairs are the
+    // future files the scoping exists for.
+    expect(quadAllowedIn('10.0.0.5', 'server/src/http/fetchJson.test.ts')).toBe(true);
+    expect(quadAllowedIn('192.168.1.1', 'server/src/http/fetchJson.test.ts')).toBe(true);
+    // …and the same address in any other file is not exempt, which is the
+    // whole of L-4: an RFC 1918 quad is shaped exactly like a real internal
+    // host, so a tree-wide exemption is a hole a future fixture walks through
+    // by choosing the same two numbers.
+    for (const path of [
+      'server/src/adapters/email/config.ts',
+      'server/src/adapters/endpoints/__fixtures__/computers.json',
+      'web/src/fixtures/email.ts',
+    ]) {
+      expect(quadAllowedIn('10.0.0.5', path), path).toBe(false);
+      expect(quadAllowedIn('192.168.1.1', path), path).toBe(false);
+    }
+    // The unscoped entries stay unscoped, deliberately: no real internal
+    // address can hide behind loopback or the metadata address.
+    expect(quadAllowedIn('127.0.0.1', 'server/src/adapters/email/config.ts')).toBe(true);
+    expect(quadAllowedIn('169.254.169.254', 'anywhere/at/all.ts')).toBe(true);
+    // And an address on nobody's list is refused everywhere.
+    expect(quadAllowedIn('10.11.12.13', 'server/src/http/fetchJson.test.ts')).toBe(false);
+  });
+
+  it('every scoped quad is still in the file that argues for it', () => {
+    // An exemption that outlives its reason is a licence nobody is using and
+    // nobody will notice being used again — the same rule the URL-attribute
+    // allowlist is held to. A scoped entry whose file no longer contains the
+    // address should be deleted, not left lying about.
+    const scanned = new Set(redactable().map(rel));
+    for (const { quad, only, why } of ALLOWED_QUADS) {
+      expect(why.length, `${quad} carries no reason`).toBeGreaterThan(20);
+      for (const path of only ?? []) {
+        expect(scanned, `${quad} is scoped to ${path}, which this guard does not scan`).toContain(path);
+        expect(read(join(REPO, path)), `${quad} is scoped to ${path}, which no longer contains it`).toContain(quad);
+      }
     }
   });
 });
@@ -674,11 +766,23 @@ describe('HTML sinks', () => {
    *   - not preceded by a word character, `.` or `:`, which is what keeps
    *     `xlink:href` with the generated-icon assertion below that owns it.
    *
-   * Known blind spot, stated rather than papered over: `createElement('a', {
-   * href: u })` uses a colon and is invisible here. This tree is JSX
-   * throughout and contains no `createElement` call, so the gap is theoretical
-   * today — but it is a gap, and the next person should know it rather than
-   * trust the guard further than it reaches.
+   * Three known blind spots, stated rather than papered over. None is live
+   * today, all three were measured rather than assumed, and the next person
+   * should know where this guard stops rather than trusting it further than it
+   * reaches:
+   *
+   *   - `createElement('a', { href: u })` uses a colon and is invisible here.
+   *     This tree is JSX throughout and contains no `createElement` call.
+   *   - **`style` is uncovered.** `style={{ backgroundImage: `url(${x})` }}` is
+   *     a URL-bearing sink this pattern cannot see. Grepped by `m4-auth`:
+   *     there is no `url(`, `backgroundImage`, `cssText` or `setProperty`
+   *     anywhere under `web/src`.
+   *   - **A spread is invisible.** `<a {...props} />` carries an `href` the
+   *     pattern never sees — which is exactly H-1's shape from G0, where
+   *     `Icon.tsx` spread `{...rest}` after `dangerouslySetInnerHTML` and the
+   *     guard could not see the sink because a spread contains no literal.
+   *     That one became a real vulnerability, so this is the gap of the three
+   *     most worth closing if any of them ever goes live.
    */
   const URL_ATTRIBUTE =
     /(?<!\b(?:const|let|var)\s)(?<![\w$.:])(href|src|action|formaction)\s*=\s*["'{$]/i;
