@@ -1908,9 +1908,23 @@ module's export surface as a set so it cannot be aliased around; and `isDemo` ha
   a soak test that is "passed" because nothing obviously broke has tested nothing. The one to
   look at first: the main db file is still 4096 bytes and the WAL is growing ~123KB/2min, so
   **nothing has ever checkpointed.** `wal_autocheckpoint` is 1000 pages, so it should plateau
-  near 4MB around 06:00Z; if the db file is still empty at dawn, a read connection is pinning
+  near 4MB around 06:20Z; if the db file is still empty at dawn, a read connection is pinning
   the WAL and the checkpoint can never complete. That is a bug a green test suite cannot have
   and only elapsed time can show — which is the whole reason this clause exists.
+
+  **The first draft of those predictions had the defect the same night's practice was about.**
+  "RSS grows sublinearly, no leak" is a total reported as a verdict: at this resolution a
+  decelerating cache and a slow leak look identical, so nothing could have falsified it. The
+  amended form names the discriminator instead — *a leak is a constant delta, a cache is a
+  shrinking one* — and, following the survivor rule, names what is **expected to grow
+  legitimately** so growth is not mistaken for the finding: `check_runs` gains ~250 rows an
+  hour all night and should, while `snapshots` must stay pinned at seven.
+
+  **And one honest limit, because a soak that overclaims is worse than none.** Retention is 45
+  days against a database created this morning, so the hourly prune will correctly delete zero
+  rows every time it runs. **This night cannot prove retention works** — its only evidence
+  remains unit tests, and "survives a night" must never be read as "retention verified in
+  production". That needs a seeded-old-rows run against a scratch db and is its own task.
 - **Three services have no probe of our own** — proofpoint, claude, openai — which is why
   the Overview reads 3 affirmed / 4 unknown rather than 6 / 1, and why five of seven have no
   `uptime30d`. Credential-free product endpoints exist for all three and are stable
