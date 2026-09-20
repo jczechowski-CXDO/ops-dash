@@ -59,7 +59,32 @@ export function resolveAsset(root: string, urlPath: string): string | undefined 
 export function serveDashboard(app: FastifyInstance, root: string): void {
   const index = join(root, 'index.html');
 
-  app.get('/*', (request, reply) => {
+  /**
+   * The SPA catch-all, and it **declares its policy** like every other route.
+   *
+   * `'public-read'` is the truth here: the dashboard's HTML, JS and fonts are
+   * served to anyone who can reach the port, by the same decision that leaves
+   * the read API open. Saying so is not ceremony — `server/src/auth/session.ts`
+   * refuses a route that declares no policy with a 500 **before its handler
+   * runs**, so an undeclared route is fail-closed rather than quietly open.
+   *
+   * This route was invisible to that machinery in both directions, which is the
+   * reason the line is here. `buildApi` wraps the API in `register`, so those
+   * routes boot at `ready()` and a later `onRoute` hook still sees them;
+   * `serveDashboard` calls `app.get` directly on the root instance, so it
+   * registers immediately and a hook added afterwards never fires for it.
+   * `m4-auth` found their route-table guard reporting **seven routes where the
+   * process serves eight** — a guard blind to the exact route it was written to
+   * catch, reporting green. It surfaced only because they pinned the expected
+   * list as literals; `expect(rows.length).toBeGreaterThan(6)` would have passed
+   * forever.
+   *
+   * With the policy declared, `registerAuth` can move to the root instance and
+   * cover anything registered on it later. **That move belongs to `m4-auth` and
+   * must come after this line** — the hook refuses undeclared routes, so moving
+   * it first makes the SPA 500 on every request.
+   */
+  app.get('/*', { config: { auth: 'public-read' } }, (request, reply) => {
     const url = request.url;
 
     // `/api/*` is never a file. Handled before the lookup so a stray file in
