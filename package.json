@@ -24,7 +24,8 @@
     "typecheck": "tsc -b shared web server",
     "icons": "npm run icons --workspace @ops-dash/web",
     "fonts": "npm run fonts --workspace @ops-dash/web",
-    "build:server": "tsc -p server/tsconfig.build.json && node server/scripts/copy-assets.mjs"
+    "build:server": "tsc -p server/tsconfig.build.json && node server/scripts/copy-assets.mjs",
+    "auth:set": "npm run build:server && node server/scripts/auth-set.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
