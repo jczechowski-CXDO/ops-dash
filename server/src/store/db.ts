@@ -102,6 +102,17 @@ export function openStore(path = 'ops-dash.sqlite') {
     incidentsSince: db.prepare(
       `SELECT * FROM incidents WHERE resolved_at IS NULL OR resolved_at >= ? ORDER BY opened_at DESC`,
     ),
+    // The operator's OVERRIDES, not the rules themselves. A row here means
+    // "somebody turned this rule off (or explicitly back on)"; a rule with no
+    // row has never been touched and runs at the default declared beside it in
+    // `engine/rules.ts`, which is where the default lives and the only place it
+    // lives. The table is emphatically NOT the source of truth for whether a
+    // rule runs — `evaluate` reads it as `enabled[key] ?? RULES[key].enabled`.
+    allRuleState: db.prepare(`SELECT key, enabled FROM rule_state`),
+    putRuleState: db.prepare(
+      `INSERT INTO rule_state (key, enabled) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET enabled = excluded.enabled`,
+    ),
     // `at < ?` and not `<=`: the cutoff instant itself is inside the window a
     // 30-day query may still ask for. See retention.ts for the windows.
     deleteCheckRuns: db.prepare(`DELETE FROM check_runs WHERE at < ?`),
@@ -213,6 +224,35 @@ export function openStore(path = 'ops-dash.sqlite') {
      *  the correlation window. */
     incidentsSince(since: string) {
       return stmt.incidentsSince.all(since) as Array<Record<string, unknown>>;
+    },
+
+    /**
+     * Every operator override, as booleans.
+     *
+     * Two conversions that look like fussiness and are not:
+     *
+     * `enabled` is an INTEGER column — SQLite has no boolean — so this comes
+     * back as a number, and anything downstream doing a truthiness check would
+     * be one refactor away from testing the STRING `"0"`, which is true. Same
+     * class as the severity `"1.0"` round-trip the engine hit in M2. The
+     * comparison is made here, once, against the number.
+     *
+     * An ABSENT key is not `false`. It is "no override", and `evaluate` falls
+     * back to the rule's own default for it, so a fresh database with an empty
+     * table leaves both rules ON. Returning a key with `false` for a rule
+     * nobody has touched would silently disable the entire product, and the
+     * symptom — a dashboard that never raises anything — is indistinguishable
+     * from a quiet day. Hence: only rows that exist appear here.
+     */
+    ruleState(): Record<string, boolean> {
+      const rows = stmt.allRuleState.all() as Array<{ key: string; enabled: number | bigint }>;
+      return Object.fromEntries(rows.map((r) => [r.key, Number(r.enabled) !== 0]));
+    },
+
+    /** Record one override. `node:sqlite` will not bind a JS boolean, so the
+     *  1/0 conversion happens here rather than at each call site. */
+    setRuleState(key: string, enabled: boolean): void {
+      stmt.putRuleState.run(key, enabled ? 1 : 0);
     },
 
     /**
