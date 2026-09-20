@@ -1968,6 +1968,30 @@ Four things this taught, in rising order of generality:
 - **A test error is not a test failure**, and a harness that reports them the same way will
   get a real intermittent shrugged at twice.
 
+## The soak found a defect in its first fifteen minutes (2026-09-20)
+
+**A cold start opened a real Sev2.** `INC-119d4dc7`, at 05:16:45Z, one second before the
+server finished booting: all four statuspage services `unknown` because nothing had polled
+yet, which the blackout rule read as a correlated upstream failure. It resolved sixty seconds
+later on the first poll. Every restart minted one, and each counts against `incidents90d` for
+ninety days. Its own summary read *"we have LOST the ability to tell"*, which was false —
+nothing had been lost, nothing had yet been looked at.
+
+**Fourth instance of the signature defect: two halves each correct, disagreeing about the
+join.** `index.ts` says of the two codes it emits, "No adapter, or never polled. Both are 'we
+have not read this'" — and then hands the rule two codes where the rule excluded one. The
+rationale already written above that exclusion argues this case exactly; it simply never named
+it. Both files were right. The seam was wrong. Fixed at `600fdea` by making the exclusion a
+closed set of two — deliberately not a general "ignore unfamiliar codes", which that same
+rationale rejects for good reason.
+
+**Why no test caught it, which is the part worth keeping.** Every test in `rules.test.ts`
+constructs signals that have already been polled. *The estate at t=0 was a shape the suite had
+no way to express.* That is not a gap in the tests' rigour; it is a gap in their vocabulary,
+and no amount of mutation testing inside that vocabulary would have surfaced it. **It is the
+argument for the soak, and it arrived fifteen minutes in.** A definition of done that lists
+"survives a night" is not asking for an uptime figure — this is what it is for.
+
 ## Two agents, one tree (2026-09-20)
 
 `m3-runs` and `m3-prims` each ran mutation batteries that write to a file, run vitest and
