@@ -1636,3 +1636,37 @@ deliberately fresh reading — a reviewer re-reviewing its own work is worth not
 instinct is to close everything. The fix for a stale roster is to close the ones with no
 follow-on work, not to close all of them and respawn. Closing an agent is throwing away
 context; do it when the context has no further use, not to tidy a list.
+
+
+## A SCOPED run's typecheck line is not a claim about the repo (2026-09-20)
+
+The fifth occurrence of the trap, committed by the person who had written the rule about it
+ninety minutes earlier.
+
+At 02:xx I added to `CLAUDE.md`: *the last run before any commit is a plain
+`npx vitest run`*, because `--typecheck.enabled=false` reports tests green while the file
+does not compile. I then landed `02522d5` after running:
+
+```
+npx vitest run --root web   ->   Tests 641 passed
+```
+
+Typecheck was **enabled**. I had not broken the rule as written. But `--root web` typechecks
+what that project's config covers, and the nine `TS18047` errors my new tests introduced —
+`serviceEntryView` returns `ServiceView | null` and I read `view.vendor.level` without
+narrowing — did not appear in that run's summary. `npm test` was red on the branch for about
+an hour and nobody noticed, including me, because I never ran it.
+
+The rule was too narrow. It named one way of getting a false green and the next one arrived
+by a different door:
+
+**A scoped run's "Type Errors: no errors" is a claim about that scope, not about the repo.**
+`--root web`, `--root server`, `--project x` and a single file path all narrow it. Only
+`npm test` from the root says the thing the phrase appears to say.
+
+Worth noticing what saved it: the agent that found it could not run `npm test` at all because
+the `pretest` hook was failing, so the breakage blocked someone else's work within the hour.
+Had it been a warning rather than an error it would still be there. The generalisation is the
+one already at the top of `CLAUDE.md` and it keeps being true at larger scales: *a check that
+is not run is indistinguishable from a check that passes* — and this time the check was in
+the command, it just was not the command anyone ran.

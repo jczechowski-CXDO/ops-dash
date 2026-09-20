@@ -230,10 +230,16 @@ evidence: assert what a value **must be**, never what it must not be; run the ba
 against the world where the candidates **differ**; and before trusting a check that
 passes, prove it can fail.
 
-**The last run before any commit is a plain `npx vitest run`.** Mutation testing wants
-`--typecheck.enabled=false` for speed, and that flag makes a green run a lie about whether
-the file compiles — it has already produced a commit with nine passing tests and a broken
-build. Speed during the mutation loop, the full thing before the commit.
+**The last run before any commit is `npm test` from the repo root.** Two ways to get a
+false green, both already paid for:
+
+- `--typecheck.enabled=false` reports tests green while the file does not compile. It
+  produced a commit with nine passing tests and a broken build.
+- A **scoped** run — `--root web`, `--root server`, `--project x`, a single file path —
+  prints "Type Errors: no errors" about that scope only. It produced a commit that left
+  `npm test` red on the branch for an hour, with typecheck switched on the whole time.
+
+Scope the run while you iterate; run the whole thing before you commit.
 
 ## Current state
 
