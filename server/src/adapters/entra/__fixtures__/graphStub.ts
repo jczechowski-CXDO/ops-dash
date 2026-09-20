@@ -128,6 +128,25 @@ export const POLICY_AUDITS = { value: [
   { id: 'DEMO-AUDIT-0010', activityDisplayName: 'Update token lifetime policy', activityDateTime: '2026-09-20T09:00:00Z' },
 ] };
 
+/**
+ * The 15-minute spray window's `since`, as an ISO string, and one page of rows
+ * for it.
+ *
+ * Kept distinct from the 48-hour failed-sign-in fixture on purpose: if both
+ * queries returned the same rows, a producer that fed section 7's 15-minute
+ * threshold from the 24-hour read would be indistinguishable from a correct
+ * one — which is the exact defect the threshold's window exists to prevent.
+ * Two rows here against six there.
+ */
+export const SPRAY_SINCE = new Date(Date.parse(NOW.toISOString()) - 15 * 60 * 1000).toISOString();
+
+export const SPRAY_WINDOW_PAGE = {
+  value: [
+    { id: 'DEMO-SIGNIN-9001', createdDateTime: '2026-09-20T11:58:00Z', userId: 'DEMO-USER-0001' },
+    { id: 'DEMO-SIGNIN-9002', createdDateTime: '2026-09-20T11:52:00Z', userId: 'DEMO-USER-0002' },
+  ],
+};
+
 export type Route = [match: (url: string) => boolean, body: unknown];
 
 /** Matched by the distinguishing part of each query rather than by the whole
@@ -135,11 +154,26 @@ export type Route = [match: (url: string) => boolean, body: unknown];
  *  turn a real assertion into a test of the error path. */
 export function routes(f: GraphFixtures, over: Route[] = []): Route[] {
   const has = (...parts: string[]) => (url: string) => parts.every((p) => url.includes(p));
+  /**
+   * Matchers must be MUTUALLY EXCLUSIVE, which the first version of this was
+   * not: the successful-legacy query contains `clientAppUsed` AND
+   * `status/errorCode eq 0`, so the failed-sign-in route swallowed it and
+   * served six rows where the producer expected none. A stub whose routes
+   * overlap answers a question nobody asked, confidently.
+   */
   const signIn = (what: string, kind: 'interactive' | 'other') => (url: string) =>
     url.includes('/auditLogs/signIns') && url.includes(what) &&
+    (what !== 'status/errorCode' || !url.includes('clientAppUsed')) &&
     url.includes('signInEventTypes') === (kind === 'other');
   return [
     ...over,
+    // The 15-minute spray window must be DISTINGUISHABLE from the 48-hour read,
+    // or a producer that used the wrong one would look correct. Matched on the
+    // window's own `since`, which the caller computes from NOW.
+    [(url) => url.includes('/auditLogs/signIns') && url.includes(SPRAY_SINCE)
+      && !url.includes('clientAppUsed') && !url.includes('signInEventTypes'), SPRAY_WINDOW_PAGE],
+    [(url) => url.includes('/auditLogs/signIns') && url.includes(SPRAY_SINCE)
+      && !url.includes('clientAppUsed'), { value: [] }],
     [signIn('status/errorCode', 'interactive'), f.failedSignInsPage1],
     [(url) => url.includes('$skiptoken=DEMO-SKIP-0001'), f.failedSignInsPage2],
     [signIn('status/errorCode', 'other'), { value: [] }],

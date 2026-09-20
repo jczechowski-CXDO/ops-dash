@@ -1,4 +1,5 @@
 import type { AuditEvent, EntraSignal, EntraSnapshot, SourceResult } from '@ops-dash/shared';
+import type { IdentitySignal } from '../../engine/rules.js';
 import type { FetchLike } from '../../http/fetchJson.js';
 import type { TokenSource } from '../../http/graphToken.js';
 import { readAll, type PagedRead, type Row } from './paged.js';
@@ -16,6 +17,8 @@ import {
   RISK_DETECTIONS,
   ROLE_ASSIGNMENTS,
   ROLE_MEMBERS,
+  SUCCESSFUL_LEGACY_SIGNINS,
+  credentialsExpiringSoon,
   asString,
   auditEvent,
   credentialSignal,
@@ -117,6 +120,34 @@ export type EntraPollOptions = {
   previous?: EntraSnapshot;
 };
 
+/**
+ * The window the identity sign-in count covers, and the horizon the credential
+ * count uses.
+ *
+ * **Deliberately NOT imported from `engine/rules.js`, and that is the point.**
+ * The engine refuses an `IdentitySignal` whose `windowMs` is not fifteen
+ * minutes or whose `horizonDays` is not fourteen. If this file imported those
+ * constants the two could never disagree, the refusal would be unreachable, and
+ * the check would be a tautology about a single definition — which is the
+ * failure `docs/RESUME.md` names in three places. Two independently-reachable
+ * literals, with a drift test asserting they agree, is the shape that can
+ * actually fail.
+ */
+export const IDENTITY_SIGNIN_WINDOW_MS = 15 * 60 * 1000;
+export const IDENTITY_CREDENTIAL_HORIZON_DAYS = 14;
+
+/**
+ * A poll, with the rule input beside the screen input.
+ *
+ * `identity` is absent whenever `result.data` is, because facts assembled from
+ * a poll that failed halfway are facts about nothing — the same all-or-nothing
+ * ruling that governs `stats`.
+ */
+export type EntraPoll = {
+  result: SourceResult<EntraSnapshot>;
+  identity?: IdentitySignal;
+};
+
 type Failure = { code: string; message: string };
 
 /** Accumulates the first failure and the fact of any truncation across a dozen
@@ -179,7 +210,20 @@ class Reader {
   }
 }
 
+/**
+ * The snapshot alone, for callers that only draw the screen.
+ *
+ * Delegates rather than duplicating, so there is one fetch path and the
+ * 1,473-row `applications` read happens once. The cost is that a caller wanting
+ * only the screen still pays for the identity reads — four narrow queries — and
+ * that is deliberate: two fetch paths would be two places for the estate to be
+ * read differently, which is the seam defect this milestone keeps producing.
+ */
 export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<EntraSnapshot>> {
+  return (await pollEntraWithIdentity(opts)).result;
+}
+
+export async function pollEntraWithIdentity(opts: EntraPollOptions): Promise<EntraPoll> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const fetchedAt = nowDate.toISOString();
   const now = nowDate.getTime();
@@ -189,11 +233,13 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
   if ('error' in auth) {
     // A failure to LOOK, not a statement about the directory. No `data`.
     return {
-      fetchedAt,
-      degraded: false,
-      error: {
-        code: auth.error.code,
-        message: `We could not authenticate to Microsoft Graph (${auth.error.code}), so nothing about Entra was read.`,
+      result: {
+        fetchedAt,
+        degraded: false,
+        error: {
+          code: auth.error.code,
+          message: `We could not authenticate to Microsoft Graph (${auth.error.code}), so nothing about Entra was read.`,
+        },
       },
     };
   }
@@ -211,6 +257,21 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
   const roleAudits = await r.read('role-management audit', AUDITS_IN_CATEGORY('RoleManagement', since48));
   const policyAudits = await r.read('policy audit', AUDITS_IN_CATEGORY('Policy', since48));
   const recentAudits = await r.readNewest('recent directory audit', RECENT_AUDITS);
+
+  // The identity rules' own reads. Four narrow queries, and they are separate
+  // from everything above because they ask DIFFERENT questions of the same
+  // estate — a fifteen-minute failure count, and legacy sign-ins that
+  // succeeded. Section 7's thresholds name those quantities; the 24-hour
+  // figures the screen wants cannot answer either, and each near-miss errs
+  // toward firing forever.
+  const sprayWindow = await r.readSignIns(
+    'failed sign-ins (spray window)',
+    FAILED_SIGNINS(now - IDENTITY_SIGNIN_WINDOW_MS),
+  );
+  const legacySuccesses = await r.readSignIns(
+    'successful legacy sign-ins',
+    SUCCESSFUL_LEGACY_SIGNINS(since48),
+  );
 
   // Global admins take two hops: the role's object id is a tenant value we look
   // up rather than a GUID transcribed into source.
@@ -281,6 +342,7 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
 
   if (r.failure !== undefined) {
     return {
+      result: {
       fetchedAt,
       degraded: false,
       error: {
@@ -289,6 +351,7 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
         // unanswered, and a snapshot that is missing is more useful than one
         // that is quietly wrong.
         message: `We could not read Entra (${r.failure.message}). No figures are shown rather than partial ones, because a missing count on this screen reads as good news.`,
+      },
       },
     };
   }
@@ -365,20 +428,54 @@ export async function pollEntra(opts: EntraPollOptions): Promise<SourceResult<En
   // the contract says `data` and `error` are not mutually exclusive, and this is
   // the case it was written for.
   const unparsed = failed.unparsed + legacy.unparsed + risk.unparsed + roles.unparsed + ca.unparsed;
+  /* ------------------------------------------------------------- identity */
+
+  /**
+   * The rule input, assembled from the same poll so the two halves cannot
+   * disagree about the estate.
+   *
+   * Every field here is the quantity section 7's threshold NAMES, not the
+   * adjacent one the screen wants:
+   *
+   *   failedSignIns        a real 15-minute window, not `stats.failedSignIns24h`
+   *   credentialsExpiring  FUTURE expiry only, not the standing backlog
+   *   successfulLegacy     successes, not the attempts the signal counts
+   *
+   * `observedAt` is the poll's own `fetchedAt`, so the engine measures
+   * freshness from when we LOOKED rather than from when anyone stored it.
+   */
+  const identity: IdentitySignal = {
+    observedAt: fetchedAt,
+    failedSignIns: { count: sprayWindow.length, windowMs: IDENTITY_SIGNIN_WINDOW_MS },
+    credentialsExpiring: {
+      count: credentialsExpiringSoon(applications, now, IDENTITY_CREDENTIAL_HORIZON_DAYS),
+      horizonDays: IDENTITY_CREDENTIAL_HORIZON_DAYS,
+    },
+    // Over the same 48-hour read as the dashboard signal. "Any occurrence" in
+    // section 7 has no window of its own, so this one is stated here rather
+    // than left implicit — flagged to the lead as the one field whose window
+    // does not travel with it in the type.
+    successfulLegacySignIns: legacySuccesses.length,
+    confirmedCompromised: compromised.length,
+  };
+
   const reasons: string[] = [];
   if (r.truncated.length > 0) reasons.push(`hit the page budget on: ${r.truncated.join(', ')}`);
   if (unparsed > 0) reasons.push(`${unparsed} row(s) carried a timestamp we could not read`);
   if (reasons.length > 0) {
     return {
-      data,
-      fetchedAt,
-      degraded: true,
-      error: {
-        code: 'entra_partial',
-        message: `These counts are lower bounds: ${reasons.join('; ')}.`,
+      result: {
+        data,
+        fetchedAt,
+        degraded: true,
+        error: {
+          code: 'entra_partial',
+          message: `These counts are lower bounds: ${reasons.join('; ')}.`,
+        },
       },
+      identity,
     };
   }
 
-  return { data, fetchedAt, degraded: false };
+  return { result: { data, fetchedAt, degraded: false }, identity };
 }

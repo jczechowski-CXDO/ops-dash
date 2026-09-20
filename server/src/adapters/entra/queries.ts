@@ -118,6 +118,26 @@ export const LEGACY_SIGNINS = (since: number): [string, string] =>
   );
 
 /**
+ * Legacy-protocol sign-ins that SUCCEEDED.
+ *
+ * §7's `legacy` rule is about a success, not an attempt — a blocked IMAP login
+ * is the control working. `LEGACY_SIGNINS` above counts attempts because that
+ * is what the dashboard signal means; this counts the subset that got through,
+ * and the two differ by the whole of the estate's blocked traffic. Measured on
+ * the live tenant over 24 hours: **11 attempts, 0 successes.** A rule wired to
+ * the attempts figure is a permanent Sev2; wired to this one it is correctly
+ * silent.
+ *
+ * `status/errorCode eq 0` is Entra's own definition of a sign-in that worked.
+ */
+export const SUCCESSFUL_LEGACY_SIGNINS = (since: number): [string, string] =>
+  signInQueries(
+    `(${LEGACY_CLIENT_APPS.map((a) => `clientAppUsed eq ${quoted(a)}`).join(' or ')}) and status/errorCode eq 0`,
+    since,
+    ['id', 'createdDateTime'],
+  );
+
+/**
  * Risky sign-ins come from `riskDetections`, NOT from the sign-in log.
  *
  * `riskLevelDuringSignIn` is a property on the sign-in entity and it is not
@@ -379,6 +399,45 @@ export function credentialSignal(apps: Row[], now: number, horizonDays = EXPIRY_
   const crossed = entries.filter((e) => e <= now);
   const lastEnteredAt = crossed.length === 0 ? undefined : iso(Math.max(...crossed));
   return { count, delta24h: count - before, lastEnteredAt };
+}
+
+/**
+ * Credentials whose expiry is in the FUTURE and inside the horizon.
+ *
+ * **A different computation from `credentialSignal`, not a different parameter,
+ * and the distinction is the whole reason this function exists.**
+ * `credentialSignal` counts a credential from the moment it enters the window
+ * and keeps counting it forever after it expires — deliberately, because an
+ * expired secret is not a solved problem, it is the problem having happened,
+ * and a dashboard figure should say so. That makes it a **standing backlog**.
+ *
+ * §7's `secrets` rule needs the opposite: what is about to break. Measured on
+ * the live tenant, the two disagree by twenty on an ordinary day —
+ * `credentialSignal` reports **20**, of which **19 have already expired**, and
+ * this reports **0**. Feeding the backlog figure to the rule at any horizon
+ * pins a Sev3 on permanently, which no horizon value can fix.
+ *
+ * So the two numbers are both right and they answer different questions. The
+ * first person to see 20 on the Entra screen and 0 in the rule will assume one
+ * is broken; this comment and the one on `credentialSignal` are the answer.
+ */
+export function credentialsExpiringSoon(apps: Row[], now: number, horizonDays: number): number {
+  const until = now + horizonDays * DAY_MS;
+  let count = 0;
+  for (const app of apps) {
+    for (const field of ['passwordCredentials', 'keyCredentials'] as const) {
+      const list = app[field];
+      if (!Array.isArray(list)) continue;
+      for (const cred of list) {
+        const rec = asRecord(cred);
+        const end = instant(rec?.['endDateTime']);
+        // Strictly in the future, and inside the horizon. An already-expired
+        // credential is excluded here and counted by `credentialSignal`.
+        if (end !== undefined && end > now && end <= until) count += 1;
+      }
+    }
+  }
+  return count;
 }
 
 /** Is a directory-audit row about Conditional Access? The category is `Policy`,

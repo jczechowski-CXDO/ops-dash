@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readAll } from './paged.js';
 import { FAILED_SIGNINS } from './queries.js';
-import { pollEntra } from './index.js';
+import {
+  IDENTITY_CREDENTIAL_HORIZON_DAYS, IDENTITY_SIGNIN_WINDOW_MS, pollEntra, pollEntraWithIdentity,
+} from './index.js';
+import {
+  IDENTITY_MAX_AGE_MS, SECRETS_HORIZON_DAYS, SPRAY_WINDOW_MS, WrongWindowError, evaluate,
+} from '../../engine/rules.js';
 // The stubbed Graph lives beside the fixtures it reads, and is shared with the
 // composition root's own test so the two sides of the seam cannot drift about
 // what Graph answers. See the module's own comment.
@@ -208,7 +213,10 @@ describe('the Entra snapshot, end to end over a stubbed Graph', () => {
     const b = await readAll(other, 'stub-token', impl);
     expect(a.ok && b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
-    expect(a.rows.length + b.rows.length).toBe(6);   // both pages of the fixture
+    // Two rows: the stub serves the 15-minute window separately from the
+    // 48-hour read, precisely so the two cannot be confused. `spray` wants this
+    // number and the screen wants the other one.
+    expect(a.rows.length + b.rows.length).toBe(2);
   });
 });
 
@@ -320,5 +328,128 @@ describe('a lower bound is reported as a lower bound', () => {
     expect(r.degraded).toBe(true);
     expect(r.error?.message).toContain('page budget');
     expect(r.error?.message).toContain('failed sign-ins (interactive)');
+  });
+});
+
+describe('the identity producer — section 7’s rules finally have an input', () => {
+  const withIdentity = (over: Route[] = []) => {
+    const { impl, misses } = serve(routes(over));
+    return pollEntraWithIdentity({ tokens: goodToken(), fetchImpl: impl, now: () => NOW })
+      .then((poll) => ({ poll, misses }));
+  };
+
+  it('reads the FIFTEEN-MINUTE window, not the 24-hour one', () => {
+    // The stub serves two rows for the spray window and six for the 48-hour
+    // failed read, so a producer wired to the wrong query reports 6 and this
+    // fails. Without that distinction the two are indistinguishable, which is
+    // the whole defect the threshold's window exists to prevent.
+    return withIdentity().then(({ poll, misses }) => {
+      expect(misses).toEqual([]);
+      expect(poll.identity?.failedSignIns).toEqual({ count: 2, windowMs: 900_000 });
+      // …and the snapshot's own figure still comes from the 48-hour read.
+      expect(poll.result.data?.stats.failedSignIns24h).toBe(4);
+    });
+  });
+
+  it('counts only credentials expiring in the FUTURE, inside 14 days', async () => {
+    // The fixture's three credentials end 2026-10-05, 2026-10-19 and
+    // 2027-06-01. At NOW (2026-09-20T12:00Z) none is inside 14 days, so the
+    // rule input is 0 — while the dashboard signal reports 2, because it counts
+    // the standing backlog. On the live tenant that gap is 0 against 20.
+    const { poll } = await withIdentity();
+    expect(poll.identity?.credentialsExpiring).toEqual({ count: 0, horizonDays: 14 });
+    expect(poll.result.data?.signals.find((s) => s.key === 'expiring_credentials')?.count).toBe(2);
+  });
+
+  it('counts legacy SUCCESSES, and the snapshot still counts attempts', async () => {
+    const { poll } = await withIdentity();
+    expect(poll.identity?.successfulLegacySignIns).toBe(0);
+    expect(Object.keys(poll.identity!)).not.toContain('legacyAuth');
+  });
+
+  it('stamps observedAt from when we LOOKED', async () => {
+    const { poll } = await withIdentity();
+    expect(poll.identity?.observedAt).toBe(poll.result.fetchedAt);
+  });
+
+  it('**the seam**: the engine ACCEPTS this signal and runs all four rules', async () => {
+    // The assertion this whole piece exists for. The engine refuses a window
+    // that is not fifteen minutes and a horizon that is not fourteen days, by
+    // throwing — so a producer whose quantities were the near-misses would not
+    // quietly under-report, it would blow up here. This is the only test that
+    // runs the producer's real output through the consumer's real checks.
+    const { poll } = await withIdentity();
+    expect(() => evaluate([], {}, { identity: poll.identity!, at: NOW.toISOString() })).not.toThrow();
+
+    // And it does not merely fail to throw — a rule FIRES, end to end, from a
+    // Graph payload through the producer into the engine. The stub's directory
+    // holds two confirmed-compromised accounts, so `risky` is the one that
+    // should, and the other three should not: 2 rows in the 15-minute window is
+    // far below 500, no credential expires inside 14 days, and no legacy
+    // sign-in succeeded.
+    const findings = evaluate([], {}, { identity: poll.identity!, at: NOW.toISOString() });
+    expect(findings.map((f) => f.ruleKey)).toEqual(['risky']);
+    expect(findings[0]!.severity).toBe(1);
+    expect(findings[0]!.serviceId).toBe('m365');
+    expect(findings[0]!.title).toContain('2 accounts confirmed compromised');
+  });
+
+  it('**and the refusal is reachable**: the near-miss quantities are rejected', async () => {
+    // The control for the test above. If the engine accepted anything, "the
+    // engine accepts this signal" would be worth nothing.
+    const { poll } = await withIdentity();
+    const naive = {
+      ...poll.identity!,
+      failedSignIns: { count: 4535, windowMs: 24 * 60 * 60 * 1000 },
+    };
+    expect(() => evaluate([], {}, { identity: naive, at: NOW.toISOString() })).toThrow(WrongWindowError);
+  });
+
+  it('the window and horizon are independently reachable, and they agree', () => {
+    // NOT imported from the engine, deliberately: if they were, the refusal
+    // could never fire and the check would be a tautology about one definition.
+    // This is the drift guard — two definitions compared, neither derived from
+    // the other — and it is what makes the refusal above meaningful.
+    expect(IDENTITY_SIGNIN_WINDOW_MS).toBe(900_000);
+    expect(IDENTITY_CREDENTIAL_HORIZON_DAYS).toBe(14);
+    expect(IDENTITY_SIGNIN_WINDOW_MS).toBe(SPRAY_WINDOW_MS);
+    expect(IDENTITY_CREDENTIAL_HORIZON_DAYS).toBe(SECRETS_HORIZON_DAYS);
+  });
+
+  it('is fresh enough for the engine to read at the moment it is produced', () => {
+    // A signal that arrived already stale would make the rules unreachable in a
+    // subtler way than having no producer at all.
+    return withIdentity().then(({ poll }) => {
+      const age = Date.parse(NOW.toISOString()) - Date.parse(poll.identity!.observedAt);
+      expect(age).toBeLessThan(IDENTITY_MAX_AGE_MS);
+    });
+  });
+
+  it('carries NO identity when the snapshot failed — facts from a half-failed poll', async () => {
+    const { poll } = await withIdentity([[(u) => u.includes('riskyUsers'), null]]);
+    expect(poll.result.data).toBeUndefined();
+    expect(poll.identity).toBeUndefined();
+  });
+
+  it('carries no identity when we could not authenticate either', async () => {
+    const { impl } = serve(routes());
+    const poll = await pollEntraWithIdentity({ tokens: failingToken(), fetchImpl: impl, now: () => NOW });
+    expect(poll.identity).toBeUndefined();
+    expect(poll.result.error?.code).toBe('graph_config');
+  });
+
+  it('DOES carry identity on a partial read, because the snapshot is real', async () => {
+    const { poll } = await withIdentity();
+    expect(poll.result.degraded).toBe(true);        // the committed fixture has one bad timestamp
+    expect(poll.result.error?.code).toBe('entra_partial');
+    expect(poll.identity).toBeDefined();
+  });
+
+  it('pollEntra still returns the snapshot alone, unchanged', async () => {
+    // The delegation. Every existing caller sees exactly what it saw before.
+    const { impl } = serve(routes());
+    const direct = await pollEntra({ tokens: goodToken(), fetchImpl: impl, now: () => NOW });
+    const { poll } = await withIdentity();
+    expect(direct).toEqual(poll.result);
   });
 });
