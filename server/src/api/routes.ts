@@ -81,9 +81,22 @@ export type ApiStore = TileStore & {
   openIncidents(): Array<Record<string, unknown>>;
 };
 
-/** How many individual runs `/api/checks` will hand back. The detail page shows
- *  a short table, not a log; anything wanting the history should ask for a
- *  window rather than a bigger page of the newest rows. */
+/**
+ * How many individual runs `/api/checks` hands back.
+ *
+ * A page size that bounds the response, not a display preference. The original
+ * justification here was "the detail page shows a short table, not a log",
+ * which was me writing the cap before anything consumed it — and it was wrong
+ * about the table's job. The view agent pushed back with the arithmetic: at one
+ * poll a minute with two probes on a service, five rows is one or two ticks,
+ * and a flapping probe is invisible in two ticks. 25 is roughly six to twelve
+ * minutes of history.
+ *
+ * The rest of the page answers "how is this service"; this table is the only
+ * thing that answers "which check, from where, how fast, when". Anything
+ * wanting real history should ask for a time window rather than a bigger page
+ * of the newest rows.
+ */
 export const CHECKS_PAGE = 25;
 
 /** The poller, narrowed the same way. Typed from `schedule.ts`'s own
