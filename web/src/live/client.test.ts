@@ -166,3 +166,130 @@ describe('the one route that takes an argument is still built here', () => {
     expect(got.error.message).toContain('/api/checks?service=jira');
   });
 });
+
+/**
+ * The status, as a value rather than as prose.
+ *
+ * Added because the number used to survive only inside `message`, so the only
+ * way for a view to tell "you are not signed in" from "the store is down" was
+ * to regex an English sentence. That matters beyond tidiness: every view paints
+ * an error `kind` red, and G3 HIGH-2 ruled that a state which is not a source
+ * failure must not be red — red for an ordinary condition teaches an operator
+ * to distrust red.
+ */
+describe('a non-2xx carries its status as a number', () => {
+  it('reports the status for every class of HTTP failure', async () => {
+    // Several shapes, not one: a single 401 case would pass against a function
+    // that hard-coded 401, and the claim is about the relationship between the
+    // response and the reported status.
+    for (const status of [400, 401, 403, 404, 429, 500, 503]) {
+      stub({ status, body: 'nope' });
+      const got = await getJson('/api/services');
+      expect(got.ok).toBe(false);
+      if (got.ok) return;
+      expect(got.error.status, `HTTP ${status}`).toBe(status);
+      // The prose is still there and still names it; the field is what a caller
+      // branches on.
+      expect(got.error.message).toContain(String(status));
+    }
+  });
+
+  it('lets a caller tell "not signed in" from "the store is down" without reading prose', async () => {
+    stub({ status: 401, body: '' });
+    const unauth = await getJson('/api/services');
+    stub({ status: 503, body: '' });
+    const down = await getJson('/api/services');
+    expect(unauth.ok || down.ok).toBe(false);
+    if (unauth.ok || down.ok) return;
+    // The two independently reachable facts, compared: one number distinguishes
+    // them, and neither assertion goes anywhere near the message string.
+    expect(unauth.error.status).toBe(401);
+    expect(down.error.status).toBe(503);
+    expect(unauth.error.status === 401).not.toBe(down.error.status === 401);
+  });
+
+  it('carries no status where there was no response to have one', async () => {
+    // A throw never reached a status line, and `status: 0` would be a reading.
+    stub({ throws: new TypeError('Failed to fetch') });
+    const got = await getJson('/api/health');
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.error.code).toBe('unreachable');
+    expect(got.error.status).toBeUndefined();
+    // …and the three 2xx failures likewise: they have a status, and it is 200,
+    // which says nothing about them. The field is for the failures the status
+    // line itself describes.
+    stub({ body: '' });
+    const empty = await getJson('/api/health');
+    expect(empty.ok).toBe(false);
+    if (empty.ok) return;
+    expect(empty.error.code).toBe('empty_body');
+    expect(empty.error.status).toBeUndefined();
+  });
+});
+
+describe('a non-2xx body explains itself in the server\'s own words', () => {
+  it('adopts the code and message our own API served', async () => {
+    stub({
+      status: 401,
+      body: JSON.stringify({ error: { code: 'unauthenticated', message: 'this route needs a session' } }),
+    });
+    const got = await getJson('/api/services');
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.error.code).toBe('unauthenticated');
+    expect(got.error.message).toBe('this route needs a session');
+    // The status survives ALONGSIDE the served words, not instead of them.
+    expect(got.error.status).toBe(401);
+  });
+
+  it('falls back to describing the status when the body explains nothing', async () => {
+    const useless = [
+      '',
+      'Not Found',
+      '<!doctype html><html><body>Sign in</body></html>',
+      '[]',
+      'null',
+      JSON.stringify({ error: 'unauthenticated' }),
+      JSON.stringify({ error: { code: 'unauthenticated' } }),
+      JSON.stringify({ error: { message: 'no code' } }),
+      JSON.stringify({ error: { code: 7, message: 'not a string' } }),
+      JSON.stringify({ code: 'unauthenticated', message: 'not nested under error' }),
+    ];
+    for (const body of useless) {
+      stub({ status: 401, body });
+      const got = await getJson('/api/services');
+      expect(got.ok).toBe(false);
+      if (got.ok) return;
+      expect(got.error.code, body.slice(0, 40)).toBe('http_status');
+      expect(got.error.message, body.slice(0, 40)).toContain('401');
+      // Unreadable prose never costs us the number.
+      expect(got.error.status, body.slice(0, 40)).toBe(401);
+    }
+  });
+
+  it('never lets the server speak this door\'s private vocabulary', async () => {
+    // `DataSource.tsx` DROPS an `aborted` error without painting anything — an
+    // abort means the user navigated. A served `aborted` would therefore make a
+    // real HTTP failure vanish into a blank panel with nothing to explain it.
+    // The other four are this door's own classifications and would misdescribe
+    // what happened.
+    for (const code of ['aborted', 'unreachable', 'http_status', 'empty_body', 'non_json_2xx']) {
+      stub({ status: 500, body: JSON.stringify({ error: { code, message: 'a served message' } }) });
+      const got = await getJson('/api/incidents');
+      expect(got.ok).toBe(false);
+      if (got.ok) return;
+      expect(got.error.code, code).toBe('http_status');
+      expect(got.error.message, code).toContain('500');
+      expect(got.error.status, code).toBe(500);
+    }
+    // The control: a code that is NOT reserved is still adopted, so the four
+    // assertions above are not passing because adoption is broken outright.
+    stub({ status: 500, body: JSON.stringify({ error: { code: 'store_unavailable', message: 'a served message' } }) });
+    const adopted = await getJson('/api/incidents');
+    expect(adopted.ok).toBe(false);
+    if (adopted.ok) return;
+    expect(adopted.error.code).toBe('store_unavailable');
+    expect(adopted.error.message).toBe('a served message');
+  });
+});

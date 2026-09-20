@@ -53,9 +53,84 @@ export function checksPath(serviceId: ServiceId): string {
   return `/api/checks?service=${encodeURIComponent(serviceId)}`;
 }
 
-export type Fetched = { ok: true; json: unknown } | { ok: false; error: { code: string; message: string } };
+export type Fetched =
+  | { ok: true; json: unknown }
+  | {
+      ok: false;
+      error: {
+        code: string;
+        message: string;
+        /**
+         * The HTTP status, as a NUMBER, whenever there was a response to have
+         * one. Absent for a throw, an abort, or a failure that never reached a
+         * status line.
+         *
+         * ## Why this field exists
+         *
+         * It used to survive only inside `message`, as the words "answered HTTP
+         * 401". That reads fine and is useless: a view's only way to tell "you
+         * are not signed in" from "the store is down" was to regex an English
+         * sentence — re-deriving a value from its own prose rendering, which is
+         * the shape this codebase keeps getting burned by.
+         *
+         * And the consequence was not cosmetic. Every view funnels errors
+         * through `panelStateFor`, which paints `kind: 'error'` — a red "X is
+         * unavailable". G3 HIGH-2 ruled on precisely that in `ServiceDetail`: a
+         * state that is NOT a source failure must not be painted red, because
+         * red for an ordinary condition teaches an operator to distrust red.
+         * **Not being signed in is not an outage.** A caller that wants to say
+         * so branches on `status === 401`, a number, mechanically.
+         */
+        status?: number;
+      };
+    };
 
 const failed = (code: string, message: string): Fetched => ({ ok: false, error: { code, message } });
+
+/**
+ * The codes this door issues about the TRANSPORT, which the server may not
+ * speak.
+ *
+ * `DataSource.tsx` drops an `aborted` error without painting anything — an
+ * abort means the component unmounted or a newer poll superseded this one, and
+ * a red panel because the user navigated is a false alarm. So a response body
+ * carrying `{"error":{"code":"aborted"}}` would make a real failure vanish into
+ * a blank panel with no explanation anywhere.
+ *
+ * It is a narrow hole and it is cheap to close: a served code that collides
+ * with this door's own vocabulary is not adopted, and the classification falls
+ * back to `http_status`. The status number is carried either way, so nothing is
+ * lost — the server simply does not get to speak the client's private language.
+ */
+const RESERVED_CODES = ['aborted', 'unreachable', 'http_status', 'empty_body', 'non_json_2xx'];
+
+/**
+ * `{ error: { code, message } }` out of a non-2xx body, or `null`.
+ *
+ * Every error on this surface already has that shape — `SourceResult.error`,
+ * `Fetched['error']`, the API's own envelopes — so an authentication failure
+ * answering `401 { error: { code: 'unauthenticated', message } }` lands in the
+ * existing vocabulary rather than introducing a second one.
+ *
+ * Never throws, and adopts nothing it cannot read: a body that is not JSON, not
+ * an object, or missing either string is simply not a served error, and the
+ * caller falls back to describing the status itself.
+ */
+function servedError(body: string): { code: string; message: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const error = (parsed as Record<string, unknown>)['error'];
+  if (typeof error !== 'object' || error === null || Array.isArray(error)) return null;
+  const { code, message } = error as Record<string, unknown>;
+  if (typeof code !== 'string' || typeof message !== 'string') return null;
+  if (RESERVED_CODES.includes(code)) return null;
+  return { code, message };
+}
 
 /** The narrow contract the provider depends on, so a test can supply a client
  *  that answers from a literal rather than stubbing a global. */
@@ -98,7 +173,27 @@ async function request(path: string, signal?: AbortSignal): Promise<Fetched> {
   }
 
   if (!response.ok) {
-    return failed('http_status', `${path} answered HTTP ${response.status}`);
+    // The body is READ on a non-2xx, which it did not used to be. Our own API
+    // explains itself in the body — `401 {error:{code:'unauthenticated'}}` —
+    // and discarding it left the web with a status buried in prose and the
+    // server's own words thrown away. A body we cannot read costs nothing: the
+    // status is carried as a number regardless.
+    let body = '';
+    try {
+      body = await response.text();
+    } catch {
+      // A body that will not read is not a second failure to report. The status
+      // line already told us what happened.
+    }
+    const served = servedError(body);
+    return {
+      ok: false,
+      error: {
+        code: served?.code ?? 'http_status',
+        message: served?.message ?? `${path} answered HTTP ${response.status}`,
+        status: response.status,
+      },
+    };
   }
 
   let body: string;
