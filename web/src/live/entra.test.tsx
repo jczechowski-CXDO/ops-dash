@@ -99,6 +99,10 @@ function clientOf(answers: Partial<Record<ApiPath, () => Promise<Fetched> | Fetc
       return answer ? answer() : fail(`no stub for ${path}`);
     },
     checks: async (serviceId) => fail(`no checks stub for ${serviceId}`),
+    // Deliberately an ERROR rather than a silent success, matching the `checks`
+    // stub above: a test that reaches a write it did not mean to should see a
+    // failure, not a no-op it cannot distinguish from working.
+    act: async (action) => fail(`no act stub for ${action}`),
   };
 }
 

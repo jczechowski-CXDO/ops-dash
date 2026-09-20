@@ -63,6 +63,7 @@ const pending = (): Promise<Fetched> => new Promise<Fetched>(() => {});
 const clientOf = (answer: () => Promise<Fetched> | Fetched): ApiClient => ({
   get: async (path: ApiPath) => (path === '/api/endpoints' ? answer() : pending()),
   checks: async (serviceId) => fail(`no checks stub for ${serviceId}`),
+  act: async (action) => fail(`no act stub for ${action}`),
 });
 
 const live = (answer: () => Promise<Fetched> | Fetched, children: ReactNode = <Endpoints />, intervalMs = 1_000_000) =>

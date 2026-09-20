@@ -72,6 +72,29 @@ export function checksPath(serviceId: ServiceId): string {
   return `/api/checks?service=${encodeURIComponent(serviceId)}`;
 }
 
+/**
+ * The four things an operator can change, and the only writes this app makes.
+ *
+ * A closed union rather than a string, for the reason `ApiPath` is one: a
+ * caller passing `\`${thing}\`` would make the method surface open, and this
+ * file would stop being the only place that can name a target.
+ */
+export type IncidentAction = 'ack' | 'mute' | 'unmute' | 'resolve';
+
+/**
+ * Built here, never by a caller, and the id is ENCODED.
+ *
+ * `checksPath` takes a `ServiceId` — already a closed union — so its encoding
+ * is belt and braces. This one is different and the encoding is load-bearing:
+ * an incident id is a value the SERVER chose and we read off the wire, so it is
+ * the first path segment in this app assembled from data rather than from a
+ * literal. `INC-2291/../../admin` is a path traversal if it is interpolated
+ * raw; encoded it is a 404 about an incident with a silly name.
+ */
+export function incidentActionPath(action: IncidentAction, incidentId: string): string {
+  return `/api/incidents/${encodeURIComponent(incidentId)}/${action}`;
+}
+
 export type Fetched =
   | { ok: true; json: unknown }
   | {
@@ -157,11 +180,37 @@ export type ApiClient = {
   get(path: ApiPath, signal?: AbortSignal): Promise<Fetched>;
   /** Kept separate from `get` so the path union stays a union. */
   checks(serviceId: ServiceId, signal?: AbortSignal): Promise<Fetched>;
+  /**
+   * The only writes. Separate from `get` for the same reason `checks` is —
+   * a `post(path, body)` would make `ApiPath` a string in practice, which is
+   * the one property this file exists to hold.
+   *
+   * `until` is for `mute` alone. **Absent means indefinite**, and it is sent as
+   * an omitted key rather than as `''` or a placeholder: the server answers an
+   * unparseable expiry with 400 and writes nothing, deliberately, because a
+   * mute whose expiry cannot be compared folds as never-expiring or
+   * always-expired depending on which side of a NaN comparison it lands, and
+   * both are silent.
+   */
+  act(
+    action: IncidentAction,
+    incidentId: string,
+    body?: { until?: string | null },
+    signal?: AbortSignal,
+  ): Promise<Fetched>;
 };
 
 export const apiClient: ApiClient = {
   get: getJson,
   checks: (serviceId, signal) => request(checksPath(serviceId), signal),
+  act: (action, incidentId, body, signal) =>
+    request(incidentActionPath(action, incidentId), signal, {
+      method: 'POST',
+      // Always a body, even for the three that take none: `{}` is what the
+      // routes expect and an absent body on a POST is the shape a proxy or a
+      // framework is most likely to disagree about.
+      body: JSON.stringify(body ?? {}),
+    }),
 };
 
 export async function getJson(path: ApiPath, signal?: AbortSignal): Promise<Fetched> {
@@ -170,7 +219,14 @@ export async function getJson(path: ApiPath, signal?: AbortSignal): Promise<Fetc
 
 /** The single call. `getJson` and `checks` differ only in how their path is
  *  built; everything about the request itself is decided once, here. */
-async function request(path: string, signal?: AbortSignal): Promise<Fetched> {
+async function request(
+  path: string,
+  signal?: AbortSignal,
+  /** POST and its body, for the four write routes. Absent is a GET — spelled
+   *  that way rather than defaulting `method`, so a read cannot become a write
+   *  by omission. */
+  write?: { method: 'POST'; body: string },
+): Promise<Fetched> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -180,7 +236,10 @@ async function request(path: string, signal?: AbortSignal): Promise<Fetched> {
       // unexpressible; this makes it harmless if that ever stopped being true.
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { accept: 'application/json' },
+      headers: write
+        ? { accept: 'application/json', 'content-type': 'application/json' }
+        : { accept: 'application/json' },
+      ...(write ? { method: write.method, body: write.body } : {}),
       ...(signal ? { signal } : {}),
     });
   } catch (cause) {

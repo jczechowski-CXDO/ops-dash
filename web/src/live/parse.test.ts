@@ -555,3 +555,72 @@ describe('the individual check runs', () => {
     }
   });
 });
+
+describe('incidentView hydrates the operator\'s own actions', () => {
+  /** What `/api/incidents` serves for an incident somebody has acted on. */
+  const served = (over: Record<string, unknown>) => ({
+    id: 'INC-2291',
+    ruleKey: 'vendor',
+    serviceId: 'proofpoint',
+    severity: 1,
+    openedAt: '2026-09-20T07:00:00.000Z',
+    summary: 'Mail flow degraded. Two probes failing.',
+    ...over,
+  });
+
+  it('carries ack through, because three call sites already read it', () => {
+    // `Overview.tsx` dims an acknowledged row, credits `incident.ack.by` and
+    // disables its Acknowledge button; `IncidentDetail.tsx` reads it too. All
+    // of that was dead on the live path — this parser built an Incident without
+    // the field, so an incident somebody HAD acknowledged rendered as untouched
+    // with the button still inviting them to do it again.
+    const view = incidentView(served({ ack: { by: 'ops@example.com', at: '2026-09-20T07:30:00.000Z' } }));
+    expect(view).not.toBeNull();
+    expect(view?.ack).toEqual({ by: 'ops@example.com', at: '2026-09-20T07:30:00.000Z' });
+  });
+
+  it('treats an indefinite mute and an expiring one as different facts', () => {
+    // `until: null` is muted indefinitely. It is NOT the same as an expiry we
+    // could not read, and it is not the same as no mute at all.
+    const forever = incidentView(served({ muted: { by: 'ops@example.com', until: null } }));
+    expect(forever?.muted).toEqual({ by: 'ops@example.com', until: null });
+
+    const timed = incidentView(served({ muted: { by: 'ops@example.com', until: '2026-09-21T00:00:00.000Z' } }));
+    expect(timed?.muted).toEqual({ by: 'ops@example.com', until: '2026-09-21T00:00:00.000Z' });
+
+    // An omitted `until` is the server's normalised indefinite, same as null.
+    const omitted = incidentView(served({ muted: { by: 'ops@example.com' } }));
+    expect(omitted?.muted).toEqual({ by: 'ops@example.com', until: null });
+  });
+
+  it('leaves both keys ABSENT when there is no action, never empty objects', () => {
+    // `Overview.tsx` does `Boolean(i.ack)`, so `{}` would read as acknowledged
+    // by nobody — and `{...incident}` has to keep working across the web layer.
+    const view = incidentView(served({}));
+    expect(view).not.toBeNull();
+    expect(view && 'ack' in view).toBe(false);
+    expect(view && 'muted' in view).toBe(false);
+    expect(Boolean(view?.ack)).toBe(false);
+  });
+
+  it('refuses a half-built flag rather than crediting it to nobody', () => {
+    // An ack with no `by` cannot be credited, and inventing a name would put a
+    // person's name on an action they may not have taken. Dropping the flag
+    // says "not acknowledged", which is the honest reading of a record we
+    // cannot read — and it is visibly different from a wrong name.
+    for (const ack of [{ at: '2026-09-20T07:30:00.000Z' }, { by: 'ops@example.com' }, 'yes', 7, []]) {
+      const view = incidentView(served({ ack }));
+      expect(view, JSON.stringify(ack)).not.toBeNull();
+      expect(view?.ack, JSON.stringify(ack)).toBeUndefined();
+    }
+    // A mute whose expiry is neither a string nor null is refused whole: it
+    // must not silently become "forever".
+    expect(incidentView(served({ muted: { by: 'ops@example.com', until: 12345 } }))?.muted).toBeUndefined();
+    // The control: a well-formed flag is still accepted, so the refusals above
+    // are not a parser that drops every flag.
+    expect(incidentView(served({ ack: { by: 'ops@example.com', at: 't' } }))?.ack).toEqual({
+      by: 'ops@example.com',
+      at: 't',
+    });
+  });
+});

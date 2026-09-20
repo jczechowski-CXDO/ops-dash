@@ -154,6 +154,8 @@ function clientOf(
     // success: a test that forgets to stub this should see a panel saying the
     // runs could not be read, not one saying there are none.
     checks: async (serviceId) => (checks ? checks(serviceId) : fail(`no checks stub for ${serviceId}`)),
+    // Same rule as `checks`: unstubbed is an error, never an empty success.
+    act: async (action) => fail(`no act stub for ${action}`),
   };
 }
 

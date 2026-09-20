@@ -207,6 +207,51 @@ export function decodeSeverity(v: unknown): Severity {
  *   - `blastRadius` and `timeline` are EMPTY, and both screens have a designed
  *     empty state that says so. An empty timeline is not "nothing happened".
  */
+/**
+ * The operator's own actions, hydrated onto an incident by `/api/incidents`.
+ *
+ * **These were being dropped silently.** `Overview.tsx` dims an acknowledged
+ * row, credits it to `incident.ack.by`, and disables its Acknowledge button;
+ * `IncidentDetail.tsx` reads `incident.ack` for the same reason. None of that
+ * could ever fire on the live path, because this parser built an `Incident`
+ * without the two fields — so an incident somebody had acknowledged rendered as
+ * untouched, with the button still inviting them to do it again.
+ *
+ * It was not a defect when this file was written: nothing served the fields.
+ * It became one the moment `/api/incidents` started hydrating them, which is
+ * the shape `RESUME.md` describes as two correct halves diverging when a
+ * premise moves underneath one of them.
+ *
+ * Both are refused rather than half-built: an `ack` with no `by` cannot be
+ * credited to anybody, and inventing a name for it would put a person's name
+ * on an action they may not have taken. An absent field is absent, never an
+ * empty object — `{...incident}` has to keep working.
+ */
+function ackOf(v: unknown): { by: string; at: string } | null {
+  if (!isRecord(v)) return null;
+  const by = str(v['by']);
+  const at = str(v['at']);
+  return by === null || at === null ? null : { by, at };
+}
+
+/**
+ * `until` is `string | null` in the contract and **`null` is load-bearing**: it
+ * means muted indefinitely, which is a different fact from a mute that expires
+ * at a time we could not read. So an absent key and an explicit `null` both
+ * become `null` — the server normalises to `null` for indefinite and the
+ * contract has no third state — while a non-string, non-null value refuses the
+ * whole flag rather than silently becoming "forever".
+ */
+function mutedOf(v: unknown): { by: string; until: string | null } | null {
+  if (!isRecord(v)) return null;
+  const by = str(v['by']);
+  if (by === null) return null;
+  const raw = v['until'];
+  if (raw === undefined || raw === null) return { by, until: null };
+  const until = str(raw);
+  return until === null ? null : { by, until };
+}
+
 export function incidentView(raw: unknown): IncidentView | null {
   if (!isRecord(raw)) return null;
   const id = str(raw['id']);
@@ -219,6 +264,8 @@ export function incidentView(raw: unknown): IncidentView | null {
   const resolvedAt = str(raw['resolvedAt']);
   const severityRaw = str(raw['severityRaw']);
   const blastRadius: BlastMetric[] = [];
+  const ack = ackOf(raw['ack']);
+  const muted = mutedOf(raw['muted']);
 
   return {
     id,
@@ -240,6 +287,8 @@ export function incidentView(raw: unknown): IncidentView | null {
     ruleKey,
     blastRadius,
     timeline: [],
+    ...(ack === null ? {} : { ack }),
+    ...(muted === null ? {} : { muted }),
   };
 }
 

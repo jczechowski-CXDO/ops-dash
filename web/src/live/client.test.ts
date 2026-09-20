@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { apiClient, checksPath, getJson } from './client.js';
+import { apiClient, checksPath, getJson, incidentActionPath } from './client.js';
 
 /**
  * The one door, exercised against the five ways a read fails.
@@ -305,5 +305,75 @@ describe('a non-2xx body explains itself in the server\'s own words', () => {
     if (adopted.ok) return;
     expect(adopted.error.code).toBe('store_unavailable');
     expect(adopted.error.message).toBe('a served message');
+  });
+});
+
+describe('the four writes are built here, and only here', () => {
+  it('encodes the incident id into the path', () => {
+    // The FIRST path segment in this app assembled from data rather than from a
+    // literal: an incident id is chosen by the server and read off the wire.
+    // Interpolated raw, `INC/../../admin` is a path traversal; encoded, it is a
+    // 404 about an incident with a silly name.
+    expect(incidentActionPath('ack', 'INC-2291')).toBe('/api/incidents/INC-2291/ack');
+    expect(incidentActionPath('resolve', 'INC-2291')).toBe('/api/incidents/INC-2291/resolve');
+    expect(incidentActionPath('mute', 'INC/../../admin')).toBe('/api/incidents/INC%2F..%2F..%2Fadmin/mute');
+    expect(incidentActionPath('unmute', 'a b&c')).toBe('/api/incidents/a%20b%26c/unmute');
+  });
+
+  it('POSTs with a JSON body and our own session, for every action', async () => {
+    for (const action of ['ack', 'mute', 'unmute', 'resolve'] as const) {
+      const spy = stub({ body: '{"servedAt":"t","id":"INC-1","flags":{}}' });
+      await apiClient.act(action, 'INC-1');
+      const [url, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
+      expect(url, action).toBe(`/api/incidents/INC-1/${action}`);
+      expect(init['method'], action).toBe('POST');
+      // The three that take no body still send `{}`: an absent body on a POST
+      // is the shape a proxy or a framework is most likely to disagree about.
+      expect(init['body'], action).toBe('{}');
+      expect((init['headers'] as Record<string, string>)['content-type'], action).toBe('application/json');
+      // A write needs the session the server issues, by the same rule as a read.
+      expect(init['credentials'], action).toBe('same-origin');
+    }
+  });
+
+  it('sends an expiry only when there is one, and never a placeholder', async () => {
+    // Absent means indefinite. The server answers an unparseable expiry with
+    // 400 and writes nothing, deliberately — a mute whose expiry cannot be
+    // compared folds as never-expiring or always-expired depending on which
+    // side of a NaN comparison it lands, and both are silent.
+    const withUntil = stub({ body: '{}' });
+    await apiClient.act('mute', 'INC-1', { until: '2026-09-21T00:00:00.000Z' });
+    expect((withUntil.mock.calls[0] as [string, Record<string, unknown>])[1]['body']).toBe(
+      '{"until":"2026-09-21T00:00:00.000Z"}',
+    );
+
+    const indefinite = stub({ body: '{}' });
+    await apiClient.act('mute', 'INC-1', { until: null });
+    expect((indefinite.mock.calls[0] as [string, Record<string, unknown>])[1]['body']).toBe('{"until":null}');
+
+    const omitted = stub({ body: '{}' });
+    await apiClient.act('mute', 'INC-1');
+    expect((omitted.mock.calls[0] as [string, Record<string, unknown>])[1]['body']).toBe('{}');
+  });
+
+  it('a read is still a GET — a write cannot happen by omission', async () => {
+    // The control. Every assertion above is about POSTs; this is what stops the
+    // `method` key leaking onto the reads, which would turn every poll into a
+    // write against routes that require a session.
+    const spy = stub({ body: '{}' });
+    await getJson('/api/services');
+    const [, init] = spy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(init['method']).toBeUndefined();
+    expect(init['body']).toBeUndefined();
+    expect(Object.keys(init['headers'] as object)).toEqual(['accept']);
+  });
+
+  it('carries the server\'s own failure back, so a 401 is not a transport error', async () => {
+    stub({ status: 401, body: JSON.stringify({ error: { code: 'unauthenticated', message: 'this route needs a session' } }) });
+    const got = await apiClient.act('resolve', 'INC-1');
+    expect(got.ok).toBe(false);
+    if (got.ok) return;
+    expect(got.error.code).toBe('unauthenticated');
+    expect(got.error.status).toBe(401);
   });
 });
