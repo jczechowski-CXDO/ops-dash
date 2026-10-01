@@ -1,0 +1,857 @@
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import type { Incident, StatusLevel } from '@ops-dash/shared';
+import { useDashboard, useIncidentWrites, type IncidentWrite } from '../live/DataSource.js';
+import {
+  feedMarker,
+  latencyText,
+  panelStateFor,
+  holesPhrase,
+  sparkSamples,
+  type IncidentView,
+  type ServiceView,
+} from '../live/model.js';
+import { Card } from '../components/Card.js';
+import { Panel, type PanelState } from '../components/Panel.js';
+import { SectionHeading } from '../components/SectionHeading.js';
+import { Sparkline } from '../components/Sparkline.js';
+import { Button } from '../components/aurora/Button.js';
+import { Icon } from '../components/aurora/Icon.js';
+import { Table, type Column } from '../components/aurora/Table.js';
+import { allOperational, blastTextColor, isAffirmed, severityColor, severityFillColor, severityLabel, severityOnFillColor, statusColor } from '../theme/statusColor.js';
+import { srOnly } from '../theme/srOnly.js';
+import type { HistoryRow } from '../fixtures/index.js';
+// The repository's one HH:MM formatter, already used by ServiceDetail and
+// IncidentDetail for "Opened {HH:MM}". A mute expiry is a wall-clock instant of
+// the same kind, so it takes the same idiom rather than a third one.
+import { clockOf } from '../fixtures/time.js';
+import { ageLabel, UNKNOWN_AGE } from '../theme/ageLabel.js';
+
+/**
+ * The actor credited for an action taken HERE, by clicking, as in the prototype.
+ * Milestone 4 replaces it with the signed-in user.
+ *
+ * It covers the local-click case ONLY. A row acknowledged in the DATA was
+ * acknowledged by somebody else, possibly days ago and possibly in another
+ * tool, and must credit `incident.ack.by` — see AlertRow. `?? ACTOR` there is
+ * not a fallback for a missing field, it is the distinction between the two
+ * paths, and it is what keeps the contract's `ack.by` load-bearing rather than
+ * carried and discarded at render.
+ */
+const ACTOR = 'John H.';
+
+/**
+ * Which level a tile shows for a service with two independently-sourced halves.
+ *
+ * Rank order is the whole point: `unknown` outranks `operational`, so a service
+ * we cannot see never inherits the green of the half we can. That makes this
+ * function agree with `isAffirmed` by construction — a tile is green exactly
+ * when both halves are operational — and `Overview.test.tsx` asserts that
+ * equivalence over four differently-shaped lists rather than over today's seven
+ * services. `maintenance` sits above `operational` for the same reason
+ * (amendment 1: announced work is not an assertion of health) and below
+ * `unknown`, because knowing about a maintenance window is more information
+ * than having none at all.
+ */
+const RANK: Record<StatusLevel, number> = {
+  operational: 0,
+  maintenance: 1,
+  unknown: 2,
+  degraded: 3,
+  outage: 4,
+};
+
+export function tileLevel(service: ServiceView): StatusLevel {
+  return RANK[service.vendor.level] >= RANK[service.ours.level]
+    ? service.vendor.level
+    : service.ours.level;
+}
+
+/**
+ * A service's state as a phrase, for the strip pill's text equivalent.
+ *
+ * Written to be read immediately after the service name — "Microsoft 365,
+ * status unknown" — rather than as a standalone fragment, because that is how a
+ * screen reader runs the pill together.
+ *
+ * A Record, not a switch with a fallback: an eighth `StatusLevel` stops this
+ * compiling instead of announcing nothing. `unknown` says so in words for the
+ * same reason `statusColor` gives it the disabled grey — the absence of
+ * information is a state, and must be stated rather than omitted.
+ */
+const STATUS_PHRASE: Record<StatusLevel, string> = {
+  operational: 'operational',
+  maintenance: 'in scheduled maintenance',
+  unknown: 'status unknown',
+  degraded: 'degraded',
+  outage: 'not responding',
+};
+
+export function statusPhrase(level: StatusLevel): string {
+  return STATUS_PHRASE[level];
+}
+
+/**
+ * How the seven split. `affirmed` is defined by the published predicate and
+ * nothing else — the count and the verdict have one definition between them.
+ * `unknown` counts services with an unmeasurable half, which is the thing the
+ * strip has to name; whatever is left is `other` (degraded, outage, announced
+ * maintenance), so the three buckets always partition the list.
+ */
+export function statusTally(services: ServiceView[]): {
+  affirmed: number;
+  unknown: number;
+  other: number;
+} {
+  const affirmed = services.filter(isAffirmed).length;
+  const unknown = services.filter(
+    (s) => !isAffirmed(s) && (s.vendor.level === 'unknown' || s.ours.level === 'unknown'),
+  ).length;
+  return { affirmed, unknown, other: services.length - affirmed - unknown };
+}
+
+/**
+ * The strip's leading overline.
+ *
+ * README § 1 leads the quiet strip with "ALL SYSTEMS OPERATIONAL". Amendment 1
+ * makes that claim conditional and, with Zendesk's SSP and M365's pending
+ * consent, permanently unreachable in production — so the all-clear is returned
+ * only when `allOperational` says so, and otherwise the strip states the split
+ * it can actually evidence. The overline is never rendered over a grey dot.
+ */
+export function stripOverline(services: ServiceView[]): string {
+  if (allOperational(services)) return 'ALL SYSTEMS OPERATIONAL';
+  const { affirmed, unknown, other } = statusTally(services);
+  const parts = [`${affirmed} AFFIRMED`];
+  if (unknown > 0) parts.push(`${unknown} UNKNOWN`);
+  if (other > 0) parts.push(`${other} NEEDS ATTENTION`);
+  return parts.join(' · ');
+}
+
+/**
+ * The summary line under "Active incidents", built from the list it summarises.
+ *
+ * A separate function only so it can be asserted over several lists: written
+ * inline, a hard-coded string that happens to match today's five incidents
+ * passes every test in this file. `Overview.test.tsx` runs it over four slices.
+ */
+export function alertSummary(open: IncidentView[]): string {
+  const sev = (s: 1 | 2 | 3) => open.filter((i) => i.severity === s).length;
+  return `${open.length} open · ${sev(1)} Sev1 · ${sev(2)} Sev2 · ${sev(3)} Sev3`;
+}
+
+/**
+ * Who acknowledged this alert, and when they did.
+ *
+ * M-4, the fourth field in this family after `ack.by`, `muted.by` and
+ * `muted.until`: `ack.at` was carried, guarded by `ops-fixtures` to postdate
+ * `openedAt`, and discarded at render, leaving two credits from the same
+ * contract on one line where only one said when.
+ *
+ * AGE, not a clock time, and the asymmetry with `muteCredit` is deliberate. A
+ * mute expiry is a near-future instant, so "until 14:30" is unambiguous. An
+ * acknowledgement is a past occurrence of any age — this fixture's is two days
+ * old — and "at 14:30" on a two-day-old ack reads as today. `${ageLabel} ago` is
+ * also the idiom Entra, Settings and ServiceDetail already use for a past
+ * instant, so this is the row matching its neighbours rather than a fourth
+ * spelling.
+ *
+ * UNKNOWN_AGE drops the time rather than printing it. The published contract for
+ * `ageLabel` is that an unparseable timestamp returns a value which is
+ * deliberately NOT a plausible age, and callers branch on it; "acknowledged an
+ * unknown age ago" would be a bad timestamp rendered as prose. The credit itself
+ * is still true, so it stands alone.
+ *
+ * A local click passes `undefined` and carries no time, exactly as a local mute
+ * carries no expiry: the action has no recorded instant until Milestone 4.
+ */
+export function ackCredit(ack: Incident['ack'], actor: string, now?: number): string {
+  const by = ack?.by ?? actor;
+  if (!ack?.at) return `Acknowledged by ${by}`;
+  const age = ageLabel(ack.at, now);
+  return age === UNKNOWN_AGE ? `Acknowledged by ${by}` : `Acknowledged by ${by} ${age} ago`;
+}
+
+/**
+ * Who silenced this alert, and when it comes back.
+ *
+ * Both halves, because a mute that does not say when it expires is a mute
+ * somebody has to remember. `until` is `string | null` in the contract and the
+ * two cases mean different things: a timed mute ("silence this for four hours",
+ * which is what Milestone 2 will mostly write) and an indefinite one, silenced
+ * until a person unmutes it. Rendering only the actor collapsed that
+ * distinction; rendering "until null" would be worse.
+ *
+ * A pure function rather than an inline ternary, so BOTH branches can be
+ * asserted: only one of them has a fixture, and the indefinite case would
+ * otherwise be reachable in no test at all — the shape M-9 was about.
+ *
+ * The local-click case passes `undefined`, which is correct rather than a
+ * fallback: a mute taken here and now has no expiry until Milestone 4 gives the
+ * control one.
+ */
+export function muteCredit(muted: Incident['muted'], actor: string): string {
+  const by = muted?.by ?? actor;
+  return muted?.until ? `Muted by ${by} until ${clockOf(muted.until)}` : `Muted by ${by}`;
+}
+
+/** An empty list is a designed state, not a blank area. */
+export function listState(count: number, message: string): PanelState {
+  return count === 0 ? { kind: 'empty', message } : { kind: 'ready' };
+}
+
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const word = (n: number): string => WORDS[n] ?? String(n);
+const title = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * The quiet empty-state sentence.
+ *
+ * PLAN DEFECT (Task 7 Step 1). The plan pins this copy as "Seven monitored
+ * services reporting healthy across vendor status and our own synthetic
+ * checks" — the same overclaim G1 raised a blocker on and G2 fixed one string
+ * further along in the header subtitle. Five of the seven are affirmed; two
+ * cannot be, in this world or any other. Zero open incidents does not license
+ * the claim, so the count is named and every number here is derived.
+ */
+function emptyStateLine(services: ServiceView[], lastClosed: string | undefined): string {
+  const { affirmed } = statusTally(services);
+  const unaffirmed = services.length - affirmed;
+  const health =
+    unaffirmed === 0
+      ? `${title(word(services.length))} monitored services, all reporting healthy across vendor status and our own synthetic checks.`
+      : `${title(word(services.length))} monitored services, ${word(affirmed)} reporting healthy across vendor status and our own synthetic checks; ${word(unaffirmed)} cannot be affirmed.`;
+  return lastClosed ? `${health} Last incident closed ${lastClosed}.` : health;
+}
+
+const DOT = (size: number, color: string) => ({
+  width: size,
+  height: size,
+  borderRadius: '50%',
+  background: color,
+  flex: '0 0 auto',
+});
+
+// ------------------------------------------------------------------ the strip
+
+/** README § 1 quiet 1: one bordered radius-12 row, padding 10px 14px, wrapping
+ *  flex, gap 8px; one pill per service at radius 999, padding 4px 9px, with a
+ *  6px dot and an 11.5px/600 name.
+ *
+ *  Exported only so the test can render it over the SEV1 service list as well.
+ *  The strip itself is quiet-only, and in the quiet world every service's `ours`
+ *  half is operational — so vendor-level and rolled-up-level agree for all seven
+ *  and no assertion made through the page can tell them apart. Rendered over the
+ *  sev1 list, m365 is vendor-`unknown` with our probes failing, which is exactly
+ *  the pair that separates them. A mutation announcing only `s.vendor.level`
+ *  survived the whole suite until this existed. */
+export function StatusStrip({ services }: { services: ServiceView[] }) {
+  return (
+    <Card
+      data-testid="status-strip"
+      padding="10px 14px"
+      style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        {stripOverline(services)}
+      </div>
+      {services.map((s) => (
+        <Link
+          key={s.id}
+          data-testid="service-pill"
+          to={`/services/${s.id}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            // BLOCKER, G3 re-verification. This was `var(--grey-grey-100)`, a
+            // RAMP token — a fixed value in Aurora's grey scale with no dark
+            // override — while the text inherits `--text-primary`, which in the
+            // dark palette resolves to that same rgb(235,242,245). 1.00:1: seven
+            // blank capsules carrying only a coloured dot, which put the dot back
+            // to being the sole visible carrier of status and inverted the very
+            // ruling the srOnly text above discharges.
+            //
+            // `--background-cardelevation2` is a ROLE: a surface that resolves
+            // per theme. That is the distinction — a ramp token as a background
+            // is a light-mode assumption written where the theme cannot reach it.
+            //
+            // This rung specifically, rather than a darker one: in the light
+            // palette `--background-cardelevation2` IS `var(--grey-grey-100)`,
+            // so README:64's stated pill colour is preserved pixel-for-pixel and
+            // no light baseline moves, while dark gives 14.39:1 for the label.
+            // The capsule silhouette against the card is 1.23:1 in dark versus
+            // 1.13:1 in light today, so the pill reads as a pill in both.
+            background: 'var(--background-cardelevation2)',
+            borderRadius: 999,
+            padding: '4px 9px',
+            textDecoration: 'none',
+            color: 'var(--text-primary)',
+          }}
+        >
+          {/* G3: the dot stays --main and stays 6px. It was not the colour that
+              was wrong, it was being the ONLY thing that said anything: a pill
+              was [dot][name], so a screen-reader user heard "Zendesk" and learned
+              nothing, while the group overline told them two of seven were
+              unknown without saying which two. Darkening the dot would have
+              satisfied a contrast checker and left them exactly as blind. The
+              status is now text, so the dot is redundant decoration; it is an
+              empty span, which carries no accessible name, so it needs no
+              aria-hidden to stay out of the accessibility tree. */}
+          <span data-testid="pill-dot" style={DOT(6, statusColor(tileLevel(s)))} />
+          <span style={{ fontSize: 11.5, fontWeight: 600 }}>{s.short}</span>
+          <span style={srOnly}>{`, ${statusPhrase(tileLevel(s))}`}</span>
+        </Link>
+      ))}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------------- the tiles
+
+/** README § 1 sev1 1: card recipe + border-left 3px solid {statusColor},
+ *  padding 10px 12px, gap 6px; row 1 a 7px dot, a 12.5px/700 name and a
+ *  right-aligned 11px tabular-nums latency; row 2 the 26px sparkline; row 3 the
+ *  two half-labels at 10.5px --text-secondary. */
+/**
+ * The tile's 26px chart, or what we show when there is nothing to chart.
+ *
+ * Three cases and they are three different facts:
+ *
+ *   - `spark === null`: no probe has ever run. A line would be a fabrication,
+ *     so the row says so in words and keeps the tile the same height.
+ *   - holes in the series: those probes did not answer. The raw series goes to
+ *     `Sparkline`, which breaks the line at each hole — never dropped silently
+ *     (which leaves a shorter, healthier-looking line) and never zeroed (which
+ *     dives the line to instantaneous: an outage drawn as the best news on the
+ *     page). The count stays as a label beside it: a 26px strip on a 190px tile
+ *     is not where anyone counts gaps.
+ *   - a clean series: exactly Milestone 1's chart, unchanged.
+ */
+function TileSpark({ spark, color }: { spark: Array<number | null> | null; color: string }) {
+  const { values, missing } = sparkSamples(spark);
+  if (values.length === 0) {
+    return (
+      <div
+        data-testid="tile-no-spark"
+        style={{ height: 26, display: 'flex', alignItems: 'center', fontSize: 10.5, color: 'var(--text-secondary)' }}
+      >
+        {spark === null ? 'No probe samples' : 'No probe answered'}
+      </div>
+    );
+  }
+  return (
+    <>
+      {/* The raw series, holes and all. `values` above is only used to decide
+          whether anything answered, and to count what did not. */}
+      <Sparkline values={spark ?? []} color={color} height={26} viewBoxHeight={26} />
+      {missing === 0 ? null : (
+        <div data-testid="tile-spark-holes" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
+          {holesPhrase(missing, values.length)}
+        </div>
+      )}
+    </>
+  );
+}
+
+function ServiceTile({ service }: { service: ServiceView }) {
+  const color = statusColor(tileLevel(service));
+  const navigate = useNavigate();
+  const href = `/services/${service.id}`;
+  const marker = feedMarker(service.feed);
+  return (
+    // The hook is on the Card itself (ops-primitives added `data-testid` at
+    // 37cea35). It used to be on a wrapper <div>, which made the WRAPPER the grid
+    // item under repeat(auto-fill, minmax(190px,1fr)) and the Card its child — so
+    // the track sizing applied to a box the Card did not control.
+    <Card
+      data-testid="service-tile"
+      padding="10px 12px"
+      borderLeft={color}
+      // Radius 10, not the card recipe's 12. README § Screens/views and the plan
+      // both say "radius 12 on cards, 10 on tiles and alert rows", and the
+      // prototype carries exactly two `border-radius:10px` rules — these two
+      // elements. README:60's "card recipe used everywhere" is the generic
+      // recipe; this is its one documented override.
+      // The WHOLE tile is the click target, as the prototype has it. L-12 kept
+      // the alert row non-interactive because its three buttons would then be
+      // interactive children inside a role="button", which is invalid for
+      // assistive tech — a tile has no interactive children, so that objection
+      // does not apply here. The name stays a real <Link> for middle-click and
+      // "open in new tab"; the Card's handler only adds the rest of the surface.
+      onClick={() => navigate(href)}
+      style={{ display: 'flex', flexDirection: 'column', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span data-testid="tile-dot" style={DOT(7, color)} />
+        <Link
+          to={href}
+          // The card navigates too, so without this one click ran both: the
+          // anchor AND the Card handler, pushing two history entries and making
+          // Back look broken on the commonest path into a service. Stopping the
+          // bubble is the fix; removing the anchor would cost middle-click and
+          // open-in-new-tab, which is why the anchor stays.
+          onClick={(e) => e.stopPropagation()}
+          style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
+        >
+          {service.short}
+        </Link>
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 11,
+            fontVariantNumeric: 'tabular-nums',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          {/* An em dash, never `null ms` and never `0 ms`. Zero would be the
+              fastest probe ever recorded; five of the seven services have no
+              probe at all, so this is the common path rather than the edge. */}
+          {latencyText(service.latencyMs)}
+        </span>
+      </div>
+      <TileSpark spark={service.spark} color={color} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: 'var(--text-secondary)' }}>
+        <span>Vendor: {service.vendor.label}</span>
+        <span>Ours: {service.ours.label}</span>
+      </div>
+      {/* Null in every demo world, so no baseline moves. In live mode this is
+          the line that says the grey dot above is OUR failure to look. */}
+      {marker === null ? null : (
+        <div data-testid="tile-feed-marker" style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>
+          {marker}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------- the alert rows
+
+type RowState = { ack: boolean; muted: boolean; resolved: boolean };
+
+/** README § 1 sev1 2: grid 52px 1fr auto, gap 14, padding 11px 14px, card
+ *  recipe + border-left 3px solid {sevColor}; a 52x22 radius-6 solid chip in
+ *  white 11px/700; a 13.5px/700 clickable title over an 11.5px meta line; three
+ *  small Buttons. Acknowledged/muted/resolved rows drop to opacity 0.45 and the
+ *  row stays in place. */
+/**
+ * What Resolve actually does, in two places, because the operator who needs it
+ * most has already clicked.
+ *
+ * **A manual resolve cannot make a live condition false.** If the rule is still
+ * firing, the next correlation tick reopens the incident with the same id and
+ * the acknowledgement intact. That is the detector working — `m4-auth`'s route
+ * is a 200 that declines to pretend otherwise, deliberately, rather than
+ * suppressing the engine at the route — but an operator who clicks Resolve and
+ * watches the row come back within a minute will read it as a bug unless
+ * something says so.
+ *
+ * Split deliberately. **Before the click**: the one fact that changes the
+ * decision, once at the section rather than on every row, because N copies of a
+ * caution is noise and noise is how a caution stops being read. **After the
+ * reopen**: all three facts, at the row, where somebody is actively confused —
+ * and including that the ack survived, which is the part that makes it
+ * tolerable and the part a short tooltip would drop.
+ *
+ * Both are live-only. The demo world has no engine to reopen anything, saying
+ * so there would be false, and every one of the 152 baselines photographs that
+ * world.
+ */
+export const RESOLVE_WARNING =
+  'Resolving records the action and clears the alert now. A condition that is still firing will reopen it.';
+
+export const RESOLVE_REOPEN_NOTE =
+  'Resolved. If this condition is still firing the incident will reopen with the same id — your acknowledgement is kept.';
+
+function AlertRow({
+  incident,
+  state,
+  write,
+  onAck,
+  onMute,
+  onResolve,
+}: {
+  incident: Incident;
+  state: RowState;
+  /** What OUR last write to this incident did. `undefined` on the fixture
+   *  path, where a click cannot fail and there is nothing to report. */
+  write?: IncidentWrite;
+  onAck: () => void;
+  onMute: () => void;
+  onResolve: () => void;
+}) {
+  const color = severityColor(incident.severity);
+  const dimmed = state.ack || state.muted || state.resolved;
+  /**
+   * Who did what, in front of the metadata.
+   *
+   * Resolving is click-only in this milestone — the contract carries no
+   * `resolvedBy` — so it credits the person at the keyboard. Acknowledging and
+   * muting can arrive either way, so each credits whoever the DATA names and
+   * falls back to the local actor only when the action happened here.
+   *
+   * DELIBERATE README DEVIATION (the third, after the chip's fill rung and the
+   * strip overline), ruled by the lead. README:81 names three states that dim —
+   * "Acknowledged / muted / resolved" — and then gives prefixes for only two of
+   * them. That is an omission rather than a decision: `muted.by` exists in the
+   * frozen contract, carried and redacted and validated, so the contract and the
+   * README disagree about whether anyone needs to know who silenced an alert.
+   * Muting is the one action here that suppresses FUTURE alerting, which makes
+   * its actor the most consequential of the three, not the least. Uncredited, a
+   * real `muted.by` written by Milestone 2 would go nowhere visible.
+   *
+   * Resolved and acknowledged are alternatives — resolving implies the
+   * acknowledgement — but a muted row can also be acknowledged, so the mute
+   * credit is additive rather than part of the same chain.
+   */
+  /**
+   * The flags OUR write returned outrank the polled ones, and that is not a
+   * nicety.
+   *
+   * A live ack sets `state.ack` from the reply immediately, while
+   * `incident.ack` stays undefined until the next poll up to 30 seconds later.
+   * Crediting `incident.ack` alone therefore fell through to `?? ACTOR` — the
+   * hard-coded demo name — and printed "Acknowledged by John H." for an action
+   * the server attributed to whoever was actually signed in. A wrong name on an
+   * audit line is worse than no name, and it would have been wrong only in the
+   * live world and only for half a minute, which is exactly the window nobody
+   * screenshots.
+   */
+  const ack = write?.ack ?? incident.ack;
+  const mutedFlag = write?.muted ?? incident.muted;
+  const credits: string[] = [];
+  if (state.resolved) credits.push(`Resolved by ${ACTOR}`);
+  else if (state.ack) credits.push(ackCredit(ack, ACTOR));
+  if (state.muted) credits.push(muteCredit(mutedFlag, ACTOR));
+  const meta = [...credits, ...incident.metaParts];
+  const pending = write?.pending === true;
+
+  return (
+    <Card
+      data-testid="alert-row"
+      padding="11px 14px"
+      borderLeft={color}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '52px 1fr auto',
+        gap: 14,
+        alignItems: 'center',
+        // Radius 10 — the same documented override as the tile above.
+        borderRadius: 10,
+        ...(dimmed ? { opacity: 0.45 } : {}),
+      }}
+    >
+      {/* G3 HIGH-1. The chip is filled with the `-dark` rung, not README:77's
+          `-main`, and its word takes the theme-aware `-contrast` token rather
+          than a literal white. Both are the lead's ruling, recorded here so
+          Task 11's fidelity pass reads the chip as a decision rather than as
+          drift from the prototype: white on `--warning-main` is 2.40:1, and a
+          literal white collapses further in the dark palette, where `-dark`
+          lightens. The 3px row accent beside it stays `-main` (severityColor),
+          which is the rung that grade is for. */}
+      <span
+        style={{
+          width: 52,
+          height: 22,
+          borderRadius: 6,
+          background: severityFillColor(incident.severity),
+          color: severityOnFillColor(incident.severity),
+          fontSize: 11,
+          fontWeight: 700,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {severityLabel(incident.severity)}
+      </span>
+
+      <div style={{ minWidth: 0 }}>
+        {/* L-12: the TITLE is the click target, not the card. A `Card` with
+            onClick takes role="button", and nesting the three action buttons
+            inside a role="button" is as invalid for assistive technology as a
+            nested <button>. */}
+        <Link
+          to={`/incidents/${incident.id}`}
+          style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none' }}
+        >
+          {incident.title}
+        </Link>
+        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{meta.join(' · ')}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {/* primary, not neutral: the prototype renders Acknowledge and Mute in
+            rgb(0,128,190) — measured from its own DOM, not read off the image.
+            The plan's Task 7 text names the variants and not the colours, so
+            neutral was a reasonable default and the prototype overrules it. */}
+        <Button
+          size="small"
+          variant="outlined"
+          color="primary"
+          onClick={onAck}
+          // Disabled while a write is in flight so a second click cannot queue a
+          // second request against a row whose state nobody knows yet.
+          disabled={state.ack || pending}
+        >
+          {state.ack ? 'Acknowledged' : 'Acknowledge'}
+        </Button>
+        <Button size="small" variant="text" color="primary" onClick={onMute} disabled={pending}>
+          {state.muted ? 'Unmute' : 'Mute'}
+        </Button>
+        <Button
+          size="small"
+          variant="text"
+          color="success"
+          onClick={onResolve}
+          disabled={state.resolved || pending}
+        >
+          {state.resolved ? 'Resolved' : 'Resolve'}
+        </Button>
+      </div>
+
+      {/* What OUR write did, and only ever on the live path. A failure must
+          never leave the row looking as though the action took: the state above
+          is unchanged, and this says why. */}
+      {write?.error === undefined ? null : (
+        <div
+          data-testid="write-error"
+          role="alert"
+          style={{ flexBasis: '100%', fontSize: 11.5, color: blastTextColor('error') }}
+        >
+          {`That did not save — ${write.error.message}`}
+        </div>
+      )}
+      {write?.resolved === true ? (
+        <div
+          data-testid="resolve-note"
+          style={{ flexBasis: '100%', fontSize: 11.5, color: 'var(--text-secondary)' }}
+        >
+          {RESOLVE_REOPEN_NOTE}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------ recent history
+
+/** Defect G-4: these keys are the FIXTURE's field names. The prototype called
+ *  `duration` "dur"; `Column<R>`'s `keyof R & string` now refuses that, but the
+ *  names are still spelled out here rather than guessed. */
+const HISTORY_COLUMNS: Column<HistoryRow>[] = [
+  { key: 'id', label: 'Incident', width: '120px' },
+  { key: 'title', label: 'Summary' },
+  { key: 'duration', label: 'Duration', align: 'right' },
+  { key: 'closed', label: 'Closed', align: 'right' },
+];
+
+// ------------------------------------------------------------------- the view
+
+export default function Overview() {
+  const dashboard = useDashboard();
+  const services = dashboard.services.data ?? [];
+
+  // An incident is open while it has no resolvedAt — the contract's definition,
+  // the same one the sidebar badge uses. The fixtures arrive sorted
+  // severity-then-newest, which is the order this list renders; the API serves
+  // only open incidents, so the filter is a no-op there rather than a second
+  // definition of open.
+  const open = (dashboard.incidents.data ?? []).filter((i) => !i.resolvedAt);
+
+  /**
+   * Ack/mute/resolve are local state in this milestone; Milestone 4 makes them
+   * server-persisted mutations. The INITIAL state is read off the incident, so
+   * `ack` and `muted` from the contract are honoured rather than ignored — but
+   * no fixture incident carries either (accepted finding M-9), so that path
+   * renders in no world today and only the click path is covered by a test.
+   */
+  const [actions, setActions] = useState<Record<string, RowState>>({});
+  /**
+   * The write half, or `null` on the fixture path.
+   *
+   * **The two paths are genuinely different and must not be unified.** A demo
+   * click cannot fail, so flipping a local boolean is right there and it is
+   * what the 152 baselines photograph. A live click CAN fail — 401 when a
+   * session lapsed, 404 for an incident the engine closed underneath us, or the
+   * API simply being down — and an optimistic "Acknowledged" over a write that
+   * never happened is the most direct wrong-green this product can produce: the
+   * operator believes the alert is handled and it is not.
+   *
+   * So on the live path nothing is anticipated. The row reports pending while
+   * the request is in flight and applies only what came back.
+   */
+  const writes = useIncidentWrites();
+  const stateOf = (i: Incident): RowState => {
+    if (writes !== null) {
+      const w = writes.writeFor(i.id);
+      // The server's answer wins where it exists; otherwise what the poll
+      // hydrated. Never a local guess.
+      return {
+        ack: Boolean(w.ack ?? i.ack),
+        muted: Boolean(w.muted ?? i.muted),
+        resolved: w.resolved === true || Boolean(i.resolvedAt),
+      };
+    }
+    return actions[i.id] ?? { ack: Boolean(i.ack), muted: Boolean(i.muted), resolved: Boolean(i.resolvedAt) };
+  };
+  const update = (i: Incident, patch: Partial<RowState>) =>
+    setActions((prev) => ({ ...prev, [i.id]: { ...stateOf(i), ...patch } }));
+
+  /**
+   * The quiet screen is claimed ONLY on evidence.
+   *
+   * `open.length === 0` alone is the wrong test the moment the data can fail:
+   * a dead `/api/incidents` produces an empty list, which would render the
+   * calm strip and "No active incidents" over a system nobody can see. So the
+   * calm layout requires a load we actually completed. Loading, stale-without-
+   * data and failed all keep the expanded layout, where the incidents Panel
+   * says what happened.
+   *
+   * In both demo worlds the incidents load is always ready, so this is exactly
+   * `open.length === 0` there and the baselines cannot move.
+   */
+  const incidentsAnswered = dashboard.incidents.data !== undefined;
+  const quiet = incidentsAnswered && open.length === 0;
+
+  const statusState = panelStateFor(dashboard.services, 'Service status', {
+    when: (list: ServiceView[]) => list.length === 0,
+    message: 'No service status has been collected yet.',
+  });
+  const incidentsState = panelStateFor(dashboard.incidents, 'Incidents');
+
+  return (
+    <div data-testid="view-overview" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Status: the compressed strip when nothing is running, the expanded
+          tile grid when something is. */}
+      <Panel state={statusState}>
+        {quiet ? (
+          <StatusStrip services={services} />
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
+              gap: 10,
+            }}
+          >
+            {services.map((s) => (
+              <ServiceTile key={s.id} service={s} />
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {quiet ? (
+        <Card
+          data-testid="no-incidents"
+          padding="28px 24px"
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}
+        >
+          <Icon name="task_alt" size={34} color="var(--success-main)" />
+          <div style={{ fontSize: 16, fontWeight: 700 }}>No active incidents</div>
+          <div
+            style={{
+              fontSize: 13,
+              color: 'var(--text-secondary)',
+              maxWidth: 460,
+              textWrap: 'pretty',
+            }}
+          >
+            {emptyStateLine(services, dashboard.history?.[0]?.closed)}
+          </div>
+        </Card>
+      ) : (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionHeading
+            meta={
+              // The summary counts the rows below it. With no answer there are
+              // no rows to count, and "0 open · 0 Sev1 · 0 Sev2 · 0 Sev3" over a
+              // failed fetch is the all-clear this product exists to refuse.
+              incidentsAnswered ? <span data-testid="alert-summary">{alertSummary(open)}</span> : undefined
+            }
+          >
+            Active incidents
+          </SectionHeading>
+          {/* Once, under the heading — not on every row. N copies of a caution
+              is noise, and noise is how a caution stops being read. Live only:
+              the demo world has no engine to reopen anything, so saying it
+              there would be false, and every baseline photographs that world. */}
+          {writes === null || open.length === 0 ? null : (
+            <p
+              data-testid="resolve-warning"
+              style={{ margin: 0, fontSize: 11.5, color: 'var(--text-secondary)' }}
+            >
+              {RESOLVE_WARNING}
+            </p>
+          )}
+          <Panel state={incidentsState}>
+            {open.map((incident) => {
+              const state = stateOf(incident);
+              return (
+                <AlertRow
+                  key={incident.id}
+                  incident={incident}
+                  state={state}
+                  {...(writes === null ? {} : { write: writes.writeFor(incident.id) })}
+                  onAck={() =>
+                    writes === null ? update(incident, { ack: true }) : writes.run('ack', incident.id)
+                  }
+                  onMute={() =>
+                    writes === null
+                      ? update(incident, { muted: !state.muted })
+                      : writes.run(state.muted ? 'unmute' : 'mute', incident.id)
+                  }
+                  // Resolving also acknowledges: you cannot resolve something
+                  // nobody picked up. On the live path the server decides that,
+                  // not this line — `resolveIncident` records the actor and the
+                  // reply says what is now true.
+                  onResolve={() =>
+                    writes === null
+                      ? update(incident, { ack: true, resolved: true })
+                      : writes.run('resolve', incident.id)
+                  }
+                />
+              );
+            })}
+          </Panel>
+        </section>
+      )}
+
+      {quiet ? (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionHeading>Recent history</SectionHeading>
+          {/* `null` history is not an empty history. The API serves open
+              incidents and keeps no closed-incident list, so saying "nothing
+              closed in the last 30 days" over it would be a claim about a
+              record we do not have. Two absences, two sentences. */}
+          <Panel
+            state={
+              dashboard.history === null
+                ? { kind: 'empty', message: 'Closed-incident history is not served by the API yet.' }
+                : listState(dashboard.history.length, 'No incidents have closed in the last 30 days.')
+            }
+          >
+            <Card padding="0" style={{ overflow: 'hidden' }}>
+              <Table
+                dense
+                columns={HISTORY_COLUMNS}
+                rows={dashboard.history ?? []}
+                getRowKey={(row) => row.id}
+              />
+            </Card>
+          </Panel>
+        </section>
+      ) : null}
+    </div>
+  );
+}

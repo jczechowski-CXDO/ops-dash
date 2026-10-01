@@ -1,0 +1,15 @@
+{
+  "name": "@ops-dash/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts"
+  },
+  "dependencies": {
+    "@ops-dash/shared": "*",
+    "fastify": "^5.2.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "//": [
+    "Emit, for the one thing that has to run as a process.",
+    "",
+    "`tsconfig.json` is noEmit because until Milestone 3 nothing ran the server",
+    "outside vitest, which loads TypeScript directly. Running `node src/main.ts`",
+    "does not work and cannot: the sources use NodeNext `.js` specifiers, which",
+    "is correct TypeScript, and Node's type stripping erases types without",
+    "rewriting specifiers — so it looks for `index.js` beside `index.ts` and",
+    "finds nothing. Found by running it, on the first attempt.",
+    "",
+    "Tests are excluded rather than emitted and ignored: a shipped artefact that",
+    "contains the test suite also contains every fixture path and stub the suite",
+    "needs, and none of that belongs in a running process."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/__integration__/**", "src/__live__/**"]
+}

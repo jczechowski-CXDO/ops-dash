@@ -1,0 +1,105 @@
+/// <reference types="vite/client" />
+// The reference is load-bearing: `import.meta.env` is a Vite ambient type, and
+// without it `tsc -b` fails with TS2339 while Vitest — which transpiles web
+// without typechecking it — reports a clean run. The plan's Step 4 source has
+// no reference and does not compile.
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
+import { fixtures, type DemoMode, type FixtureBundle } from '../fixtures/index.js';
+
+const Ctx = createContext<{
+  mode: DemoMode;
+  setMode: (m: DemoMode) => void;
+  bundle: FixtureBundle;
+  /** Whether this session is showing a demo world at all, as opposed to which
+   *  one. Sticky across navigation for the same reason `mode` is — see below. */
+  isDemo: boolean;
+} | null>(null);
+
+/** Which world we show when nothing asks for one. */
+export const DEFAULT_MODE: DemoMode = 'sev1';
+
+/** The query parameter that selects a world: `?demo=quiet`. */
+export const DEMO_PARAM = 'demo';
+
+/** Whether the sidebar's segmented control is rendered. Dev-only, as the plan
+ *  and the README both intend — in production the toggle is an affordance we do
+ *  not want. It gates the CONTROL, not the mode: `?demo=` below works in every
+ *  build, because Task 10A screenshots the production bundle and a mode nothing
+ *  can reach there is a mode that ships unbaselined (G2 HIGH-2).
+ *
+ *  RULED 2026-09-20 (John delegated the call): **this provider STAYS.** The M1
+ *  plan said Milestone 4 would delete it, and that instruction is now struck.
+ *
+ *  The reason it read as a prototype smell was that in Milestone 1 it was the
+ *  only way to reach both worlds, so the toggle *was* the product. Since M3 it
+ *  is not: the dashboard renders live vendor data and `?demo=` is the fixture
+ *  path beside it. What deleting it would actually remove is the 152 visual
+ *  baselines and the offline proof, both of which are built on `?demo=` — the
+ *  regression suite would go out with the affordance. The control is already
+ *  dev-gated, which was the whole of the objection.
+ *
+ *  Revisit only if the fixtures stop being the baseline mechanism. Until then a
+ *  deletion here is a deletion of the test suite, and the plan's instruction was
+ *  written before the thing that made it wrong existed. */
+export const DEMO_TOGGLE_VISIBLE = import.meta.env.DEV;
+
+/** A tripwire, not a lookup. If `DemoMode` gains a third world this object stops
+ *  compiling, which is the only way `parseDemoMode` below — deliberately written
+ *  as explicit literal comparisons so that no cast is involved — gets noticed. */
+const ALL_MODES: Record<DemoMode, true> = { quiet: true, sev1: true };
+void ALL_MODES;
+
+/**
+ * A query parameter is input from outside our own source, so it is parsed to the
+ * union and never cast into it. Anything that is not exactly one of the two
+ * literals — a case variant, an empty string, a script tag, an absent parameter
+ * — yields null and the caller falls back to the default. The value is used only
+ * to pick a fixture bundle; it reaches no href, src, style or HTML sink, and the
+ * rejected string is never echoed back to the page.
+ */
+export function parseDemoMode(raw: string | null): DemoMode | null {
+  return raw === 'quiet' || raw === 'sev1' ? raw : null;
+}
+
+export function DemoModeProvider({ children }: { children: ReactNode }) {
+  const [params] = useSearchParams();
+  const requested = parseDemoMode(params.get(DEMO_PARAM));
+  const [mode, setMode] = useState<DemoMode>(requested ?? DEFAULT_MODE);
+  /**
+   * Whether we are in a demo world at all — a separate question from which one,
+   * and the reason this lives here rather than being re-derived.
+   *
+   * `DataSourceSwitch` used to read `?demo=` from the URL itself on every
+   * render. It agreed with this provider on the first paint and disagreed the
+   * moment anything navigated, because in-app links are `/services/${id}` and
+   * drop the parameter: `mode` stayed put, `isDemo` flipped to false, and one
+   * click on a tile left the fixtures, mounted the live provider and started
+   * fetching `/api/*` — which in a preview build nothing serves, so the page
+   * fell back to a generic title.
+   *
+   * Two components answering "which world am I in" with two implementations is
+   * the same defect this codebase has now hit four times. There is one answer
+   * and it is here.
+   */
+  const [isDemo, setIsDemo] = useState<boolean>(requested !== null);
+
+  // An explicit request wins, including when it arrives by navigation rather
+  // than on first load. With no parameter the current mode stands, so the
+  // sidebar control keeps working and a plain link does not reset the view.
+  useEffect(() => {
+    if (requested) {
+      setMode(requested);
+      setIsDemo(true);
+    }
+  }, [requested]);
+
+  const value = useMemo(() => ({ mode, setMode, bundle: fixtures[mode], isDemo }), [mode, isDemo]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+export function useDemoMode() {
+  const v = useContext(Ctx);
+  if (!v) throw new Error('useDemoMode outside DemoModeProvider');
+  return v;
+}

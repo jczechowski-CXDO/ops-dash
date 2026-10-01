@@ -1,0 +1,52 @@
+{
+  "message_type": "bitlockerreports",
+  "message_version": "1.4",
+  "status": "success",
+  "message_response": {
+    "total": 5,
+    "limit": 500,
+    "page": 1,
+    "bitlockerreports": [
+      {
+        "resource_id": 101,
+        "resource_id_string": "101",
+        "volume_type": 0,
+        "encryption_status": 1,
+        "protection_status": 1,
+        "managedcomputer.friendly_name": "DEMO-LT-0412"
+      },
+      {
+        "resource_id": 102,
+        "resource_id_string": "102",
+        "volume_type": 0,
+        "encryption_status": 1,
+        "protection_status": 1,
+        "managedcomputer.friendly_name": "DEMO-LT-0288"
+      },
+      {
+        "resource_id": 103,
+        "resource_id_string": "103",
+        "volume_type": 0,
+        "encryption_status": 0,
+        "protection_status": 0,
+        "managedcomputer.friendly_name": "DEMO-DT-0117"
+      },
+      {
+        "resource_id": 103,
+        "resource_id_string": "103",
+        "volume_type": 1,
+        "encryption_status": 0,
+        "protection_status": 0,
+        "managedcomputer.friendly_name": "DEMO-DT-0117"
+      },
+      {
+        "resource_id": 105,
+        "resource_id_string": "105",
+        "volume_type": 1,
+        "encryption_status": 1,
+        "protection_status": 1,
+        "managedcomputer.friendly_name": "DEMO-DT-0092"
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+coverage/
 
 # Local data store — SQLite file and its WAL companions
 *.sqlite
@@ -35,3 +36,9 @@ Thumbs.db
 # Superseded design bundle. The extracted design_handoff_it_ops_dashboard/ is the
 # committed source of record; the archives are not tracked.
 *.zip
+
+# SDD workspace (scratch, per-plan)
+.superpowers/
+
+# Server build output
+server/dist/

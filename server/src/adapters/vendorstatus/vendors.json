@@ -1,0 +1,73 @@
+{
+  "$comment": [
+    "The vendor feed list. Adding a fifth Statuspage vendor is a line here and no code \u2014",
+    "server/src/adapters/vendorstatus/index.test.ts proves it by loading a five-entry list.",
+    "'platform' selects the adapter and is never inferred from 'id'.",
+    "'url' must be https: this process fetches exactly what this file says and nothing else.",
+    "'component' is optional; when present the feed MUST publish it, or the vendor reads",
+    "unknown rather than quietly rolling up a shorter list.",
+    "Statuspage: use /api/v2/summary.json, never /api/v2/status.json \u2014 the latter is a",
+    "page-level rollup with no components, incidents or maintenance.",
+    "Zendesk: the url is the SSP base; the adapter appends /incidents.json and, only when a",
+    "component is configured, /services.json.",
+    "Milestone 3. index.ts answers for them with an explicit unsupported-platform error, so",
+    "adding them here before the adapter exists reads unknown rather than green.",
+    "Zendesk: 'tenants' scopes the feed per account via ?subdomain=. We have two \u2014 crexendo and netsapiens \u2014 and BOTH are queried and merged, deduped by incident id. They share Pod 23 today, so one query would happen to cover both; that coincidence is exactly what not to build on.",
+    "proofpoint is Hornetsecurity on status.io (live.hornet-status.com); the page id is in its HTML. 'locations' filters to OUR datacentres \u2014 the feed publishes ten and an unfiltered Frankfurt outage would land on our tile. Ours is named two mutually-exclusive ways: 'United States - Atlanta' carries the 13 core email services, 'United States - Georgia' the 3 newer 365 products. Both, or a third of the estate drops out.",
+    "m365 is Graph service health, app-only auth by certificate \u2014 the only feed needing a credential, which lives outside the repo (see http/graphToken.ts). 'components' names the 7 services we depend on out of the 32 Graph reports: Microsoft always has something degraded somewhere (9 of 32 on 2026-09-19, three of them Copilot), and rolling up all of them would leave the tile permanently amber."
+  ],
+  "feeds": [
+    {
+      "id": "proofpoint",
+      "platform": "statusio",
+      "url": "https://api.status.io/1.0/status/591aaa7fe69f388425000fda",
+      "locations": [
+        "United States - Atlanta",
+        "United States - Georgia"
+      ]
+    },
+    {
+      "id": "jira",
+      "platform": "statuspage",
+      "url": "https://jira-software.status.atlassian.com/api/v2/summary.json"
+    },
+    {
+      "id": "helpjuice",
+      "platform": "statuspage",
+      "url": "https://status.helpjuice.com/api/v2/summary.json"
+    },
+    {
+      "id": "claude",
+      "platform": "statuspage",
+      "url": "https://status.claude.com/api/v2/summary.json"
+    },
+    {
+      "id": "openai",
+      "platform": "statuspage",
+      "url": "https://status.openai.com/api/v2/summary.json"
+    },
+    {
+      "id": "zendesk",
+      "platform": "zendesk-ssp",
+      "url": "https://status.zendesk.com/api/ssp",
+      "tenants": [
+        "crexendo",
+        "netsapiens"
+      ]
+    },
+    {
+      "id": "m365",
+      "platform": "msgraph",
+      "url": "https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/healthOverviews",
+      "components": [
+        "Exchange Online",
+        "Microsoft Entra",
+        "Microsoft Teams",
+        "SharePoint Online",
+        "Microsoft OneDrive",
+        "Microsoft Intune",
+        "Microsoft 365 apps"
+      ]
+    }
+  ]
+}

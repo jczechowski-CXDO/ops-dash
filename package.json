@@ -1,0 +1,43 @@
+{
+  "name": "ops-dash",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "workspaces": [
+    "shared",
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @ops-dash/web",
+    "dev:server": "npm run build:server && node --watch server/dist/main.js",
+    "start": "npm run build:server && node server/dist/main.js",
+    "build": "npm run build --workspace @ops-dash/web",
+    "preview": "npm run preview --workspace @ops-dash/web",
+    "pretest": "npm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test --config web/playwright.config.ts",
+    "test:e2e:update": "playwright test --config web/playwright.config.ts --update-snapshots",
+    "typecheck": "tsc -b shared web server",
+    "icons": "npm run icons --workspace @ops-dash/web",
+    "fonts": "npm run fonts --workspace @ops-dash/web",
+    "build:server": "tsc -p server/tsconfig.build.json && node server/scripts/copy-assets.mjs",
+    "auth:set": "npm run build:server && node server/scripts/auth-set.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^24.13.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}

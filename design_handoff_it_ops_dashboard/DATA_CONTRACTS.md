@@ -13,7 +13,8 @@ Common envelope, returned by every adapter:
 
 ```ts
 type SourceResult<T> = {
-  data: T;
+  data?: T;                 // amendment 9 — optional, because a failed TRANSPORT has no payload.
+                            // See the note below: an adapter may still supply a derived value.
   fetchedAt: string;      // ISO 8601
   degraded: boolean;      // partial result (some pages/regions failed)
   empty?: boolean;        // fetch completed, returned no records — NOT an assertion of health
@@ -24,12 +25,44 @@ type SourceResult<T> = {
 When `error` is set the UI renders the panel's last good data with a stale badge, or an
 error state if there is none. It never renders zeros as if they were real.
 
+**`data` and `error` are not mutually exclusive, and the difference is the layer (amendment 9).**
+At the transport layer a failure has no payload: `fetchJson` sets `error` and omits `data`,
+because there is nothing to report. At the **adapter** layer the opposite is right — an adapter
+turns a transport failure into a *renderable* state and returns **both**: `data` holding a
+vendor at `unknown` whose note says we could not read the feed, and `error` saying why. That is
+the product's whole thesis in one shape. A panel that renders nothing because a poll failed has
+told the operator less than one that renders "unknown, and here is the reason".
+
+So a consumer must branch on `error` to decide whether to show a stale badge, and on `data`
+to decide whether it has anything to draw — never on one to infer the other.
+
+**A 2xx carrying non-JSON is an error, not data (amendment 7).** A JSON-decode failure on a
+successful status code sets `error` with `code: 'non_json_2xx'` and maps the level to
+`unknown` — it is never parsed leniently and never treated as an empty result. This is not
+defensive programming: EPC's `/api/1.4/common/groups` returns **HTTP 200 with a Zoho sign-in
+HTML page** when the token has expired, so an adapter that trusts the status code reports a
+successful poll of zero groups. It belongs in one shared helper rather than in each adapter,
+because the failure is per-transport and not per-vendor. The companion trap, also proven on
+this tenant: EPC delivers its own errors as HTTP 200 with `{"status":"error","error_code":…}`.
+
 `empty` exists because a completed fetch that returns nothing is not the same claim as a
 completed fetch that returns "healthy" (**amendment 4**). Zendesk is the sharp case: its SSP
 feed publishes no per-service status field, so an empty `incidents.json` is the only green
 signal available — and an absence is not an affirmation. An adapter that cannot distinguish
 "nothing is wrong" from "nothing came back" sets `empty` and maps the level to `unknown`.
-Consumers must never infer `operational` from `empty`.
+Consumers must never infer `operational` from `empty` — **and must not infer it from `empty`
+being absent either.** That second half is the one that bites. `empty` is a *transport floor*:
+it means the body carried nothing at all, which the helper can see. It cannot see that
+Zendesk's `{"data":[],"included":[]}` carried no records, because that is a non-empty object,
+so an adapter widens the flag when it knows which key holds the records. The widening is
+monotone — an adapter may set `empty`, never clear it — so a consumer's `empty` is always at
+least as pessimistic as the truth.
+
+But `!empty` still proves nothing about health. Zendesk's `incidents.json` returns seventeen
+*closed* incidents: not empty, and equally silent about whether anything is wrong. Zendesk's
+level is `unknown` on every path because the platform publishes no status field at all, not
+because a document happened to be empty. **The flag describes the body; only the adapter can
+describe the health.**
 
 ---
 
@@ -54,6 +87,12 @@ type ServiceId =               // amendment 3 — the seven verified vendors
   | 'zendesk'
   | 'm365';                    // Microsoft 365 / Entra ID
 
+type VendorPlatform =          // amendment 5
+  | 'statuspage'               // Jira, Helpjuice, Claude, OpenAI — one adapter, four vendors
+  | 'statusio'                 // Proofpoint / Hornetsecurity
+  | 'zendesk-ssp'              // Zendesk's own SSP feed
+  | 'msgraph';                 // M365 Service Health
+
 type VendorIncident = {        // amendment 2
   id: string;
   title: string;
@@ -69,7 +108,13 @@ type ServiceStatus = {
   name: string;                // page title,   e.g. 'Microsoft 365 / Entra ID'
   vendor: {
     level: StatusLevel;
-    label: string;             // 'Operational' | 'Degraded' | 'Advisory' | 'Maintenance' | 'Unknown'
+    label: string;             // the display form of `level`, one per StatusLevel member:
+                               // 'Operational' | 'Degraded' | 'Outage' | 'Maintenance' | 'Unknown'.
+                               // Corrected 2026-09-19: this listed 'Advisory' and omitted
+                               // 'Outage'. 'Advisory' was the prototype's word for a degraded
+                               // vendor with a published advisory; nothing emits it, and a
+                               // comment naming a label no code produces while omitting one it
+                               // does is worse than no comment.
     note: string;              // advisory text + last vendor update time, or why the level is unknown
     advisoryId?: string;       // e.g. 'EX1084221'
     url?: string;
@@ -78,9 +123,23 @@ type ServiceStatus = {
       scheduledFor: string;    // ISO 8601
       scheduledUntil: string;  // ISO 8601
     };
+    inferred?: {               // amendment 10 — present when `level` was DERIVED from our own
+      basis: string;           // evidence rather than published by the vendor. Absent means the
+    };                         // vendor said it. Only a platform that publishes no health at
+                               // all may do this, only upward to `operational`, and only when
+                               // every check of ours passes. The tile MUST show that the
+                               // reading is ours: a green the reader believes the vendor
+                               // affirmed, when it was really our two probes, is a worse lie
+                               // than the grey it replaced.
     incidentsSince: VendorIncident[];  // amendment 2 — everything the vendor published since our
                                        // last SUCCESSFUL poll, not a current-state diff
     lastSuccessfulPoll?: string;       // ISO 8601; the lookback anchor for incidentsSince
+    platform: VendorPlatform;          // amendment 5 — WHICH upstream this claim came from.
+                                       // Four of the seven sit behind Statuspage, so a single
+                                       // upstream failure takes four vendors to `unknown` at
+                                       // once. Without this field that reads as four
+                                       // independent unknowns; with it, the correlation engine
+                                       // can say we have lost sight of a whole platform.
   };
   ours: {
     level: StatusLevel;
@@ -123,6 +182,10 @@ pre-render SVG point strings in an adapter.
 
 ```ts
 type CheckRun = {
+  serviceId: ServiceId;        // amendment 6 — which service this run belongs to. The M1
+                               // fixtures keyed a Record by service and got away with it; a
+                               // row written to the store cannot, and neither can a query
+                               // that reads runs back across services.
   at: string;                  // ISO 8601
   check: string;               // 'Mailflow round trip'
   region: string;              // 'us-east'
@@ -355,10 +418,40 @@ only to our own store.
 | `secrets` | Secret or certificate expiring | within 14 days | 3 |
 | `stale` | Agent stale | no check-in for 21 days | 2 |
 | `legacy` | Successful legacy protocol sign-in | any occurrence | 2 |
+| `ourside` | **Our check failing and no vendor advisory corroborating it** (amendment 11) | at least one probe failing, vendor not `degraded`/`outage`, vendor actually read | 2 |
+| `blackout` | **All vendors on one platform went `unknown` together** (amendment 8) | every service whose `vendor.platform` matches, and more than one | 2 |
 
 The `vendor` rule is the headline behavior of the product: neither signal alone opens a
 Sev1. A vendor advisory with our checks still passing is informational; our checks
 failing with no vendor advisory is a Sev2 pointing at our own network or credentials.
+
+`blackout` is the rule amendment 1 implied and did not state. Amendment 1 stops a
+Statuspage-wide failure painting Jira, Helpjuice, Claude and OpenAI green; it leaves four grey
+tiles that look like four independent unknowns. They are one upstream failure, and that is the
+more alarming fact — we are blind to four vendors and nothing says so. It is a Sev2 rather than
+a Sev1 because nothing is known to be broken: we have lost the ability to tell. It fires only
+where more than one service shares the platform, so a single `msgraph` outage stays an ordinary
+`unknown` on one tile.
+
+`ourside` is the rule this section described twice in prose and the engine did not implement
+until 2026-09-20 (amendment 11). It is the `vendor` ladder one rung down, and the rungs are
+what give each severity its meaning: vendor corroborates + our probe red is Sev1, confirmed
+and theirs; nothing corroborates + our probe red is Sev2, unconfirmed and probably ours; a
+vendor advisory with our probe green is neither, because it is an advisory.
+
+Two exclusions are load-bearing rather than tidy. **No probe is not a failing probe** —
+`ours.total === 0` is no evidence, and no evidence may not manufacture an incident any more
+than it may render green, which is what keeps `ourside` off the four services that have no
+synthetic check. And **a vendor we have not read yet is not an uncorroborated failure**: after
+a restart the store already holds probe history while the vendor snapshot is still null, so
+without the exclusion the rule opens a Sev2 on every boot, blaming our own network for a feed
+we had not yet asked. That is the same defect as INC-119d4dc7, one rule over.
+
+It is deliberately **not** suppressed while a `blackout` is firing on the same platform. The
+two answer different questions and both answers are true: blackout says visibility is lost
+from one upstream cause, `ourside` says this service is measurably failing and nobody upstream
+confirms it. The over-count `blackout` exists to collapse is four *identical* unknowns, not two
+different facts.
 
 The vendor half of the rule is satisfied by `degraded` or `outage` **only**. `unknown` and
 `maintenance` do not satisfy it (amendment 1). A vendor at `unknown` with our check failing is
@@ -395,6 +488,66 @@ file to change first; it did. After these four, `shared/contracts.ts` is frozen.
 | 2 | `ServiceStatus.vendor` gains `maintenance`, `incidentsSince[]` and `lastSuccessfulPoll` | Blindness to anything that flaps between polls — current-state diffing alone cannot see an incident that opened and closed inside the window |
 | 3 | `ServiceStatus.id` becomes the `ServiceId` union of the seven verified vendors | Building against the handoff's placeholder list (AWS / Okta / Cloudflare / GitHub / CrowdStrike), none of which is a monitored source |
 | 4 | `SourceResult.empty` added, with the rule that consumers never infer `operational` from it | Zendesk's absent status field reading as green when in fact nothing came back |
+
+**Amended again 2026-09-19**, approved by John, before the Milestone 2 adapters were written.
+Four amendments landed in one opening rather than four, because a freeze that is opened
+casually is not one.
+
+| # | Change | Prevents |
+|---|---|---|
+| 5 | `ServiceStatus.vendor` gains `platform`, and `VendorPlatform` is added | Four vendors going `unknown` behind one Statuspage failure reading as four unrelated unknowns. Nothing could group them, so nothing could say we had lost sight of a platform |
+| 6 | `CheckRun` gains `serviceId` | A check run in the store with no way back to its service. The M1 fixtures keyed a `Record` and got away with it; a persisted row cannot |
+| 7 | The non-JSON-2xx rule is stated, with `error.code: 'non_json_2xx'` | An expired EPC token returning an HTML sign-in page under HTTP 200 being parsed as a successful poll of zero records |
+| 8 | The `blackout` rule joins section 7's table | The gap amendment 1 left: it stops the false green and raises no alarm about the blindness that replaced it |
+| 9 | `SourceResult.data` becomes optional | `data` was required, so every adapter's error path had to cast past the contract — and code typed on `SourceResult` could write `result.data.components` on an errored result with no type error. Surfaced the first time a real adapter had to return a failure; M1 never noticed because a fixture never fails |
+
+**Amended again 2026-09-19**, approved by John, after Milestone 2 shipped and the Zendesk
+tile had been grey in production for a day.
+
+| # | Change | Prevents |
+|---|---|---|
+| 10 | `ServiceStatus.vendor` gains `inferred?: { basis }`, and a platform that publishes no health MAY report `operational` under the rule below | A permanently-grey tile. Amendment 4 stopped an absent status field reading as green; it also left Zendesk unable to read anything *but* grey, and a tile that can never change teaches the operator to ignore it exactly as a permanently-red one does |
+| 11 | The `ourside` rule is added to section 7's table (engine only — no type changes, so the frozen contract is untouched) | A rule this document promised twice in prose and the engine never implemented. Section 7 said "our checks failing with no vendor advisory is a Sev2" and "a vendor at `unknown` with our check failing is the Sev2 case"; three tests in `correlate.test.ts` asserted the *absence* of exactly those findings, one of them quoting this document's own sentence in its comment. The spec and the suite disagreed for two milestones and the suite was green |
+
+### Amendment 10, in full
+
+This is the one amendment that **narrows** amendment 4, so it is written out rather than
+compressed into the table.
+
+Amendment 4 says consumers never infer `operational` from `empty`. That stands. What it did
+not anticipate is a platform that publishes **no health field at all** — Zendesk's SSP
+publishes incidents and nothing else, verified twice against the live feed, once with the
+account subdomain applied. For such a platform `unknown` is not a transient state, it is the
+only state, and the tile can never move.
+
+Zendesk's own status page renders green for "no open incident". We decline that inference on
+the vendor's behalf — but we are entitled to make a statement about **our own evidence**, and
+we have two direct checks of our two tenants answering in tens of milliseconds.
+
+So: a vendor half MAY report `operational` when **all** of the following hold.
+
+1. The platform is one that publishes no health field. Today that is `zendesk-ssp` alone. A
+   platform that normally publishes health and returned `unknown` this time has genuinely
+   failed to tell us something, and must stay `unknown`.
+2. The newest poll **succeeded**. A failed read is never inferred over — that is the rule the
+   whole product rests on and amendment 10 does not touch it.
+3. Its scoped incident feed shows **no open incident**.
+4. We have **at least one** check of our own for that service, and **every one passes**. No
+   evidence is not evidence: `total === 0` infers nothing, matching `ourCheckFailing`.
+
+When it does, it MUST set `vendor.inferred.basis` naming what the claim rests on, and the tile
+MUST show that the reading is ours rather than the vendor's. `inferred` absent means the
+vendor said it.
+
+A level is **never** inferred downward. `degraded` and `outage` come from published incidents
+only — inferring an outage from our own failing checks would double-count our half into the
+vendor half, and the Sev1 rule is `vendor degraded/outage AND our check failing`. Both halves
+must stay independently sourced or the rule confirms itself.
+
+That independence is preserved by condition 4: inference only fires when our checks all pass,
+so it can never satisfy the vendor half of a Sev1 (`operational` does not), and it can never
+suppress one (if our checks were failing, no inference happens and the level stays `unknown`,
+which also does not satisfy it). The rule's behaviour is unchanged in both directions.
 
 Amendment 3 note: CrowdStrike is a plausible eighth tile later — the credential and a
 `pull_falcon.py` already exist — but it is not one of the seven verified feeds, so it is not in

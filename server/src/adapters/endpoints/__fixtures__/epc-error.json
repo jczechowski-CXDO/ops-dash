@@ -1,0 +1,7 @@
+{
+  "message_type": "computers",
+  "message_version": "1.4",
+  "status": "error",
+  "error_code": "10022",
+  "error_description": "API Endpoint is not supported by current server."
+}

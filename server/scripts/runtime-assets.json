@@ -1,0 +1,15 @@
+{
+  "$comment": [
+    "Non-TypeScript files the server reads at runtime, relative to server/src.",
+    "`tsc` emits TypeScript and nothing else, so a build without copying these",
+    "produces an artefact that typechecks, compiles, and then dies on its first",
+    "line with ENOENT. That happened twice, ten minutes apart, the first time the",
+    "server was ever started as a process.",
+    "JSON rather than a list in either the script or the test, so the copy step",
+    "and the guard that checks it read the SAME source and cannot drift."
+  ],
+  "assets": [
+    "store/schema.sql",
+    "adapters/vendorstatus/vendors.json"
+  ]
+}
